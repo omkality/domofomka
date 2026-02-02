@@ -1,0 +1,14 @@
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl
+
+WORKDIR /backend
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+COPY pyproject.toml ./
+
+RUN uv sync --group api
+
+COPY src/ ./src/
+COPY codes.db ./codes.db

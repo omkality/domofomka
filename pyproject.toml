@@ -1,0 +1,33 @@
+[project]
+name = "domofomka"
+version = "1.5.1"
+description = "Application for getting the intercom code at the given address"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+api = [
+    "aiosqlite>=0.22.1",
+    "granian>=2.7.0",
+    "litestar>=2.19.0",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "pyreqwest>=0.10.1",
+    "toml>=0.10.2",
+]
+dev = [
+    "black>=26.1.0",
+    "mypy>=1.19.1",
+    "pre-commit>=4.5.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.14.14",
+]
+vkbot = [
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "pyreqwest>=0.10.1",
+    "redis>=7.1.0",
+    "vk-api>=11.10.0",
+]
