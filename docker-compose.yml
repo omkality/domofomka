@@ -5,6 +5,11 @@ services:
       dockerfile: Dockerfile.api
     container_name: domofomka-api
     restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: uv run granian --interface asgi src.api.app:app --host ${API_HOST} --port ${API_PORT} --workers ${WORKERS_NUM} --log --access-log
     env_file:
       - .env
@@ -29,6 +34,11 @@ services:
       dockerfile: Dockerfile.vkbot
     container_name: domofomka-vkbot
     restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: uv run python -m src.vkbot.main
     env_file:
       - .env
@@ -45,6 +55,11 @@ services:
     image: redis:8.4-alpine
     container_name: domofomka-redis
     restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file:
       - .env
     hostname: ${REDIS_HOST}
