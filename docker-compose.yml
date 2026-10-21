@@ -1,50 +1,58 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+    max-file: "${DOCKER_LOG_MAX_FILES:-3}"
+
 services:
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
-    container_name: domofomka-api
+    init: true
     restart: always
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    command: uv run granian --interface asgi src.api.app:app --host ${API_HOST} --port ${API_PORT} --workers ${WORKERS_NUM} --log --access-log
+    mem_limit: ${API_MEM_LIMIT:-384m}
+    memswap_limit: ${API_MEMSWAP_LIMIT:-512m}
+    pids_limit: ${API_PIDS_LIMIT:-128}
+    logging: *logging
+    command: uv run --frozen granian --interface asgi src.api.app:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8000} --workers ${WORKERS_NUM:-1} --log --access-log
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
     env_file:
-      - .env
+      - ${DOMOFOMKA_ENV_FILE:-.env}
     ports:
-      - "${API_PORT}:${API_PORT}"
+      - "127.0.0.1:${API_PUBLISH_PORT:-8000}:${API_PORT:-8000}"
     volumes:
-      - ./src:/backend/src
-      - ./codes.db:/backend/codes.db
+      - ./src:/backend/src:ro
+      - ./codes.db:/backend/codes.db:ro
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: curl -f http://localhost:${API_PORT}/version
-      interval: 20s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${API_PORT:-8000}/version"]
+      interval: ${API_HEALTH_INTERVAL:-20s}
+      timeout: ${API_HEALTH_TIMEOUT:-5s}
+      retries: ${API_HEALTH_RETRIES:-5}
+      start_period: ${API_HEALTH_START_PERIOD:-60s}
 
   vkbot:
     build:
       context: .
       dockerfile: Dockerfile.vkbot
-    container_name: domofomka-vkbot
+    init: true
     restart: always
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    command: uv run python -m src.vkbot.main
+    mem_limit: ${BOT_MEM_LIMIT:-128m}
+    memswap_limit: ${BOT_MEMSWAP_LIMIT:-192m}
+    pids_limit: ${BOT_PIDS_LIMIT:-64}
+    logging: *logging
+    command: uv run --frozen python -m src.vkbot.main
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
     env_file:
-      - .env
+      - ${DOMOFOMKA_ENV_FILE:-.env}
     volumes:
-      - ./src:/backend/src
-      - ./start_message.txt:/backend/start_message.txt
+      - ./src:/backend/src:ro
+      - ./start_message.txt:/backend/start_message.txt:ro
     depends_on:
       api:
         condition: service_healthy
@@ -53,19 +61,18 @@ services:
 
   redis:
     image: redis:8.4-alpine
-    container_name: domofomka-redis
+    init: true
     restart: always
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+    mem_limit: ${REDIS_MEM_LIMIT:-96m}
+    memswap_limit: ${REDIS_MEMSWAP_LIMIT:-128m}
+    pids_limit: ${REDIS_PIDS_LIMIT:-32}
+    logging: *logging
     env_file:
-      - .env
-    hostname: ${REDIS_HOST}
-    command: --port ${REDIS_PORT}
+      - ${DOMOFOMKA_ENV_FILE:-.env}
+    hostname: ${REDIS_HOST:-redis}
+    command: ["redis-server", "--port", "${REDIS_PORT:-6379}", "--maxmemory", "${REDIS_MAXMEMORY:-64mb}", "--maxmemory-policy", "${REDIS_MAXMEMORY_POLICY:-allkeys-lru}"]
     healthcheck:
-      test: redis-cli ping
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      test: ["CMD", "redis-cli", "-p", "${REDIS_PORT:-6379}", "ping"]
+      interval: ${REDIS_HEALTH_INTERVAL:-10s}
+      timeout: ${REDIS_HEALTH_TIMEOUT:-5s}
+      retries: ${REDIS_HEALTH_RETRIES:-3}

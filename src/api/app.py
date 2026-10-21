@@ -5,6 +5,7 @@ from litestar.openapi import OpenAPIConfig
 from litestar.openapi.plugins import ScalarRenderPlugin
 from litestar.response import Redirect
 
+from src.api.config import settings
 from src.api.routes import codes_router
 from src.version import get_app_info
 
@@ -29,5 +30,5 @@ app = Litestar(
         render_plugins=[ScalarRenderPlugin()],
         path="/docs",
     ),
-    debug=True,
+    debug=settings.api_debug,
 )

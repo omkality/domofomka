@@ -31,6 +31,8 @@ Optional `VK_PROXY_URL` and `DADATA_PROXY_URL` point to the host-side SSH tunnel
 
 Only connection failures trigger direct fallback. API errors and response timeouts do not switch routes. Safe VK retries keep the same `random_id` or edit result. Timeouts, retries and recovery intervals are configurable in `.env`; see [`.env.example`](.env.example) for defaults. Restart containers after changing them.
 
+The service API is bound to localhost. Container memory/PID limits and the Redis cache limit are configurable in `.env`.
+
 ## Prerequisites
 * Docker & Docker Compose
 * Python 3.12+ (for local development)
