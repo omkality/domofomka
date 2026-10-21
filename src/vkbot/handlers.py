@@ -3,10 +3,11 @@ import logging
 import traceback
 from datetime import timedelta
 
-from pyreqwest.simple.request import pyreqwest_get
+from pyreqwest.client import ClientBuilder
 from vk_api.utils import get_random_id
 from vk_api.vk_api import VkApiMethod
 
+from src.network import network_settings
 from src.storages.interfaces import KeyValueClientProtocol
 from src.vkbot.config import settings
 from src.vkbot.keyboard import build_many_buttons, get_location_keyboard
@@ -45,36 +46,34 @@ class MessageHandler:
             logger.error(f"Failed to check subscription: {traceback.format_exc()}")
             raise
 
-    async def get_codes_by_geo(self, lat: float, lon: float) -> dict:
-        url = f"http://{settings.domofomka_api_host}:{settings.domofomka_api_port}/codes/geo"
-
-        try:
-            response = await pyreqwest_get(url).query({"lat": lat, "lon": lon}).timeout(timedelta(seconds=12)).send()
-
-            if response.status == 200:
-                return await response.json()
-            else:
-                logger.error(f"API error: {response.status}")
+    async def _lookup(self, path: str, query: dict, timeout: float) -> dict:
+        url = f"http://{settings.domofomka_api_host}:{settings.domofomka_api_port}/codes/{path}"
+        async with (
+            ClientBuilder()
+            .no_proxy()
+            .connect_timeout(timedelta(seconds=network_settings.internal_api_connect_timeout_seconds))
+            .timeout(timedelta(seconds=timeout))
+            .build() as client
+        ):
+            response = await client.get(url).query(query).build().send()
+            if response.status != 200:
                 raise RuntimeError(f"API returned status {response.status}")
+            return await response.json()
 
+    async def get_codes_by_geo(self, lat: float, lon: float) -> dict:
+        try:
+            return await self._lookup(
+                "geo", {"lat": lat, "lon": lon}, network_settings.internal_api_geo_timeout_seconds
+            )
         except Exception as exc:
             logger.warning("Geo lookup failed error=%s", type(exc).__name__)
             raise
 
     async def get_codes_by_message(self, message: str) -> dict:
-        url = f"http://{settings.domofomka_api_host}:{settings.domofomka_api_port}/codes/msg"
-
         try:
-            response = await pyreqwest_get(url).query({"message": message}).send()
-
-            if response.status == 200:
-                return await response.json()
-            else:
-                logger.error(f"API error: {response.status}")
-                raise RuntimeError(f"API returned status {response.status}")
-
-        except Exception:
-            logger.error(f"Failed to get codes by message: {traceback.format_exc()}")
+            return await self._lookup("msg", {"message": message}, network_settings.internal_api_timeout_seconds)
+        except Exception as exc:
+            logger.warning("Text lookup failed error=%s", type(exc).__name__)
             raise
 
     async def handle_message(self, event: dict) -> None:

@@ -12,7 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 async def get_dadata_client() -> DadataClient:
-    return DadataClient(token=settings.dadata_token, timeout_seconds=settings.dadata_timeout_seconds)
+    return DadataClient(
+        token=settings.dadata_token,
+        proxy_url=settings.dadata_proxy_url,
+    )
 
 
 @get("/msg")

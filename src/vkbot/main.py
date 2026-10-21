@@ -7,6 +7,7 @@ from vk_api import VkApi
 from vk_api.bot_longpoll import VkBotEventType, VkBotLongPoll
 from vk_api.vk_api import VkApiMethod
 
+from src.network import network_settings
 from src.storages.redis import RedisStorage
 from src.vkbot.config import settings
 from src.vkbot.handlers import MessageHandler
@@ -26,17 +27,20 @@ class VKBot:
         redis_password: str | None = None,
     ):
         self.vk_session: VkApi = VkApi(token=token, session=TimeoutSession())
-        self.long_poll: VkBotLongPoll = VkBotLongPoll(vk=self.vk_session, group_id=group_id)
-        self.long_poll.session = TimeoutSession()
+        self.long_poll: VkBotLongPoll = VkBotLongPoll(
+            vk=self.vk_session, group_id=group_id, wait=network_settings.vk_longpoll_wait_seconds
+        )
+        self.long_poll.session.close()
+        self.long_poll.session = TimeoutSession(longpoll=True)
         self.vk_api: VkApiMethod = self.vk_session.get_api()
 
         redis_client = Redis(
             host=redis_host,
             port=redis_port,
             password=redis_password,
-            socket_connect_timeout=5,
-            socket_timeout=5,
-            health_check_interval=30,
+            socket_connect_timeout=network_settings.redis_connect_timeout_seconds,
+            socket_timeout=network_settings.redis_socket_timeout_seconds,
+            health_check_interval=network_settings.redis_health_check_interval_seconds,
         )
         self.redis_storage = RedisStorage(redis_client)
         self.handler = MessageHandler(vk_api=self.vk_api, redis=self.redis_storage)
@@ -59,7 +63,7 @@ class VKBot:
 
             except Exception:
                 logger.error(f"Error in main loop: {traceback.format_exc()}")
-                await asyncio.sleep(3)
+                await asyncio.sleep(network_settings.bot_restart_delay_seconds)
 
     async def cleanup(self) -> None:
         await self.redis_storage.client.aclose()

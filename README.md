@@ -3,6 +3,34 @@
 Application for getting the intercom code at the given address.
 Used stack: *Litestar*, *Granian*, *SQLite*, *Redis*, *VK API*.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    VK[VK] <-->|Long Poll and API| B[Bot]
+    B --> A[HTTP API]
+    A --> DB[(SQLite codes)]
+    A --> D[DaData geocoding]
+    B <--> R[(Redis context and cooldown)]
+```
+
+Messages are processed sequentially. Geocoding failures ask the user to send an address as text. This branch has no persistent message queue.
+
+```mermaid
+flowchart LR
+    A[VK and DaData clients] --> P{Proxy connection available?}
+    P -->|Yes| T[SSH tunnel]
+    T --> R[Tinyproxy in Russia]
+    R --> S[VK or DaData]
+    P -->|No| D[Direct connection from Europe]
+    D --> S
+    D -.->|Retry proxy after 30 to 300 seconds| P
+```
+
+Optional `VK_PROXY_URL` and `DADATA_PROXY_URL` point to the host-side SSH tunnel; empty values use direct connections. Tinyproxy listens on localhost and forwards HTTPS with CONNECT without decrypting it. OpenSSH and systemd maintain the tunnel outside Docker.
+
+Only connection failures trigger direct fallback. API errors and response timeouts do not switch routes. Safe VK retries keep the same `random_id` or edit result. Timeouts, retries and recovery intervals are configurable in `.env`; see [`.env.example`](.env.example) for defaults. Restart containers after changing them.
+
 ## Prerequisites
 * Docker & Docker Compose
 * Python 3.12+ (for local development)
@@ -11,7 +39,7 @@ Used stack: *Litestar*, *Granian*, *SQLite*, *Redis*, *VK API*.
 
 Build `domofomka` from source:
 ~~~~bash
-git clone https://github.com/omka0708/domofomka
+git clone https://github.com/omkality/domofomka
 cd domofomka
 ~~~~
 
@@ -25,10 +53,13 @@ API_HOST=0.0.0.0
 API_PORT=8000
 DB_NAME=codes.db
 DADATA_TOKEN=your_dadata_token_here
+DADATA_TIMEOUT_SECONDS=8
+DADATA_PROXY_URL=
 
 # VK Bot Configuration
 VK_GROUP_TOKEN=your_vk_group_token_here
 VK_GROUP_ID=your_vk_group_id_here
+VK_PROXY_URL=
 
 # Redis Configuration
 REDIS_HOST=redis
@@ -111,10 +142,10 @@ docker compose up --build -d
 
 ## VK Bot
 ### Get codes by message
-![codes_by_msg](https://github.com/omka0708/domofomka/assets/56554057/d21e6146-95a7-4f09-a501-31d8fd2ae7df)
+![codes_by_msg](https://github.com/omkality/domofomka/assets/56554057/d21e6146-95a7-4f09-a501-31d8fd2ae7df)
 
 ### Get codes by latitude and longitude
-![codes_by_lat_lon](https://github.com/omka0708/domofomka/assets/56554057/85f2b4f6-7634-4b3a-b7a7-5ae10cdc9219)
+![codes_by_lat_lon](https://github.com/omkality/domofomka/assets/56554057/85f2b4f6-7634-4b3a-b7a7-5ae10cdc9219)
 
 ## Telegram Bot
 
