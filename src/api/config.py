@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     api_port: int
     db_name: str
     dadata_token: str
+    dadata_timeout_seconds: float = 8
 
 
 settings = Settings()

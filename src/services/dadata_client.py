@@ -1,14 +1,23 @@
+import asyncio
 import logging
-import traceback
+import time
 import typing as tp
+from datetime import timedelta
 
 from pyreqwest.simple.request import pyreqwest_post
 
 logger = logging.getLogger(__name__)
 
 
+class DadataUnavailable(RuntimeError):
+    """Temporary geocoding failure; callers can distinguish it from no results."""
+
+
 class DadataClient:
-    def __init__(self, token: str):
+    _unavailable_until = 0.0
+
+    def __init__(self, token: str, timeout_seconds: float = 8):
+        self.timeout_seconds = timeout_seconds
         self.token = token
         self.base_url = "https://suggestions.dadata.ru/suggestions/api/4_1/rs"
         self.headers = {
@@ -20,23 +29,26 @@ class DadataClient:
         url = f"{self.base_url}/geolocate/address"
         payload = {"lat": lat, "lon": lon}
 
+        if time.monotonic() < type(self)._unavailable_until:
+            raise DadataUnavailable("Geocoding is temporarily unavailable")
         try:
-            response = (
-                await pyreqwest_post(url)
-                .headers(self.headers)
-                .body_json(payload)
-                .send()
-            )
-
-            if response.status == 200:
+            async with asyncio.timeout(self.timeout_seconds):
+                response = await (
+                    pyreqwest_post(url)
+                    .headers(self.headers)
+                    .body_json(payload)
+                    .timeout(timedelta(seconds=self.timeout_seconds))
+                    .send()
+                )
+                if response.status != 200:
+                    raise DadataUnavailable("Geocoding returned an unsuccessful response")
                 return await response.json()
-            else:
-                logger.error(f"Dadata API error: {response.status}")
-                return None
-
-        except Exception:
-            logger.error(f"Dadata request failed: {traceback.format_exc()}")
-            raise
+        except Exception as exc:
+            # Separate client instances are created for requests. Keep the short
+            # circuit breaker at process level to avoid repeated long waits.
+            type(self)._unavailable_until = time.monotonic() + 30
+            logger.warning("Geocoding unavailable error=%s", type(exc).__name__)
+            raise DadataUnavailable("Geocoding is temporarily unavailable") from None
 
     async def get_address_by_geo(self, lat: float, lon: float) -> str | None:
         houses = await self.geolocate(lat=lat, lon=lon)
@@ -45,12 +57,10 @@ class DadataClient:
             house_data: dict[str, str] = houses["suggestions"][0]["data"]
 
             if house_data.get("street"):
-                address = (
-                    f"{house_data['city']} {house_data['street']} {house_data['house']}"
-                )
+                address = f"{house_data['city']} {house_data['street']} {house_data['house']}"
 
                 if house_data.get("block"):
-                    block_type = house_data["block_type"].replace("стр", "с")
+                    block_type = (house_data.get("block_type") or "").replace("стр", "с")
                     block = house_data["block"].replace(" стр ", "с")
                     address += f" {block_type}{block}"
 

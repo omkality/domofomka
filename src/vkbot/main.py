@@ -26,9 +26,7 @@ class VKBot:
         redis_password: str | None = None,
     ):
         self.vk_session: VkApi = VkApi(token=token, session=TimeoutSession())
-        self.long_poll: VkBotLongPoll = VkBotLongPoll(
-            vk=self.vk_session, group_id=group_id
-        )
+        self.long_poll: VkBotLongPoll = VkBotLongPoll(vk=self.vk_session, group_id=group_id)
         self.long_poll.session = TimeoutSession()
         self.vk_api: VkApiMethod = self.vk_session.get_api()
 
@@ -49,10 +47,15 @@ class VKBot:
         while True:
             try:
                 for event in self.long_poll.listen():
-                    if event.type == VkBotEventType.MESSAGE_NEW:
-                        await self.handler.handle_message(event.obj)
-                    elif event.type == VkBotEventType.MESSAGE_EVENT:
-                        await self.handler.handle_event(event.obj)
+                    try:
+                        if event.type == VkBotEventType.MESSAGE_NEW:
+                            await self.handler.handle_message(event.obj)
+                        elif event.type == VkBotEventType.MESSAGE_EVENT:
+                            await self.handler.handle_event(event.obj)
+                    except Exception as exc:
+                        # A failed event must not discard the remaining events
+                        # yielded by the same Long Poll response.
+                        logger.error("Event handler failed error=%s", type(exc).__name__)
 
             except Exception:
                 logger.error(f"Error in main loop: {traceback.format_exc()}")

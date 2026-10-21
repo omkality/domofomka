@@ -1,6 +1,7 @@
 import json
 import logging
 import traceback
+from datetime import timedelta
 
 from pyreqwest.simple.request import pyreqwest_get
 from vk_api.utils import get_random_id
@@ -48,7 +49,7 @@ class MessageHandler:
         url = f"http://{settings.domofomka_api_host}:{settings.domofomka_api_port}/codes/geo"
 
         try:
-            response = await pyreqwest_get(url).query({"lat": lat, "lon": lon}).send()
+            response = await pyreqwest_get(url).query({"lat": lat, "lon": lon}).timeout(timedelta(seconds=12)).send()
 
             if response.status == 200:
                 return await response.json()
@@ -56,8 +57,8 @@ class MessageHandler:
                 logger.error(f"API error: {response.status}")
                 raise RuntimeError(f"API returned status {response.status}")
 
-        except Exception:
-            logger.error(f"Failed to get codes by geo: {traceback.format_exc()}")
+        except Exception as exc:
+            logger.warning("Geo lookup failed error=%s", type(exc).__name__)
             raise
 
     async def get_codes_by_message(self, message: str) -> dict:
@@ -97,7 +98,15 @@ class MessageHandler:
         if "geo" in event["message"]:
             coords = event["message"]["geo"]["coordinates"]
             lat, lon = coords["latitude"], coords["longitude"]
-            result = await self.get_codes_by_geo(lat, lon)
+            try:
+                result = await self.get_codes_by_geo(lat, lon)
+            except Exception:
+                self.vk.messages.send(
+                    user_id=user_id,
+                    random_id=get_random_id(),
+                    message="Не удалось определить адрес по геолокации. Пожалуйста, отправьте адрес текстом.",
+                )
+                return
         else:
             result = await self.get_codes_by_message(event["message"]["text"])
 
@@ -130,9 +139,7 @@ class MessageHandler:
                 )
 
                 msg_data = self.vk.messages.getById(message_ids=msg_id)
-                conversation_message_id = msg_data["items"][0][
-                    "conversation_message_id"
-                ]
+                conversation_message_id = msg_data["items"][0]["conversation_message_id"]
 
                 await self.redis.set(
                     f"vk:user:{user_id}:message:{conversation_message_id}",
@@ -152,11 +159,7 @@ class MessageHandler:
                 sec_str = "секунд" + (
                     "у"
                     if ttl % 10 == 1 and ttl % 100 != 11
-                    else (
-                        "ы"
-                        if ttl % 10 in [2, 3, 4] and ttl not in range(10, 15)
-                        else ""
-                    )
+                    else ("ы" if ttl % 10 in [2, 3, 4] and ttl not in range(10, 15) else "")
                 )
 
                 self.vk.messages.sendMessageEventAnswer(
@@ -172,9 +175,7 @@ class MessageHandler:
                 )
                 return
 
-        cached = await self.redis.get(
-            f"vk:user:{user_id}:message:{conversation_message_id}"
-        )
+        cached = await self.redis.get(f"vk:user:{user_id}:message:{conversation_message_id}")
 
         if cached:
             result = json.loads(cached)
