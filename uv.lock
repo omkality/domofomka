@@ -198,6 +198,7 @@ vkbot = [
     { name = "pydantic-settings" },
     { name = "pyreqwest" },
     { name = "redis" },
+    { name = "requests" },
     { name = "vk-api" },
 ]
 
@@ -226,6 +227,7 @@ vkbot = [
     { name = "pydantic-settings", specifier = ">=2.12.0" },
     { name = "pyreqwest", specifier = ">=0.10.1" },
     { name = "redis", specifier = ">=7.1.0" },
+    { name = "requests", specifier = ">=2.32.5" },
     { name = "vk-api", specifier = ">=11.10.0" },
 ]
 

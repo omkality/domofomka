@@ -10,6 +10,7 @@ from vk_api.vk_api import VkApiMethod
 from src.storages.redis import RedisStorage
 from src.vkbot.config import settings
 from src.vkbot.handlers import MessageHandler
+from src.vkbot.http import TimeoutSession
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,13 +25,21 @@ class VKBot:
         redis_port: int,
         redis_password: str | None = None,
     ):
-        self.vk_session: VkApi = VkApi(token=token)
+        self.vk_session: VkApi = VkApi(token=token, session=TimeoutSession())
         self.long_poll: VkBotLongPoll = VkBotLongPoll(
             vk=self.vk_session, group_id=group_id
         )
+        self.long_poll.session = TimeoutSession()
         self.vk_api: VkApiMethod = self.vk_session.get_api()
 
-        redis_client = Redis(host=redis_host, port=redis_port, password=redis_password)
+        redis_client = Redis(
+            host=redis_host,
+            port=redis_port,
+            password=redis_password,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+            health_check_interval=30,
+        )
         self.redis_storage = RedisStorage(redis_client)
         self.handler = MessageHandler(vk_api=self.vk_api, redis=self.redis_storage)
 

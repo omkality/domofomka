@@ -4,9 +4,9 @@ WORKDIR /backend
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-COPY pyproject.toml ./
+COPY pyproject.toml uv.lock ./
 
-RUN uv sync --group vkbot
+RUN uv sync --frozen --group vkbot
 
 COPY src/ ./src/
 COPY start_message.txt ./

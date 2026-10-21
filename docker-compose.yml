@@ -64,8 +64,6 @@ services:
       - .env
     hostname: ${REDIS_HOST}
     command: --port ${REDIS_PORT}
-    ports:
-      - ${REDIS_PORT}:${REDIS_PORT}
     healthcheck:
       test: redis-cli ping
       interval: 10s
