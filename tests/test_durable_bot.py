@@ -1,3 +1,4 @@
+import json
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -409,20 +410,18 @@ def test_known_house_without_codes_explains_result(processor: Processor) -> None
     assert effect["method"] == "send"
 
 
-def test_ambiguous_choice_edits_the_same_message(processor: Processor) -> None:
+@pytest.mark.parametrize("entrance_count", [1, 13])
+def test_ambiguous_choice_edits_the_same_message(processor: Processor, entrance_count: int) -> None:
     processor.store.message_context.return_value = {
         "candidates": [{"building_id": "gar:test", "address": "Known house"}]
     }
-    response = (
-        processor.http.get.return_value.build.return_value.send.return_value
-        if isinstance(processor.http, MagicMock)
-        else None
-    )
     processor.http.close()
     processor.http = MagicMock()
     response = processor.http.get.return_value.build.return_value.send.return_value
     response.status = 200
-    response.json.return_value = {"address": "Known house", "data": {"1": [["TEST", "test"]]}}
+    response.json.return_value = {
+        "address": "Known house", "data": {str(i): [["TEST", "test"]] for i in range(1, entrance_count + 1)}
+    }
     processor.plan(
         {
             "kind": "message_event",
@@ -434,6 +433,15 @@ def test_ambiguous_choice_edits_the_same_message(processor: Processor) -> None:
     assert effect["method"] == "edit"
     assert effect["params"]["conversation_message_id"] == 42
     assert effect["context"]["data"]
+    effects = processor.store.plan.call_args.args[1]
+    labels = {
+        button["action"]["label"]
+        for effect in effects
+        for row in json.loads(effect["params"]["keyboard"])["buttons"]
+        for button in row
+    }
+    assert labels == {str(i) for i in range(1, entrance_count + 1)}
+    assert all(effect["method"] == "send" for effect in effects[1:])
 
 
 def test_address_choices_can_be_paged_without_repeating_lookup(processor: Processor) -> None:

@@ -297,21 +297,32 @@ class Processor:
                 if answer.get("data")
                 else answer["address"] + "\nПо этому адресу кодов в нашей базе пока нет."
             )
-            self.store.plan(
-                job,
-                [
+            effects = [
+                {
+                    "method": "edit",
+                    "params": {
+                        "peer_id": peer,
+                        "conversation_message_id": cmid,
+                        "message": message,
+                        "keyboard": keyboard,
+                    },
+                    "context": answer,
+                }
+            ]
+            entrances = list(answer.get("data", {}))
+            for offset in range(10, len(entrances), 10):
+                effects.append(
                     {
-                        "method": "edit",
+                        "method": "send",
                         "params": {
                             "peer_id": peer,
-                            "conversation_message_id": cmid,
-                            "message": message,
-                            "keyboard": keyboard,
+                            "message": answer["address"],
+                            "keyboard": inline_keyboard(entrances[offset : offset + 10]),
                         },
                         "context": answer,
                     }
-                ],
-            )
+                )
+            self.store.plan(job, effects)
             return
         if result is None:
             messages = self.vk.messages.getByConversationMessageId(peer_id=peer, conversation_message_ids=cmid)["items"]
