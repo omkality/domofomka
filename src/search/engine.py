@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import hashlib
 import json
 import sqlite3
 import zlib
@@ -52,7 +53,7 @@ class Catalog:
                 continue
             bundles = json.loads(zlib.decompress(packed[0]))
             street = db.execute("SELECT city_key,street_key FROM streets WHERE id=?", (sid,)).fetchone()
-            for index, b in enumerate(bundles):
+            for b in bundles:
                 if house not in b["houses"]:
                     continue
                 identity = (b["prefix"], b["region"], b["lineage"])
@@ -61,7 +62,10 @@ class Catalog:
                 seen.add(identity)
                 rows.append(
                     {
-                        "id": f"address:{sid}:{index}:" + base64.urlsafe_b64encode(house.encode()).decode().rstrip("="),
+                        "id": f"address:{sid}:"
+                        + hashlib.sha256("\0".join(identity).encode()).hexdigest()[:20]
+                        + ":"
+                        + base64.urlsafe_b64encode(house.encode()).decode().rstrip("="),
                         "guid": None,
                         "display": b["prefix"] + ", дом " + house,
                         "city": b["city"],

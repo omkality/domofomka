@@ -30,6 +30,10 @@ def test_street_types_never_merge_code_rows(tmp_path):
                 "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
                 (id, id, f"Москва, {kind} Мира, дом 1", "Москва", "Мира", "1", "мира", "москва", "77", "москва"),
             )
+        db.execute(
+            "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("empty", "empty", "Москва, ул. Мира, дом 2", "Москва", "Мира", "2", "мира", "москва", "77", "москва"),
+        )
     output = tmp_path / "catalog.db"
     build(legacy, regions, output)
     catalog = Catalog(str(output))
@@ -47,3 +51,9 @@ def test_street_types_never_merge_code_rows(tmp_path):
     small = Catalog(str(serving))
     assert small.resolve("Москва улица Мира 1")["data"] == street["data"]
     assert small.resolve("Москва проспект Мира 1")["data"] == avenue["data"]
+
+    empty = small.resolve("Москва улица Мира 2")
+    assert empty["status"] == "no_codes"
+    assert empty["identity"] == "gar_address"
+    assert empty["fias_id"] is None
+    assert small.building(empty["building_id"])["display"] == empty["address"]

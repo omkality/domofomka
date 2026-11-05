@@ -209,7 +209,12 @@ class Processor:
                     {"method": "send", "params": dict(base, message=message, keyboard=keyboard), "context": result}
                 )
             elif not result or not result.get("data"):
-                effects.append({"method": "send", "params": dict(base, message="Нет результатов")})
+                text = (
+                    "Не удалось найти адрес. Укажите город, улицу и номер дома."
+                    if result.get("status") == "not_found"
+                    else "Нет результатов"
+                )
+                effects.append({"method": "send", "params": dict(base, message=text)})
             else:
                 entrances = list(result["data"])
                 for offset in range(0, len(entrances), 10):
@@ -263,6 +268,22 @@ class Processor:
             base_url = f"http://{self.settings.domofomka_api_host}:{self.settings.domofomka_api_port}"
             url = base_url + "/api/v2/buildings/" + quote(building, safe="")
             response = self.http.get(url).build().send()
+            if response.status == 404:
+                self.store.plan(
+                    job,
+                    [
+                        {
+                            "method": "edit",
+                            "params": {
+                                "peer_id": peer,
+                                "conversation_message_id": cmid,
+                                "message": "Адрес в базе обновился. Пришлите его заново.",
+                                "keyboard": json.dumps({"inline": True, "buttons": []}),
+                            },
+                        }
+                    ],
+                )
+                return
             if response.status != 200:
                 raise LookupUnavailable("Building lookup unavailable")
             answer = response.json()

@@ -12,6 +12,7 @@ from src.search.normalize import ordinals, parse_query
 
 def audit(source: Path, output: Path):
     counts = Counter()
+    failure_patterns = Counter()
     patterns = Counter()
     pairs = []
     success = []
@@ -44,6 +45,19 @@ def audit(source: Path, output: Path):
             elif previous:
                 if text == "Нет результатов":
                     counts["explicit_no_results"] += 1
+                    raw = previous["text"]
+                    flags = {
+                        "mentions_entrance": bool(re.search(r"под[ъь]?езд|под\.", raw, re.I)),
+                        "mentions_apartment": bool(re.search(r"\b(?:кв|квартира|этаж)\b", raw, re.I)),
+                        "written_ordinal": ordinals(raw.lower()) != raw.lower(),
+                        "city_alias": bool(re.search(r"\b(?:мск|питер|спб)\b", raw, re.I)),
+                        "no_house_number": not parse_query(raw).house,
+                        "house_component_words": bool(re.search(r"корп|строен|\bстр\b", raw, re.I)),
+                        "punctuation": bool(re.search(r"[,;!?№]", raw)),
+                        "length_gt_500": len(raw) > 500,
+                    }
+                    for feature, present in flags.items():
+                        failure_patterns[feature] += present
                     failed.append(previous)
                 elif "дом " in text and ("," in text) and "Не удалось" not in text:
                     counts["address_responses"] += 1
@@ -82,6 +96,7 @@ def audit(source: Path, output: Path):
     summary = {
         "counts": dict(counts),
         "patterns": dict(patterns),
+        "failed_message_features": dict(failure_patterns),
         "correction_hypotheses": len(pairs),
         "complete": False,
         "note": "Raw histories and derived query text stay in ignored artifacts; bot responses and correction pairs are weak labels, not verified truth.",
