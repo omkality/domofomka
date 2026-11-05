@@ -128,3 +128,19 @@ def test_source_city_alias_retrieves_coded_identity_without_a_primary_street_doc
     assert answer["building_id"] == "a"
     assert answer["status"] == "found"
     assert catalog.resolve("Подольск Перерва 62к1")["building_id"] == "c"
+
+
+def test_split_street_prefix_preserves_the_explicit_city_and_house(catalog):
+    proper = {
+        "id": "proper",
+        "guid": "proper",
+        "city": "Москва",
+        "street": "Новоорловская",
+        "house": "6",
+        "display": "Москва, улица Новоорловская, дом 6",
+        "region": "77",
+        "lineage": "москва",
+    }
+    assert catalog.resolve("Москва Ново Орловская 6", [proper])["building_id"] == "proper"
+    assert catalog.resolve("Подольск Ново Орловская 6", [proper])["status"] == "not_found"
+    assert catalog.resolve("Москва Ново Орловская 7", [proper])["status"] == "not_found"

@@ -204,7 +204,20 @@ class Catalog:
         query = parse_query(message)
         if not query.house or not query.words:
             return {"status": "not_found", "data": {}, "engine": "v2"}
-        indexed = [*self.candidates(query), *self.alias_candidates(query)]
+        variants = [query]
+        words = query.words.split()
+        for i in range(len(words) - 1):
+            if words[i] in {"ново", "старо", "по"} and words[i + 1].isalpha():
+                variants.append(
+                    Query(
+                        query.raw,
+                        " ".join([*words[:i], words[i] + words[i + 1], *words[i + 2 :]]),
+                        query.house,
+                        query.entrance,
+                        query.kind,
+                    )
+                )
+        indexed = [row for variant in variants for row in [*self.candidates(variant), *self.alias_candidates(variant)]]
         candidates = list({r["id"]: r for r in [*(candidates or []), *indexed]}.values())
         # Backend scores never decide house identity or permit dropping a city token.
         scored = []
@@ -214,7 +227,8 @@ class Catalog:
             street_words = address_words(row["street"]).split()
             if not any(
                 (word == part if any(c.isdigit() for c in word) else ratio(word, part) / 100 >= self.minimum_similarity)
-                for word in query.words.split()
+                for variant in variants
+                for word in variant.words.split()
                 for part in street_words
             ):
                 continue
@@ -225,8 +239,9 @@ class Catalog:
             ):
                 continue
             score = max(
-                self.similarity(query.words, words)
-                for words in [address_words(row["city"] + " " + row["street"]), *row.get("_aliases", [])]
+                self.similarity(variant.words, document)
+                for variant in variants
+                for document in [address_words(row["city"] + " " + row["street"]), *row.get("_aliases", [])]
             )
             if score >= self.minimum_similarity:
                 scored.append((score, row))
