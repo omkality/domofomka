@@ -185,8 +185,8 @@ def parse_query(value: str) -> Query:
     entrance = entrance_match[1] if entrance_match else None
     value = re.sub(r"(?:под[ъь]?езд|под[.]|пд[.]?)\s*№?\s*\d+", " ", value)
     value = re.sub(r"(?:квартира|кв[.]?|этаж|эт[.]?)\s*№?\s*\d+", " ", value)
-    value = re.sub(r"корп(?:ус)?\.?\s*", "к", value)
-    value = re.sub(r"стр(?:оение)?\.?\s*", "с", value)
+    value = re.sub(r"(?<![а-яa-z])корп(?:ус)?\.?\s*(?=\d)", "к", value)
+    value = re.sub(r"(?<![а-яa-z])стр(?:оение)?\.?\s*(?=\d)", "с", value)
     value = re.sub(r"(?<=\d)[,;]\s*(?=[кс]\s*\d)", " ", value)
     # Last number is the building: numeric street names (1905 года, 1-я) stay in words.
     candidates = list(re.finditer(r"(?<![\w/])\d+(?:/\d+)?\s*[а-яa-z]?(?:\s*[кс]\s*\d+[а-яa-z]?){0,2}(?!\w)", value))
