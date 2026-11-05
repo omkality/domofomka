@@ -17,7 +17,7 @@ jobs:
           POSTGRES_PASSWORD: local-test-only
         ports: ['5432:5432']
         options: >-
-          --health-cmd 'pg_isready -U domofomka'
+          --health-cmd "pg_isready -U domofomka"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
       TEST_QUEUE_DATABASE_URL: postgresql://domofomka:local-test-only@localhost:5432/domofomka
