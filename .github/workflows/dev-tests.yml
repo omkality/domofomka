@@ -1,0 +1,41 @@
+name: Dev checks
+on:
+  push:
+    branches: [dev]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: domofomka
+          POSTGRES_USER: domofomka
+          POSTGRES_PASSWORD: local-test-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd 'pg_isready -U domofomka'
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      TEST_QUEUE_DATABASE_URL: postgresql://domofomka:local-test-only@localhost:5432/domofomka
+      API_HOST: localhost
+      API_PORT: '8000'
+      DB_NAME: unused-test.db
+      DADATA_TOKEN: unused-test-token
+      VK_GROUP_TOKEN: unused-test-token
+      VK_GROUP_ID: '223949627'
+      EXPECTED_VK_GROUP_ID: '223949627'
+      QUEUE_DATABASE_URL: postgresql://unused
+      CACHE_EXPIRE_TIME: '1200'
+      ANTI_SPAM_TIME: '5'
+      DOMOFOMKA_API_HOST: localhost
+      DOMOFOMKA_API_PORT: '8000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --all-groups
+      - run: uv run ruff check --no-cache src tests tools
+      - run: uv run pytest -q -p no:cacheprovider

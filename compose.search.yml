@@ -1,0 +1,45 @@
+name: domofomka-search-lab
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    init: true
+    mem_limit: 512m
+    memswap_limit: 768m
+    pids_limit: 128
+    env_file: ['.env.dev']
+    environment:
+      SEARCH_CATALOG_PATH: /backend/catalog/catalog.db
+      OPENSEARCH_URL: http://opensearch:9200
+      SEARCH_REMOTE_URL: ''
+      API_DEBUG: 'false'
+      API_PORT: '8000'
+      PYTHONDONTWRITEBYTECODE: '1'
+    command: uv run --frozen granian --interface asgi src.api.app:app --host 0.0.0.0 --port 8000 --workers 2
+    ports: ['127.0.0.1:28000:8000']
+    volumes:
+      - ./src:/backend/src:ro
+      - ./artifacts/search:/backend/catalog:ro
+      - ./codes.db:/backend/codes.db:ro
+    logging:
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
+  opensearch:
+    image: opensearchproject/opensearch:3.3.2
+    restart: unless-stopped
+    mem_limit: ${OPENSEARCH_MEM_LIMIT:-3g}
+    memswap_limit: ${OPENSEARCH_MEM_LIMIT:-3g}
+    pids_limit: 512
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: 'true'
+      DISABLE_INSTALL_DEMO_CONFIG: 'true'
+      OPENSEARCH_JAVA_OPTS: '-Xms1g -Xmx1g'
+    ports: ['127.0.0.1:19200:9200']
+    volumes: ['search-data:/usr/share/opensearch/data']
+    logging:
+      driver: json-file
+      options: {max-size: '10m', max-file: '3'}
+volumes:
+  search-data:
