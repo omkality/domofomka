@@ -14,6 +14,16 @@ from pathlib import Path
 from src.search.normalize import house_key, text
 
 
+def locality(chain, region):
+    # Cities of regional significance may be level 2, not level 5.
+    # A district/urban district name is never a substitute for a settlement.
+    settlement = next((n for n in chain if n[2] in (5, 6)), None)
+    if settlement is None:
+        settlement = next((n for n in chain if n[2] == 2 and n[1].rstrip(".") in {"г", "город"}), None)
+    federal = {"77": "Москва", "78": "Санкт-Петербург", "92": "Севастополь"}
+    return settlement[0] if settlement else federal.get(region, next((n[0] for n in reversed(chain)), ""))
+
+
 def records(path: Path):
     context = ET.iterparse(path, events=("start", "end"))
     _, root = next(context)
@@ -30,7 +40,7 @@ def region_job(args):
     if target.exists():
         db = sqlite3.connect(target)
         try:
-            if db.execute("select value from metadata where key='schema'").fetchone() == ("3",):
+            if db.execute("select value from metadata where key='schema'").fetchone() == ("4",):
                 db.close()
                 return {"region": region, "resumed": True}
         except sqlite3.Error:
@@ -83,7 +93,6 @@ def region_job(args):
     nodes = {r[0]: r[1:] for r in db.execute("SELECT * FROM nodes")}
     parents = dict(db.execute("SELECT * FROM parents"))
     del wanted
-    federal = {"77": "Москва", "78": "Санкт-Петербург", "92": "Севастополь"}
     inserted = 0
     for object_id, guid, number in db.execute("SELECT * FROM houses"):
         chain, current, visited = [], parents.get(object_id), set()
@@ -99,8 +108,7 @@ def region_job(args):
             street_node = next((n for n in chain if n[2] >= 6), None)
         if not street_node:
             continue
-        city_node = next((n for n in chain if n[2] in (5, 6) and n is not street_node), None)
-        city = city_node[0] if city_node else federal.get(region, next((n[0] for n in reversed(chain)), ""))
+        city = locality([n for n in chain if n is not street_node], region)
         street = street_node[0]
         display = ", ".join(dict.fromkeys([city, street_node[1] + " " + street, "дом " + number]))
         lineage = " ".join(dict.fromkeys(text(n[0]) for n in chain if n is not street_node))
@@ -110,7 +118,7 @@ def region_job(args):
         )
         inserted += 1
     db.execute("INSERT INTO metadata VALUES('complete',?)", (str(time.time()),))
-    db.execute("INSERT INTO metadata VALUES('schema','3')")
+    db.execute("INSERT INTO metadata VALUES('schema','4')")
     db.executescript("DROP TABLE houses; DROP TABLE parents; DROP TABLE nodes; VACUUM;")
     db.commit()
     db.close()

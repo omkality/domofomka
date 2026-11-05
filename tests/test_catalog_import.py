@@ -1,7 +1,7 @@
 import sqlite3
 
 from src.search.engine import Catalog
-from tools.build_catalog import build
+from tools.build_catalog import build, relink
 
 
 def test_street_types_never_merge_code_rows(tmp_path):
@@ -44,6 +44,14 @@ def test_street_types_never_merge_code_rows(tmp_path):
     assert street["data"]["1"] == [["A", "test"]]
     assert avenue["data"]["1"] == [["B", "test"]]
 
+    # Re-linking must restore its retrieval indexes, not only the code tables.
+    with sqlite3.connect(output) as db:
+        db.execute("DELETE FROM search")
+    relink(legacy, output)
+    with sqlite3.connect(output) as db:
+        assert db.execute("SELECT count(*) FROM search").fetchone()[0] == 1
+        assert db.execute("SELECT count(*) FROM alias_search").fetchone()[0] == 2
+
     from tools.compact_catalog import compact
 
     serving = tmp_path / "serving.db"
@@ -57,3 +65,7 @@ def test_street_types_never_merge_code_rows(tmp_path):
     assert empty["identity"] == "gar_address"
     assert empty["fias_id"] is None
     assert small.building(empty["building_id"])["display"] == empty["address"]
+
+    from src.search.engine import documents
+
+    assert list(documents(str(serving))) == list(documents(str(output)))

@@ -10,6 +10,8 @@ import sqlite3
 import zlib
 from pathlib import Path
 
+from tools.refresh_aliases import refresh
+
 
 def compact(source: Path, output: Path):
     work = output.with_suffix(".building.db")
@@ -78,6 +80,7 @@ def compact(source: Path, output: Path):
         if count % 50000 == 0:
             db.commit()
             print(json.dumps({"streets": count, "houses": houses}), flush=True)
+    refresh(db)
     db.commit()
     db.execute("ANALYZE")
     db.close()

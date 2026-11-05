@@ -110,3 +110,17 @@ def test_street_type_can_also_be_part_of_an_official_name(catalog):
     }
     result = catalog.resolve("Большая набережная 1", [proper])
     assert result["building_id"] == "proper"
+
+
+def test_source_city_alias_retrieves_coded_identity_without_a_primary_street_document(catalog):
+    from tools.refresh_aliases import refresh
+
+    with sqlite3.connect(catalog.path) as db:
+        db.execute("UPDATE buildings SET city='Московская',city_key='московская' WHERE id='a'")
+        db.execute("DELETE FROM search WHERE id='a'")
+        db.execute("INSERT INTO aliases VALUES('a','люберцы','перерва','62к1')")
+        refresh(db)
+    answer = catalog.resolve("Люберцы Перерва 62к1")
+    assert answer["building_id"] == "a"
+    assert answer["status"] == "found"
+    assert catalog.resolve("Подольск Перерва 62к1")["building_id"] == "c"

@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     db_name: str
     dadata_token: str
     dadata_proxy_url: str | None = None
-    search_catalog_path: str = "artifacts/search/catalog.db"
+    search_catalog_path: str = "/backend/catalog/serving.db"
     opensearch_url: str | None = None
     opensearch_index: str = "domofomka-buildings"
     opensearch_timeout_seconds: float = Field(default=2, gt=0)

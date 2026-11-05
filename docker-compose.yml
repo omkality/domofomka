@@ -39,7 +39,7 @@ services:
       --port ${API_PORT:-8000} --workers ${WORKERS_NUM:-1} --log --access-log
     environment:
       PYTHONDONTWRITEBYTECODE: '1'
-      SEARCH_CATALOG_PATH: ${SEARCH_CATALOG_PATH:-/backend/catalog/catalog.db}
+      SEARCH_CATALOG_PATH: ${SEARCH_CATALOG_PATH:-/backend/catalog/serving.db}
       OPENSEARCH_URL: ${OPENSEARCH_URL:-}
     env_file:
     - ${DOMOFOMKA_ENV_FILE:-.env}

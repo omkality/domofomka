@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 
 from src.search.normalize import address_words, house_key, street_kind, text
+from tools.refresh_aliases import refresh
 
 SCHEMA = """
 PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;
@@ -86,6 +87,25 @@ def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict) -> None:
     db.commit()
 
 
+def index_streets(db: sqlite3.Connection) -> None:
+    db.execute("DELETE FROM streets")
+    db.execute("DELETE FROM search")
+    cursor = db.execute("SELECT city_key,street_key FROM buildings GROUP BY city_key,street_key")
+    while rows := cursor.fetchmany(10000):
+        streets = [
+            (
+                hashlib.sha256((city + "\0" + street).encode()).hexdigest()[:32],
+                city,
+                street,
+                address_words(city + " " + street),
+            )
+            for city, street in rows
+        ]
+        db.executemany("INSERT INTO streets VALUES(?,?,?,?)", streets)
+        db.executemany("INSERT INTO search(id,words) VALUES(?,?)", [(r[0], r[3]) for r in streets])
+    refresh(db)
+
+
 def build(legacy: Path, regions: Path, output: Path):
     output.parent.mkdir(parents=True, exist_ok=True)
     work = output.with_suffix(".building.db")
@@ -107,19 +127,7 @@ def build(legacy: Path, regions: Path, output: Path):
         "CREATE INDEX building_lookup ON buildings(street_key,house); CREATE INDEX building_street ON buildings(city_key,street_key,house);"
     )
     link_codes(db, legacy, stats)
-    cursor = db.execute("SELECT city_key,street_key FROM buildings GROUP BY city_key,street_key")
-    while rows := cursor.fetchmany(10000):
-        streets = [
-            (
-                hashlib.sha256((city + "\0" + street).encode()).hexdigest()[:32],
-                city,
-                street,
-                address_words(city + " " + street),
-            )
-            for city, street in rows
-        ]
-        db.executemany("INSERT INTO streets VALUES(?,?,?,?)", streets)
-        db.executemany("INSERT INTO search(id,words) VALUES(?,?)", [(r[0], r[3]) for r in streets])
+    index_streets(db)
     stats["street_documents"] = db.execute("SELECT count(*) FROM streets").fetchone()[0]
     stats["unique_codes"] = db.execute("SELECT count(*) FROM codes").fetchone()[0]
     stats["buildings_with_codes"] = db.execute("SELECT count(distinct building_id) FROM codes").fetchone()[0]
@@ -150,6 +158,8 @@ def relink(legacy: Path, output: Path) -> None:
     for k in ["legacy_rows", "linked_groups", "unresolved_groups", "ambiguous_groups"]:
         stats[k] = 0
     link_codes(db, legacy, stats)
+    index_streets(db)
+    stats["street_documents"] = db.execute("SELECT count(*) FROM streets").fetchone()[0]
     stats["unique_codes"] = db.execute("SELECT count(*) FROM codes").fetchone()[0]
     stats["buildings_with_codes"] = db.execute("SELECT count(distinct building_id) FROM codes").fetchone()[0]
     stats["identity_schema"] = 2

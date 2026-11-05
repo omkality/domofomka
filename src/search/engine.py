@@ -139,6 +139,22 @@ class Catalog:
                 )
             ]
 
+    def alias_candidates(self, query: Query) -> list[dict]:
+        with self.connect() as db:
+            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='alias_search'").fetchone():
+                return []
+            match = " AND ".join('"' + w + '"*' for w in query.words.split())
+            rows = db.execute(
+                "SELECT b.*,s.words AS alias_words FROM alias_search s JOIN buildings b ON b.id=s.building_id "
+                "WHERE alias_search MATCH ? AND s.house=? LIMIT 100",
+                (match, query.house),
+            )
+            result = {}
+            for row in rows:
+                item = result.setdefault(row["id"], dict(row))
+                item.setdefault("_aliases", []).append(row["alias_words"])
+            return list(result.values())
+
     def building(self, id: str) -> dict | None:
         with self.connect() as db:
             row = db.execute("SELECT * FROM buildings WHERE id=?", (id,)).fetchone()
@@ -188,8 +204,8 @@ class Catalog:
         query = parse_query(message)
         if not query.house or not query.words:
             return {"status": "not_found", "data": {}, "engine": "v2"}
-        indexed = self.candidates(query)
-        candidates = indexed if candidates is None else list({r["id"]: r for r in [*candidates, *indexed]}.values())
+        indexed = [*self.candidates(query), *self.alias_candidates(query)]
+        candidates = list({r["id"]: r for r in [*(candidates or []), *indexed]}.values())
         # Backend scores never decide house identity or permit dropping a city token.
         scored = []
         for row in candidates:
@@ -208,7 +224,10 @@ class Catalog:
                 and query.kind not in {street_kind(word) for word in row["street"].split()}
             ):
                 continue
-            score = self.similarity(query.words, address_words(row["city"] + " " + row["street"]))
+            score = max(
+                self.similarity(query.words, words)
+                for words in [address_words(row["city"] + " " + row["street"]), *row.get("_aliases", [])]
+            )
             if score >= self.minimum_similarity:
                 scored.append((score, row))
         scored.sort(key=lambda v: (-v[0], v[1]["id"]))
@@ -292,13 +311,19 @@ def street_vocabulary(path: str, revision: int) -> list[str]:
 
 
 def documents(path: str) -> Iterator[dict]:
-    with Catalog(path).connect() as db:
+    catalog = Catalog(path)
+    with catalog.connect() as db:
+        compact = catalog._compact(db)
         for row in db.execute("SELECT * FROM streets"):
-            houses = [
-                r[0]
-                for r in db.execute(
-                    "SELECT DISTINCT house FROM buildings WHERE city_key=? AND street_key=?",
-                    (row["city_key"], row["street_key"]),
-                )
-            ]
+            if compact:
+                packed = db.execute("SELECT data FROM street_houses WHERE id=?", (row["id"],)).fetchone()[0]
+                houses = sorted({house for b in json.loads(zlib.decompress(packed)) for house in b["houses"]})
+            else:
+                houses = [
+                    r[0]
+                    for r in db.execute(
+                        "SELECT DISTINCT house FROM buildings WHERE city_key=? AND street_key=? ORDER BY house",
+                        (row["city_key"], row["street_key"]),
+                    )
+                ]
             yield {"id": row["id"], "words": row["words"], "house": houses}
