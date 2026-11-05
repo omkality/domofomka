@@ -81,32 +81,33 @@ class Catalog:
             return []
         with self.connect() as db:
             compact = self._compact(db)
-            if compact:
-                sql = (
-                    "SELECT s.id FROM search s JOIN streets t ON t.id=s.id WHERE search MATCH ? "
-                    "ORDER BY t.has_codes DESC,t.id LIMIT ?"
-                )
 
-                def fetch(match: str) -> list[dict]:
-                    ids = [r[0] for r in db.execute(sql, (match, max(limit * 10, 1000)))]
+            def fetch(match: str, terms: list[str]) -> list[dict]:
+                clause = "(" + " OR ".join("instr(' '||t.street_key||' ',' '||?||' ')>0" for _ in terms) + ")"
+                if compact:
+                    sql = (
+                        "SELECT s.id FROM search s JOIN streets t ON t.id=s.id WHERE search MATCH ? AND "
+                        + clause
+                        + " ORDER BY t.has_codes DESC,t.id LIMIT ?"
+                    )
+                    ids = [r[0] for r in db.execute(sql, (match, *terms, max(limit * 10, 1000)))]
                     return self._expand(db, ids, query.house)
-            else:
                 sql = (
                     "SELECT DISTINCT b.* FROM search s JOIN streets t ON t.id=s.id "
                     "JOIN buildings b ON b.street_key=t.street_key AND b.city_key=t.city_key "
-                    "WHERE search MATCH ? AND b.house=? "
-                    "ORDER BY EXISTS(SELECT 1 FROM codes c WHERE c.building_id=b.id) DESC,b.id LIMIT ?"
+                    "WHERE search MATCH ? AND b.house=? AND "
+                    + clause
+                    + " ORDER BY EXISTS(SELECT 1 FROM codes c WHERE c.building_id=b.id) DESC,b.id LIMIT ?"
                 )
-
-                def fetch(match: str) -> list[dict]:
-                    return [dict(r) for r in db.execute(sql, (match, query.house, limit))]
+                return [dict(r) for r in db.execute(sql, (match, query.house, *terms, limit))]
 
             match = " AND ".join('"' + w + '"*' for w in words)
-            rows = fetch(match)
+            rows = fetch(match, words)
             if rows:
                 return rows
             vocabulary = street_vocabulary(self.path, Path(self.path).stat().st_mtime_ns)
             groups = []
+            terms = []
             for word in words:
                 alternatives = (
                     [word]
@@ -115,8 +116,9 @@ class Catalog:
                 )
                 if not alternatives:
                     return []
+                terms.extend(alternatives)
                 groups.append("(" + " OR ".join('"' + w + '"' for w in alternatives) + ")")
-            return fetch(" AND ".join(groups))
+            return fetch(" AND ".join(groups), list(dict.fromkeys(terms)))
 
     def load_candidates(self, ids: list[str], house: str) -> list[dict]:
         if not ids:
@@ -189,9 +191,17 @@ class Catalog:
         for row in candidates:
             if row["house"] != query.house:
                 continue
+            street_words = address_words(row["street"]).split()
+            if not any(
+                (word == part if any(c.isdigit() for c in word) else ratio(word, part) / 100 >= self.minimum_similarity)
+                for word in query.words.split()
+                for part in street_words
+            ):
+                continue
             if (
                 query.kind
                 and street_kind(row["display"].removeprefix(row["city"] + ", ").split(" ", 1)[0]) != query.kind
+                and query.kind not in {street_kind(word) for word in row["street"].split()}
             ):
                 continue
             score = self.similarity(query.words, address_words(row["city"] + " " + row["street"]))

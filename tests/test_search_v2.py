@@ -81,3 +81,32 @@ def test_opensearch_exact_building_filter():
 def test_top_n_index_candidates_cannot_hide_exact_catalog_match(catalog):
     wrong_city = catalog.building("c")
     assert catalog.resolve("мск Перерва 62к1", [wrong_city])["building_id"] == "a"
+
+
+def test_locality_words_cannot_replace_the_street_name(catalog):
+    unrelated = {
+        "id": "wrong",
+        "guid": "wrong",
+        "city": "Московская область Люберцы",
+        "street": "Авиаторов",
+        "house": "15",
+        "display": "Московская область Люберцы, ул. Авиаторов, дом 15",
+        "region": "50",
+        "lineage": "люберцы",
+    }
+    assert catalog.resolve("Люберцы Московская улица 15", [unrelated])["status"] == "not_found"
+
+
+def test_street_type_can_also_be_part_of_an_official_name(catalog):
+    proper = {
+        "id": "proper",
+        "guid": "proper",
+        "city": "Москва",
+        "street": "Большая Набережная",
+        "house": "1",
+        "display": "Москва, улица Большая Набережная, дом 1",
+        "region": "77",
+        "lineage": "москва",
+    }
+    result = catalog.resolve("Большая набережная 1", [proper])
+    assert result["building_id"] == "proper"

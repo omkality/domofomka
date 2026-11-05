@@ -57,8 +57,8 @@ def ordinals(value: str) -> str:
 def text(value: str) -> str:
     value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")
     value = ordinals(value)
-    value = re.sub(r'\bпр[\s.-]*кт\b','проспект',value)
-    value = re.sub(r'\bб[.-]р\b','бульвар',value)
+    value = re.sub(r"\bпр[\s.-]*кт\b", "проспект", value)
+    value = re.sub(r"\bб[.-]р\b", "бульвар", value)
     value = re.sub(r"\bмск\b", "москва", value)
     value = re.sub(r"\b(?:спб|питер|санктпетербург)\b", "санкт петербург", value)
     value = re.sub(r"\b(\d+)\s*[- ]?\s*(?:ая|я|й|ый|ой)\b", r"\1", value)
@@ -114,6 +114,25 @@ STOP = [
     "ш",
     "шоссе",
 ]
+STOP.extend(
+    [
+        "квартал",
+        "микрорайон",
+        "мкр",
+        "мкрн",
+        "территория",
+        "тер",
+        "поселок",
+        "деревня",
+        "жилой",
+        "комплекс",
+        "массив",
+        "военный",
+        "городок",
+        "тупик",
+        "тракт",
+    ]
+)
 
 
 def address_words(value: str) -> str:
