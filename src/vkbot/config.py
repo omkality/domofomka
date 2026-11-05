@@ -9,14 +9,12 @@ class VKBotSettings(BaseSettings):
     vk_group_id: str
     vk_proxy_url: str | None = None
 
-    redis_host: str
-    redis_port: int
-    redis_password: str | None = None
     cache_expire_time: int
     anti_spam_time: int
 
     domofomka_api_host: str
     domofomka_api_port: int
+    search_api_version: str = 'v2'
 
     queue_database_url: str
     queue_workers: int = 2

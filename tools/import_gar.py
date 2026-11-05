@@ -1,0 +1,132 @@
+"""Stream only active address objects, houses and their parents; resume per region.
+
+No apartments, rooms, plots or personal data. Each worker owns its own database.
+"""
+
+import argparse
+import concurrent.futures
+import json
+import sqlite3
+import time
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+from src.search.normalize import house_key, text
+
+
+def records(path: Path):
+    context = ET.iterparse(path, events=("start", "end"))
+    _, root = next(context)
+    for event, element in context:
+        if event == "end" and element is not root:
+            yield element.attrib
+            element.clear()
+            root.clear()
+
+
+def region_job(args):
+    source, target, region = args
+    target = Path(target) / f"gar-{region}.db"
+    if target.exists():
+        db = sqlite3.connect(target)
+        try:
+            if db.execute("select value from metadata where key='schema'").fetchone() == ("3",):
+                db.close()
+                return {"region": region, "resumed": True}
+        except sqlite3.Error:
+            pass
+        db.close()
+    work = target.with_suffix(".building.db")
+    if work.exists():
+        work.unlink()
+    db = sqlite3.connect(work)
+    db.executescript("""PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;
+    CREATE TABLE nodes(id INTEGER PRIMARY KEY,name TEXT,kind TEXT,level INTEGER);
+    CREATE TABLE houses(id INTEGER PRIMARY KEY,guid TEXT,number TEXT);
+    CREATE TABLE parents(id INTEGER PRIMARY KEY,parent INTEGER);
+    CREATE TABLE buildings(id TEXT PRIMARY KEY,guid TEXT,display TEXT,city TEXT,street TEXT,house TEXT,street_key TEXT,city_key TEXT,region TEXT,lineage TEXT);
+    CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT);""")
+    root = Path(source)
+    directory = root / region
+
+    def file(family):
+        return next(directory.glob(f"AS_{family}_2*.XML"))
+
+    count = 0
+    for row in records(file("ADDR_OBJ")):
+        if row.get("ISACTUAL") == "1" and row.get("ISACTIVE") == "1":
+            db.execute(
+                "INSERT OR REPLACE INTO nodes VALUES(?,?,?,?)",
+                (int(row["OBJECTID"]), row["NAME"], row["TYPENAME"], int(row["LEVEL"])),
+            )
+    db.commit()
+    additions = {"1": "к", "2": "с", "3": "соор", "4": "лит"}
+    for row in records(file("HOUSES")):
+        if row.get("ISACTUAL") != "1" or row.get("ISACTIVE") != "1":
+            continue
+        number = row.get("HOUSENUM", "")
+        for n in ("1", "2"):
+            if row.get("ADDNUM" + n):
+                number += additions.get(row.get("ADDTYPE" + n), "тип" + str(row.get("ADDTYPE" + n))) + row["ADDNUM" + n]
+        if not number:
+            continue
+        db.execute("INSERT OR REPLACE INTO houses VALUES(?,?,?)", (int(row["OBJECTID"]), row["OBJECTGUID"], number))
+        count += 1
+        if count % 50000 == 0:
+            db.commit()
+    db.commit()
+    wanted = {r[0] for r in db.execute("SELECT id FROM houses UNION SELECT id FROM nodes")}
+    for row in records(file("ADM_HIERARCHY")):
+        if row.get("ISACTIVE") == "1" and int(row["OBJECTID"]) in wanted:
+            db.execute("INSERT OR REPLACE INTO parents VALUES(?,?)", (int(row["OBJECTID"]), int(row["PARENTOBJID"])))
+    db.commit()
+    nodes = {r[0]: r[1:] for r in db.execute("SELECT * FROM nodes")}
+    parents = dict(db.execute("SELECT * FROM parents"))
+    del wanted
+    federal = {"77": "Москва", "78": "Санкт-Петербург", "92": "Севастополь"}
+    inserted = 0
+    for object_id, guid, number in db.execute("SELECT * FROM houses"):
+        chain, current, visited = [], parents.get(object_id), set()
+        while current and current not in visited:
+            visited.add(current)
+            if current in nodes:
+                chain.append(nodes[current])
+            current = parents.get(current)
+        if not chain:
+            continue
+        street_node = next((n for n in chain if n[2] == 8), next((n for n in chain if n[2] == 7), None))
+        if not street_node:
+            street_node = next((n for n in chain if n[2] >= 6), None)
+        if not street_node:
+            continue
+        city_node = next((n for n in chain if n[2] in (5, 6) and n is not street_node), None)
+        city = city_node[0] if city_node else federal.get(region, next((n[0] for n in reversed(chain)), ""))
+        street = street_node[0]
+        display = ", ".join(dict.fromkeys([city, street_node[1] + " " + street, "дом " + number]))
+        lineage = " ".join(dict.fromkeys(text(n[0]) for n in chain if n is not street_node))
+        db.execute(
+            "INSERT OR REPLACE INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
+            ("gar:" + guid, guid, display, city, street, house_key(number), text(street), text(city), region, lineage),
+        )
+        inserted += 1
+    db.execute("INSERT INTO metadata VALUES('complete',?)", (str(time.time()),))
+    db.execute("INSERT INTO metadata VALUES('schema','3')")
+    db.executescript("DROP TABLE houses; DROP TABLE parents; DROP TABLE nodes; VACUUM;")
+    db.commit()
+    db.close()
+    work.replace(target)
+    return {"region": region, "houses": count, "searchable_buildings": inserted, "bytes": target.stat().st_size}
+
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("--source", type=Path, default=Path("artifacts/gar_xml"))
+    p.add_argument("--output", type=Path, default=Path("artifacts/catalog"))
+    p.add_argument("--regions", nargs="+", default=["77", "50", "78"])
+    p.add_argument("--workers", type=int, default=3)
+    a = p.parse_args()
+    a.output.mkdir(parents=True, exist_ok=True)
+    regions = sorted(x.name for x in a.source.iterdir() if x.is_dir()) if a.regions == ["all"] else a.regions
+    with concurrent.futures.ProcessPoolExecutor(max_workers=a.workers) as pool:
+        for result in pool.map(region_job, [(str(a.source), str(a.output), r) for r in regions]):
+            print(json.dumps(result), flush=True)
