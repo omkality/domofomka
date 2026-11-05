@@ -16,6 +16,7 @@ def audit(source: Path, output: Path):
     patterns = Counter()
     pairs = []
     success = []
+    failures = []
     for path in source.glob("*.json"):
         if path.name == "conversations.json":
             continue
@@ -58,6 +59,7 @@ def audit(source: Path, output: Path):
                     }
                     for feature, present in flags.items():
                         failure_patterns[feature] += present
+                    failures.append({"dialog": data["dialog"], "query": raw, "features": flags})
                     failed.append(previous)
                 elif "дом " in text and ("," in text) and "Не удалось" not in text:
                     counts["address_responses"] += 1
@@ -89,7 +91,7 @@ def audit(source: Path, output: Path):
                     failed = []
                 previous = None
     output.mkdir(parents=True, exist_ok=True)
-    for name, rows in [("successful-queries", success), ("correction-hypotheses", pairs)]:
+    for name, rows in [("successful-queries", success), ("correction-hypotheses", pairs), ("failed-queries", failures)]:
         (output / (name + ".jsonl")).write_text(
             "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf8"
         )
