@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,7 +16,7 @@ class VKBotSettings(BaseSettings):
 
     domofomka_api_host: str
     domofomka_api_port: int
-    search_api_version: str = 'v2'
+    search_api_version: Literal["v1", "v2"] = "v2"
 
     queue_database_url: str
     queue_workers: int = 2

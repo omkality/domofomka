@@ -40,7 +40,6 @@ services:
       --port ${API_PORT:-8000} --workers ${WORKERS_NUM:-1} --log --access-log
     environment:
       PYTHONDONTWRITEBYTECODE: '1'
-      SEARCH_REMOTE_URL: ${SEARCH_REMOTE_URL:-}
       SEARCH_CATALOG_PATH: ${SEARCH_CATALOG_PATH:-/backend/catalog/catalog.db}
       OPENSEARCH_URL: ${OPENSEARCH_URL:-}
     env_file:
@@ -73,7 +72,6 @@ services:
     command: uv run --frozen python -m src.vkbot.main
     environment:
       PYTHONDONTWRITEBYTECODE: '1'
-      SEARCH_REMOTE_URL: ${SEARCH_REMOTE_URL:-}
       SEARCH_API_VERSION: ${SEARCH_API_VERSION:-v2}
     env_file:
     - ${DOMOFOMKA_ENV_FILE:-.env.dev}

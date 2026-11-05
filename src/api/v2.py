@@ -16,19 +16,6 @@ logger = logging.getLogger(__name__)
 async def lookup(message: str) -> dict:
     reason = None
     try:
-        if settings.search_remote_url:
-            async with (
-                ClientBuilder().no_proxy().timeout(timedelta(seconds=settings.search_timeout_seconds)).build() as client
-            ):
-                response = (
-                    await client.get(settings.search_remote_url + "/api/v2/codes/msg")
-                    .query({"message": message})
-                    .build()
-                    .send()
-                )
-                if response.status != 200:
-                    raise RuntimeError("Remote search unavailable")
-                return await response.json()
         catalog = Catalog(
             settings.search_catalog_path, settings.search_min_similarity, settings.search_ambiguity_margin
         )
@@ -82,7 +69,9 @@ async def lookup(message: str) -> dict:
 
 @get("/msg")
 async def message_codes(message: str) -> dict:
-    return await lookup(message[: settings.search_max_query_length])
+    if len(message) > settings.search_max_query_length:
+        return {"status": "invalid_query", "data": {}, "engine": "v2"}
+    return await lookup(message)
 
 
 @get("/geo")
@@ -103,24 +92,8 @@ v2_router = Router(path="/api/v2/codes", route_handlers=[message_codes, geo_code
 
 @get("/api/v2/buildings/{building_id:str}")
 async def building_codes(building_id: str) -> dict:
-    from litestar.exceptions import NotFoundException, ServiceUnavailableException
+    from litestar.exceptions import NotFoundException
 
-    if settings.search_remote_url:
-        from urllib.parse import quote
-
-        async with (
-            ClientBuilder().no_proxy().timeout(timedelta(seconds=settings.search_timeout_seconds)).build() as client
-        ):
-            r = (
-                await client.get(settings.search_remote_url + "/api/v2/buildings/" + quote(building_id, safe=""))
-                .build()
-                .send()
-            )
-            if r.status == 404:
-                raise NotFoundException()
-            if r.status != 200:
-                raise ServiceUnavailableException()
-            return await r.json()
     catalog = Catalog(settings.search_catalog_path)
 
     def read() -> dict | None:

@@ -458,3 +458,7 @@ def test_address_choices_can_be_paged_without_repeating_lookup(processor: Proces
     effect = processor.store.plan.call_args.args[1][0]
     assert effect["method"] == "edit"
     assert effect["params"]["conversation_message_id"] == 42
+
+
+def test_long_query_does_not_poison_retry_queue(processor: Processor) -> None:
+    assert processor.lookup("x" * 501)["status"] == "invalid_query"

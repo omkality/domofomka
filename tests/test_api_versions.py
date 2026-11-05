@@ -15,7 +15,6 @@ def test_legacy_paths_remain_equivalent(monkeypatch):
 
 
 def test_v2_unavailable_falls_back(monkeypatch, tmp_path):
-    monkeypatch.setattr(settings, "search_remote_url", None)
     monkeypatch.setattr(settings, "opensearch_url", None)
     monkeypatch.setattr(settings, "search_catalog_path", str(tmp_path / "missing.db"))
     with TestClient(app) as client:
@@ -25,7 +24,6 @@ def test_v2_unavailable_falls_back(monkeypatch, tmp_path):
 
 
 def test_identity_without_codes_is_not_overridden(monkeypatch):
-    monkeypatch.setattr(settings, "search_remote_url", None)
     monkeypatch.setattr(settings, "opensearch_url", None)
     monkeypatch.setattr(
         v2.Catalog,
@@ -40,3 +38,11 @@ def test_identity_without_codes_is_not_overridden(monkeypatch):
     with TestClient(app) as client:
         response = client.get("/api/v2/codes/msg", params={"message": "something"})
         assert response.json()["status"] == "no_codes"
+
+
+def test_long_queries_are_rejected_without_truncating_to_another_house(monkeypatch):
+    monkeypatch.setattr(settings, "search_max_query_length", 20)
+    with TestClient(app) as client:
+        result = client.get("/api/v2/codes/msg", params={"message": "House 1 " + "x" * 50 + " House 99"})
+        assert result.status_code == 200
+        assert result.json()["status"] == "invalid_query"

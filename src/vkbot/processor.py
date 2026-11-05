@@ -113,6 +113,8 @@ class Processor:
             raise TimeoutError("Injected dev failure")
 
     def lookup(self, message: str | None = None, geo: dict | None = None) -> dict:
+        if message and len(message) > getattr(self.settings, "search_max_query_length", 500):
+            return {"status": "invalid_query", "data": {}, "engine": "v2"}
         version = getattr(self.settings, "search_api_version", "v1")
         url = f"http://{self.settings.domofomka_api_host}:{self.settings.domofomka_api_port}/api/{version}/codes"
         try:
@@ -185,7 +187,14 @@ class Processor:
                     ],
                 )
                 return
-            if result.get("status") == "no_codes":
+            if result.get("status") == "invalid_query":
+                effects.append(
+                    {
+                        "method": "send",
+                        "params": dict(base, message="Пришлите улицу и номер дома одним коротким сообщением."),
+                    }
+                )
+            elif result.get("status") == "no_codes":
                 effects.append(
                     {
                         "method": "send",
