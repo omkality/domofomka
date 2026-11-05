@@ -29,6 +29,10 @@ class NetworkSettings(BaseSettings):
     redis_socket_timeout_seconds: float = Field(default=5, gt=0)
     redis_health_check_interval_seconds: float = Field(default=30, gt=0)
 
+    queue_db_connect_timeout_seconds: int = Field(default=5, gt=0)
+    queue_db_statement_timeout_ms: int = Field(default=15000, gt=0)
+    queue_db_lock_timeout_ms: int = Field(default=5000, gt=0)
+
     @model_validator(mode="after")
     def consistent_limits(self) -> "NetworkSettings":
         if self.proxy_retry_max_seconds < self.proxy_retry_initial_seconds:

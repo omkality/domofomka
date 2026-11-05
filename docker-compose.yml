@@ -5,6 +5,26 @@ x-logging: &logging
     max-file: "${DOCKER_LOG_MAX_FILES:-3}"
 
 services:
+  queue:
+    image: postgres:17-alpine
+    init: true
+    restart: always
+    mem_limit: ${QUEUE_MEM_LIMIT:-192m}
+    memswap_limit: ${QUEUE_MEMSWAP_LIMIT:-256m}
+    pids_limit: ${QUEUE_PIDS_LIMIT:-64}
+    logging: *logging
+    environment:
+      POSTGRES_DB: domofomka
+      POSTGRES_USER: domofomka
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - queue-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U domofomka -d domofomka"]
+      interval: ${QUEUE_HEALTH_INTERVAL:-5s}
+      timeout: ${QUEUE_HEALTH_TIMEOUT:-3s}
+      retries: ${QUEUE_HEALTH_RETRIES:-10}
+
   api:
     build:
       context: .
@@ -54,6 +74,8 @@ services:
       - ./src:/backend/src:ro
       - ./start_message.txt:/backend/start_message.txt:ro
     depends_on:
+      queue:
+        condition: service_healthy
       api:
         condition: service_healthy
       redis:
@@ -76,3 +98,6 @@ services:
       interval: ${REDIS_HEALTH_INTERVAL:-10s}
       timeout: ${REDIS_HEALTH_TIMEOUT:-5s}
       retries: ${REDIS_HEALTH_RETRIES:-3}
+
+volumes:
+  queue-data:

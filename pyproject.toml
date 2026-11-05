@@ -25,6 +25,7 @@ dev = [
     "ruff>=0.14.14",
 ]
 vkbot = [
+    "psycopg[binary]>=3.2.0,<4",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
     "pyreqwest>=0.10.1",

@@ -1,0 +1,9 @@
+.git
+.venv
+.codex-local
+artifacts
+history.txt
+.env*
+docs
+__pycache__
+.pytest_cache

@@ -1,0 +1,105 @@
+name: domofomka-dev
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+    max-file: "${DOCKER_LOG_MAX_FILES:-3}"
+
+services:
+  queue:
+    image: postgres:17-alpine
+    init: true
+    restart: always
+    mem_limit: ${QUEUE_MEM_LIMIT:-192m}
+    memswap_limit: ${QUEUE_MEMSWAP_LIMIT:-256m}
+    pids_limit: ${QUEUE_PIDS_LIMIT:-64}
+    logging: *logging
+    environment:
+      POSTGRES_DB: domofomka
+      POSTGRES_USER: domofomka
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - queue-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U domofomka -d domofomka"]
+      interval: ${QUEUE_HEALTH_INTERVAL:-5s}
+      timeout: ${QUEUE_HEALTH_TIMEOUT:-3s}
+      retries: ${QUEUE_HEALTH_RETRIES:-10}
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    init: true
+    restart: always
+    mem_limit: ${API_MEM_LIMIT:-384m}
+    memswap_limit: ${API_MEMSWAP_LIMIT:-512m}
+    pids_limit: ${API_PIDS_LIMIT:-128}
+    logging: *logging
+    command: uv run --frozen granian --interface asgi src.api.app:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8000} --workers ${WORKERS_NUM:-1} --log --access-log
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    env_file:
+      - ${DOMOFOMKA_ENV_FILE:-.env.dev}
+    ports:
+      - "127.0.0.1:${API_PUBLISH_PORT:-${DEV_API_PORT:-18000}}:${API_PORT:-8000}"
+    volumes:
+      - ./src:/backend/src:ro
+      - ./codes.db:/backend/codes.db:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${API_PORT:-8000}/version"]
+      interval: ${API_HEALTH_INTERVAL:-20s}
+      timeout: ${API_HEALTH_TIMEOUT:-5s}
+      retries: ${API_HEALTH_RETRIES:-5}
+      start_period: ${API_HEALTH_START_PERIOD:-60s}
+
+  vkbot:
+    build:
+      context: .
+      dockerfile: Dockerfile.vkbot
+    init: true
+    restart: always
+    mem_limit: ${BOT_MEM_LIMIT:-128m}
+    memswap_limit: ${BOT_MEMSWAP_LIMIT:-192m}
+    pids_limit: ${BOT_PIDS_LIMIT:-64}
+    logging: *logging
+    command: uv run --frozen python -m src.vkbot.main
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+    env_file:
+      - ${DOMOFOMKA_ENV_FILE:-.env.dev}
+    volumes:
+      - ./src:/backend/src:ro
+      - ./start_message.txt:/backend/start_message.txt:ro
+    depends_on:
+      queue:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:8.4-alpine
+    init: true
+    restart: always
+    mem_limit: ${REDIS_MEM_LIMIT:-96m}
+    memswap_limit: ${REDIS_MEMSWAP_LIMIT:-128m}
+    pids_limit: ${REDIS_PIDS_LIMIT:-32}
+    logging: *logging
+    env_file:
+      - ${DOMOFOMKA_ENV_FILE:-.env.dev}
+    hostname: ${REDIS_HOST:-redis}
+    command: ["redis-server", "--port", "${REDIS_PORT:-6379}", "--maxmemory", "${REDIS_MAXMEMORY:-64mb}", "--maxmemory-policy", "${REDIS_MAXMEMORY_POLICY:-allkeys-lru}"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "${REDIS_PORT:-6379}", "ping"]
+      interval: ${REDIS_HEALTH_INTERVAL:-10s}
+      timeout: ${REDIS_HEALTH_TIMEOUT:-5s}
+      retries: ${REDIS_HEALTH_RETRIES:-3}
+
+volumes:
+  queue-data:

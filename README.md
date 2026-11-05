@@ -1,20 +1,24 @@
 # domofomka
 
 Application for getting the intercom code at the given address.
-Used stack: *Litestar*, *Granian*, *SQLite*, *Redis*, *VK API*.
+Used stack: *Litestar*, *Granian*, *SQLite*, *PostgreSQL* (bot queue), *VK API*.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    VK[VK] <-->|Long Poll and API| B[Bot]
-    B --> A[HTTP API]
+    VK[VK] <-->|Long Poll| B[Bot]
+    B --> I[(PostgreSQL inbox)]
+    H[VK history recovery] --> I
+    I --> W[Workers]
+    W --> A[HTTP API]
     A --> DB[(SQLite codes)]
     A --> D[DaData geocoding]
-    B <--> R[(Redis context and cooldown)]
+    W --> O[(PostgreSQL outbox)]
+    O -->|Send or edit with retries| VK
 ```
 
-Messages are processed sequentially. Geocoding failures ask the user to send an address as text. This branch has no persistent message queue.
+Events and replies survive restarts. Saved button clicks can be retried; clicks never received from VK cannot be recovered from history.
 
 ```mermaid
 flowchart LR
@@ -31,8 +35,6 @@ Optional `VK_PROXY_URL` and `DADATA_PROXY_URL` point to the host-side SSH tunnel
 
 Only connection failures trigger direct fallback. API errors and response timeouts do not switch routes. Safe VK retries keep the same `random_id` or edit result. Timeouts, retries and recovery intervals are configurable in `.env`; see [`.env.example`](.env.example) for defaults. Restart containers after changing them.
 
-The service API is bound to localhost. Container memory/PID limits and the Redis cache limit are configurable in `.env`.
-
 ## Prerequisites
 * Docker & Docker Compose
 * Python 3.12+ (for local development)
@@ -41,7 +43,7 @@ The service API is bound to localhost. Container memory/PID limits and the Redis
 
 Build `domofomka` from source:
 ~~~~bash
-git clone https://github.com/omkality/domofomka
+git clone https://github.com/omka0708/domofomka
 cd domofomka
 ~~~~
 
@@ -55,13 +57,16 @@ API_HOST=0.0.0.0
 API_PORT=8000
 DB_NAME=codes.db
 DADATA_TOKEN=your_dadata_token_here
-DADATA_TIMEOUT_SECONDS=8
-DADATA_PROXY_URL=
 
 # VK Bot Configuration
 VK_GROUP_TOKEN=your_vk_group_token_here
 VK_GROUP_ID=your_vk_group_id_here
 VK_PROXY_URL=
+
+# Durable VK queue (required for this development version)
+EXPECTED_VK_GROUP_ID=your_vk_group_id_here
+POSTGRES_PASSWORD=replace_with_long_random_password
+QUEUE_DATABASE_URL=postgresql://domofomka:${POSTGRES_PASSWORD}@queue:5432/domofomka
 
 # Redis Configuration
 REDIS_HOST=redis
@@ -144,11 +149,13 @@ docker compose up --build -d
 
 ## VK Bot
 ### Get codes by message
-![codes_by_msg](https://github.com/omkality/domofomka/assets/56554057/d21e6146-95a7-4f09-a501-31d8fd2ae7df)
+![codes_by_msg](https://github.com/omka0708/domofomka/assets/56554057/d21e6146-95a7-4f09-a501-31d8fd2ae7df)
 
 ### Get codes by latitude and longitude
-![codes_by_lat_lon](https://github.com/omkality/domofomka/assets/56554057/85f2b4f6-7634-4b3a-b7a7-5ae10cdc9219)
+![codes_by_lat_lon](https://github.com/omka0708/domofomka/assets/56554057/85f2b4f6-7634-4b3a-b7a7-5ae10cdc9219)
 
 ## Telegram Bot
 
 *soon*
+
+The service API is published on localhost only. Container memory, process counts, Redis cache size and log rotation are configurable in `.env`.
