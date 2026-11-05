@@ -172,7 +172,13 @@ class QueueStore:
         action = obj["payload"]
         if isinstance(action, str):
             action = json.loads(action)
-        signature = f"{int(obj['conversation_message_id'])}:{action['entrance']}"
+        if "entrance" in action:
+            target = "entrance:" + str(action["entrance"])
+        elif "select_building" in action:
+            target = "building:" + str(int(action["select_building"]))
+        else:
+            target = "page:" + str(int(action["choice_page"]))
+        signature = f"{int(obj['conversation_message_id'])}:{target}"
         name = f"callback_gate:{record['peer_id']}"
         conn.execute("INSERT INTO bot_state VALUES (%s,%s,'{}') ON CONFLICT DO NOTHING", (self.group_id, name))
         state = conn.execute(

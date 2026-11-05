@@ -59,6 +59,34 @@ def code_answer(result: dict, entrance: str) -> str:
     return f"{result['address']}\nПодъезд {entrance}\n" + "\n".join(lines)
 
 
+def address_choices(result: dict, page: int = 0) -> tuple[str, str]:
+    choices = result["candidates"]
+    size = 5
+    start = page * size
+    if page < 0 or start >= len(choices):
+        raise ValueError("Invalid address page")
+    subset = choices[start : start + size]
+    labels = [c["address"] + (" (" + c["locality_context"] + ")" if c.get("locality_context") else "") for c in subset]
+    message = "Уточните адрес:\n" + "\n".join(f"{start + i + 1}. {label}" for i, label in enumerate(labels))
+    message += "\nМожно добавить город к запросу."
+
+    def button(label: str, payload: dict) -> dict:
+        return {
+            "action": {"type": "callback", "label": label, "payload": json.dumps(payload)},
+            "color": "secondary",
+        }
+
+    rows = [[button(str(start + i + 1), {"select_building": start + i}) for i in range(len(subset))]]
+    navigation = []
+    if page > 0:
+        navigation.append(button("Назад", {"choice_page": page - 1}))
+    if start + size < len(choices):
+        navigation.append(button("Далее", {"choice_page": page + 1}))
+    if navigation:
+        rows.append(navigation)
+    return message, json.dumps({"inline": True, "buttons": rows}, ensure_ascii=False)
+
+
 class LookupUnavailable(RuntimeError):
     """The internal lookup API could not complete this attempt."""
 
@@ -85,7 +113,8 @@ class Processor:
             raise TimeoutError("Injected dev failure")
 
     def lookup(self, message: str | None = None, geo: dict | None = None) -> dict:
-        url = f"http://{self.settings.domofomka_api_host}:{self.settings.domofomka_api_port}/codes"
+        version = getattr(self.settings, "search_api_version", "v1")
+        url = f"http://{self.settings.domofomka_api_host}:{self.settings.domofomka_api_port}/api/{version}/codes"
         try:
             self.fault("api")
             if geo:
@@ -156,7 +185,21 @@ class Processor:
                     ],
                 )
                 return
-            if not result or not result.get("data"):
+            if result.get("status") == "no_codes":
+                effects.append(
+                    {
+                        "method": "send",
+                        "params": dict(
+                            base, message=f"{result['address']}\nПо этому адресу кодов в нашей базе пока нет."
+                        ),
+                    }
+                )
+            elif result.get("status") == "ambiguous":
+                message, keyboard = address_choices(result)
+                effects.append(
+                    {"method": "send", "params": dict(base, message=message, keyboard=keyboard), "context": result}
+                )
+            elif not result or not result.get("data"):
                 effects.append({"method": "send", "params": dict(base, message="Нет результатов")})
             else:
                 entrances = list(result["data"])
@@ -181,6 +224,65 @@ class Processor:
         # Durable ingest coalesces consecutive identical clicks before planning.
         cmid = int(obj["conversation_message_id"])
         result = self.store.message_context(peer, cmid)
+        if "choice_page" in payload:
+            if not result or result.get("status") != "ambiguous":
+                raise ValueError("No saved address choices")
+            message, keyboard = address_choices(result, int(payload["choice_page"]))
+            self.store.plan(
+                job,
+                [
+                    {
+                        "method": "edit",
+                        "params": {
+                            "peer_id": peer,
+                            "conversation_message_id": cmid,
+                            "message": message,
+                            "keyboard": keyboard,
+                        },
+                        "context": result,
+                    }
+                ],
+            )
+            return
+        if "select_building" in payload:
+            from urllib.parse import quote
+
+            index = int(payload["select_building"])
+            if not result or not 0 <= index < len(result.get("candidates", [])):
+                raise ValueError("Selection is not part of the saved search result")
+            building = result["candidates"][index]["building_id"]
+            base_url = f"http://{self.settings.domofomka_api_host}:{self.settings.domofomka_api_port}"
+            url = base_url + "/api/v2/buildings/" + quote(building, safe="")
+            response = self.http.get(url).build().send()
+            if response.status != 200:
+                raise LookupUnavailable("Building lookup unavailable")
+            answer = response.json()
+            keyboard = (
+                inline_keyboard(list(answer["data"])[:10])
+                if answer.get("data")
+                else json.dumps({"inline": True, "buttons": []})
+            )
+            message = (
+                answer["address"]
+                if answer.get("data")
+                else answer["address"] + "\nПо этому адресу кодов в нашей базе пока нет."
+            )
+            self.store.plan(
+                job,
+                [
+                    {
+                        "method": "edit",
+                        "params": {
+                            "peer_id": peer,
+                            "conversation_message_id": cmid,
+                            "message": message,
+                            "keyboard": keyboard,
+                        },
+                        "context": answer,
+                    }
+                ],
+            )
+            return
         if result is None:
             messages = self.vk.messages.getByConversationMessageId(peer_id=peer, conversation_message_ids=cmid)["items"]
             if not messages:

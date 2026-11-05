@@ -25,9 +25,6 @@ class NetworkSettings(BaseSettings):
     internal_api_connect_timeout_seconds: float = Field(default=5, gt=0)
     internal_api_timeout_seconds: float = Field(default=30, gt=0)
     internal_api_geo_timeout_seconds: float = Field(default=30, gt=0)
-    redis_connect_timeout_seconds: float = Field(default=5, gt=0)
-    redis_socket_timeout_seconds: float = Field(default=5, gt=0)
-    redis_health_check_interval_seconds: float = Field(default=30, gt=0)
 
     queue_db_connect_timeout_seconds: int = Field(default=5, gt=0)
     queue_db_statement_timeout_ms: int = Field(default=15000, gt=0)

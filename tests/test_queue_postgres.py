@@ -271,3 +271,20 @@ def test_callback_gate_and_cursor_roll_back_with_failed_batch(store: QueueStore)
     assert store.get_state("callback_gate:10") is None
     assert store.get_state("longpoll_ts") == "old"
     assert store.claim("bot_inbox") is None
+
+
+def test_building_selection_is_a_durable_callback(store: QueueStore) -> None:
+    item = event_record(
+        store.group_id,
+        "message_event",
+        {
+            "user_id": 10,
+            "peer_id": 10,
+            "conversation_message_id": 9,
+            "event_id": "select-address",
+            "payload": {"select_building": 0},
+        },
+    )
+    assert store.ingest([item]) == 1
+    claimed = store.claim("bot_inbox")
+    assert claimed["payload"]["payload"] == {"select_building": 0}

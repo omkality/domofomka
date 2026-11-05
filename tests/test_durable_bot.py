@@ -389,7 +389,7 @@ def test_lookup_uses_pyreqwest_builder_and_internal_query(processor: Processor) 
     response.status = 200
     response.json.return_value = {"address": "a", "data": {}}
     assert processor.lookup("address") == {"address": "a", "data": {}}
-    processor.http.get.assert_called_once_with("http://api:8000/codes/msg")
+    processor.http.get.assert_called_once_with("http://api:8000/api/v1/codes/msg")
     processor.http.get.return_value.query.assert_called_once_with({"message": "address"})
 
 
@@ -399,3 +399,62 @@ def test_lookup_status_failure_is_retryable_without_requests_dependency(processo
     processor.http.get.return_value.query.return_value.build.return_value.send.return_value.status = 503
     with pytest.raises(LookupUnavailable):
         processor.lookup(geo={"latitude": 1, "longitude": 2})
+
+
+def test_known_house_without_codes_explains_result(processor: Processor) -> None:
+    processor.lookup = MagicMock(return_value={"status": "no_codes", "address": "Known house", "data": {}})
+    processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"id": 1, "text": "house"}}})
+    effect = processor.store.plan.call_args.args[1][0]
+    assert "Known house" in effect["params"]["message"]
+    assert effect["method"] == "send"
+
+
+def test_ambiguous_choice_edits_the_same_message(processor: Processor) -> None:
+    processor.store.message_context.return_value = {
+        "candidates": [{"building_id": "gar:test", "address": "Known house"}]
+    }
+    response = (
+        processor.http.get.return_value.build.return_value.send.return_value
+        if isinstance(processor.http, MagicMock)
+        else None
+    )
+    processor.http.close()
+    processor.http = MagicMock()
+    response = processor.http.get.return_value.build.return_value.send.return_value
+    response.status = 200
+    response.json.return_value = {"address": "Known house", "data": {"1": [["TEST", "test"]]}}
+    processor.plan(
+        {
+            "kind": "message_event",
+            "peer_id": 100,
+            "payload": {"conversation_message_id": 42, "payload": {"select_building": 0}},
+        }
+    )
+    effect = processor.store.plan.call_args.args[1][0]
+    assert effect["method"] == "edit"
+    assert effect["params"]["conversation_message_id"] == 42
+    assert effect["context"]["data"]
+
+
+def test_address_choices_can_be_paged_without_repeating_lookup(processor: Processor) -> None:
+    from src.vkbot.processor import address_choices
+
+    result = {
+        "status": "ambiguous",
+        "candidates": [{"building_id": str(i), "address": f"City {i}, house"} for i in range(12)],
+    }
+    text, keyboard = address_choices(result, 1)
+    assert "City 5" in text
+    assert "City 0" not in text
+    assert "choice_page" in keyboard
+    processor.store.message_context.return_value = result
+    processor.plan(
+        {
+            "kind": "message_event",
+            "peer_id": 100,
+            "payload": {"conversation_message_id": 42, "payload": {"choice_page": 1}},
+        }
+    )
+    effect = processor.store.plan.call_args.args[1][0]
+    assert effect["method"] == "edit"
+    assert effect["params"]["conversation_message_id"] == 42
