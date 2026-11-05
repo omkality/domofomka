@@ -38,4 +38,4 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv sync --frozen --all-groups
       - run: uv run ruff check --no-cache src tests tools
-      - run: uv run pytest -q -p no:cacheprovider
+      - run: uv run python -m pytest -q -p no:cacheprovider
