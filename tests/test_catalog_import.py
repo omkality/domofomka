@@ -47,6 +47,7 @@ def test_street_types_never_merge_code_rows(tmp_path):
     # Re-linking must restore its retrieval indexes, not only the code tables.
     with sqlite3.connect(output) as db:
         db.execute("DELETE FROM search")
+    db.close()
     relink(legacy, output)
     with sqlite3.connect(output) as db:
         assert db.execute("SELECT count(*) FROM search").fetchone()[0] == 1
