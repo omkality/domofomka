@@ -7,7 +7,24 @@ x-logging: &id001
 services:
   queue:
     image: postgres:17-alpine
-    command: [postgres, -c, 'shared_buffers=${QUEUE_SHARED_BUFFERS:-32MB}', -c, 'work_mem=${QUEUE_WORK_MEM:-2MB}', -c, 'maintenance_work_mem=${QUEUE_MAINTENANCE_WORK_MEM:-16MB}', -c, 'autovacuum_max_workers=${QUEUE_AUTOVACUUM_WORKERS:-1}', -c, 'max_connections=${QUEUE_MAX_CONNECTIONS:-30}']
+    command:
+    - postgres
+    - -c
+    - shared_buffers=${QUEUE_SHARED_BUFFERS:-32MB}
+    - -c
+    - work_mem=${QUEUE_WORK_MEM:-2MB}
+    - -c
+    - maintenance_work_mem=${QUEUE_MAINTENANCE_WORK_MEM:-16MB}
+    - -c
+    - autovacuum_max_workers=${QUEUE_AUTOVACUUM_WORKERS:-1}
+    - -c
+    - max_connections=${QUEUE_MAX_CONNECTIONS:-30}
+    - -c
+    - max_wal_size=${QUEUE_MAX_WAL_SIZE:-128MB}
+    - -c
+    - min_wal_size=${QUEUE_MIN_WAL_SIZE:-32MB}
+    - -c
+    - temp_file_limit=${QUEUE_TEMP_FILE_LIMIT:-128MB}
     init: true
     restart: always
     mem_limit: ${QUEUE_MEM_LIMIT:-192m}
@@ -43,6 +60,9 @@ services:
       PYTHONDONTWRITEBYTECODE: '1'
       SEARCH_CATALOG_PATH: ${SEARCH_CATALOG_PATH:-/backend/catalog/serving.db}
       OPENSEARCH_URL: ${OPENSEARCH_URL:-}
+      POSTGRES_PASSWORD: ''
+      QUEUE_DATABASE_URL: ''
+      VK_GROUP_TOKEN: ''
     env_file:
     - ${DOMOFOMKA_ENV_FILE:-.env.dev}
     ports:
@@ -54,8 +74,14 @@ services:
     depends_on: {}
     healthcheck:
       test:
-      - CMD-SHELL
-      - curl -fsS http://localhost:${API_PORT:-8000}/version
+      - CMD
+      - python
+      - -c
+      - |
+        import http.client, os
+        client = http.client.HTTPConnection('127.0.0.1', int(os.environ.get('API_PORT', '8000')))
+        client.request('GET', '/version')
+        assert client.getresponse().status == 200
       interval: ${API_HEALTH_INTERVAL:-20s}
       timeout: ${API_HEALTH_TIMEOUT:-5s}
       retries: ${API_HEALTH_RETRIES:-5}

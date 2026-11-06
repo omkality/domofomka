@@ -73,8 +73,14 @@ services:
     depends_on: {}
     healthcheck:
       test:
-      - CMD-SHELL
-      - curl -fsS http://localhost:${API_PORT:-8000}/version
+      - CMD
+      - python
+      - -c
+      - |
+        import http.client, os
+        client = http.client.HTTPConnection('127.0.0.1', int(os.environ.get('API_PORT', '8000')))
+        client.request('GET', '/version')
+        assert client.getresponse().status == 200
       interval: ${API_HEALTH_INTERVAL:-20s}
       timeout: ${API_HEALTH_TIMEOUT:-5s}
       retries: ${API_HEALTH_RETRIES:-5}
