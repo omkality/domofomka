@@ -4,6 +4,7 @@ import base64
 import binascii
 import hashlib
 import json
+import re
 import sqlite3
 import zlib
 from collections.abc import Iterator
@@ -205,18 +206,12 @@ class Catalog:
         if not query.house or not query.words:
             return {"status": "not_found", "data": {}, "engine": "v2"}
         variants = [query]
-        words = query.words.split()
-        for i in range(len(words) - 1):
-            if words[i] in {"ново", "старо", "по"} and words[i + 1].isalpha():
-                variants.append(
-                    Query(
-                        query.raw,
-                        " ".join([*words[:i], words[i] + words[i + 1], *words[i + 2 :]]),
-                        query.house,
-                        query.entrance,
-                        query.kind,
-                    )
-                )
+        # Work before stop-word removal: "по" is also an ordinary preposition.
+        for match in re.finditer(r"\b(ново|старо|по)\s+([а-я]+)\b", query.raw):
+            joined = query.raw[: match.start()] + match[1] + match[2] + query.raw[match.end() :]
+            alternate = parse_query(joined)
+            if alternate.house == query.house:
+                variants.append(Query(query.raw, alternate.words, query.house, query.entrance, query.kind))
         indexed = [row for variant in variants for row in [*self.candidates(variant), *self.alias_candidates(variant)]]
         candidates = list({r["id"]: r for r in [*(candidates or []), *indexed]}.values())
         # Backend scores never decide house identity or permit dropping a city token.

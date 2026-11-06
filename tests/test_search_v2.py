@@ -130,17 +130,18 @@ def test_source_city_alias_retrieves_coded_identity_without_a_primary_street_doc
     assert catalog.resolve("Подольск Перерва 62к1")["building_id"] == "c"
 
 
-def test_split_street_prefix_preserves_the_explicit_city_and_house(catalog):
+@pytest.mark.parametrize(("query", "street"), [("Ново Орловская", "Новоорловская"), ("По речная", "Поречная")])
+def test_split_street_prefix_preserves_the_explicit_city_and_house(catalog, query, street):
     proper = {
         "id": "proper",
         "guid": "proper",
         "city": "Москва",
-        "street": "Новоорловская",
+        "street": street,
         "house": "6",
-        "display": "Москва, улица Новоорловская, дом 6",
+        "display": f"Москва, улица {street}, дом 6",
         "region": "77",
         "lineage": "москва",
     }
-    assert catalog.resolve("Москва Ново Орловская 6", [proper])["building_id"] == "proper"
-    assert catalog.resolve("Подольск Ново Орловская 6", [proper])["status"] == "not_found"
-    assert catalog.resolve("Москва Ново Орловская 7", [proper])["status"] == "not_found"
+    assert catalog.resolve(f"Москва {query} 6", [proper])["building_id"] == "proper"
+    assert catalog.resolve(f"Подольск {query} 6", [proper])["status"] == "not_found"
+    assert catalog.resolve(f"Москва {query} 7", [proper])["status"] == "not_found"
