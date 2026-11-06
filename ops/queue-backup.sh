@@ -5,6 +5,15 @@ umask 077
 cd "${DOMOFOMKA_ROOT:?Set DOMOFOMKA_ROOT}"
 project="${COMPOSE_PROJECT_NAME:-domofomka-dev}"
 env_file="${DOMOFOMKA_ENV_FILE:-.env.dev}"
+read_setting() {
+    local value
+    value=$(awk -F= -v wanted="$1" '$1==wanted {gsub(/["\r ]/,"",$2);print $2;exit}' "$env_file")
+    if [[ "$value" =~ ^[0-9]+$ ]]; then printf '%s' "$value"; else printf '%s' "$2"; fi
+}
+keep_days="${QUEUE_BACKUP_KEEP_DAYS:-$(read_setting QUEUE_BACKUP_KEEP_DAYS 3)}"
+reserve_bytes="${QUEUE_BACKUP_RESERVE_BYTES:-$(read_setting QUEUE_BACKUP_RESERVE_BYTES 268435456)}"
+[[ "$keep_days" =~ ^[0-9]+$ && "$reserve_bytes" =~ ^[0-9]+$ ]] || exit 2
+(( keep_days >= 1 && reserve_bytes >= 67108864 )) || exit 2
 backup_dir="$PWD/backups/queue"
 mkdir -p "$backup_dir"
 chmod 700 "$backup_dir"
@@ -14,15 +23,15 @@ compose=(docker compose -p "$project" --env-file "$env_file" -f docker-compose.y
 # Оставляем минимум две копии, даже если стенд долго не запускался.
 mapfile -t old < <(find "$backup_dir" -maxdepth 1 -name 'queue-*.dump' -type f -printf '%T@ %p\n' | sort -nr | tail -n +3 | cut -d' ' -f2-)
 for file in "${old[@]}"; do
-    if [[ $(find "$file" -mtime +"${QUEUE_BACKUP_KEEP_DAYS:-3}" -print) ]]; then rm -- "$file"; fi
+    if [[ $(find "$file" -mtime +"$keep_days" -print) ]]; then rm -- "$file"; fi
 done
 size=$("${compose[@]}" exec -T queue psql -U domofomka -d domofomka -Atc 'SELECT pg_database_size(current_database())')
 free=$(df -PB1 "$backup_dir" | awk 'NR==2 {print $4}')
-if (( free < size + ${QUEUE_BACKUP_RESERVE_BYTES:-268435456} )); then
+if (( free < size + reserve_bytes )); then
     echo 'Not enough free space for a queue backup' >&2
     exit 1
 fi
-file="$backup_dir/queue-$(date -u +%Y%m%dT%H%M%SZ).dump"
+file="$backup_dir/queue-$(date -u +%Y%m%dT%H%M%SZ)-$$.dump"
 check_db=""
 cleanup() {
     rm -f -- "$file.part"
