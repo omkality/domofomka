@@ -42,6 +42,17 @@ erDiagram
 
 ```mermaid
 flowchart LR
+    D[Push dev] --> CI[Тесты и сборка в GitHub Actions]
+    CI --> R[GHCR: проверенные образы]
+    R --> DEV[Автоматический dev]
+    R --> G[Ручной выпуск master с подтверждением]
+    G --> P[Prod: включим после принятия dev]
+```
+
+[CI/CD и откат](docs/cicd.md): сервер запускает готовые образы без сборки; базы и `.env` остаются на сервере.
+
+```mermaid
+flowchart LR
     A[Клиенты VK и DaData] --> P{Соединение с прокси доступно?}
     P -->|Да| T[SSH-туннель]
     T --> R[Tinyproxy в России]
