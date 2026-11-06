@@ -17,7 +17,7 @@ from pathlib import Path
 from pyreqwest.client import SyncClientBuilder
 
 from src.search.engine import Catalog, search_body
-from src.search.normalize import address_words, parse_query
+from src.search.normalize import address_words, legacy_house_matches, parse_query
 from src.services.codes import address_exists, street_types
 
 legacy_groups = []
@@ -90,7 +90,7 @@ def evaluate(record: dict):
         except Exception:
             backend = "catalog_after_index_failure"
     result = catalogs[0].resolve(q, candidates) if len(q) <= 500 else {"status": "invalid_query", "engine": "v2"}
-    if result["status"] == "not_found" and old:
+    if result["status"] == "not_found" and old and legacy_house_matches(q, old):
         result = {"status": "found", "address": old, "engine": "v1"}
     expected = parse_query(reference)
     ids = expected_ids.get((expected.words, expected.house), set())

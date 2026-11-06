@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import re
+import sqlite3
 import traceback
 
 import aiosqlite
@@ -31,9 +33,7 @@ street_types = [
 ]
 
 
-def address_exists(
-    msg: str, city: str, street: str, house: str, street_type: str
-) -> bool:
+def address_exists(msg: str, city: str, street: str, house: str, street_type: str) -> bool:
     msg = (
         msg.lower()
         .replace("ё", "е")
@@ -81,6 +81,19 @@ def street_or_city_exists(word: str, city: str, street: str) -> bool:
 
 
 async def get_data_from_db(msg: str) -> dict:
+    if msg:
+        from src.services.legacy_index import lookup
+
+        try:
+            indexed = await asyncio.to_thread(lookup, msg, settings.db_name, settings.legacy_index_path)
+            if indexed is not None:
+                return indexed
+        except (OSError, sqlite3.Error, ValueError, TypeError, KeyError):
+            logger.warning("Legacy candidate index unavailable; using source scan")
+    return await scan_data_from_db(msg)
+
+
+async def scan_data_from_db(msg: str) -> dict:
     result: dict = {}
 
     if not msg:
@@ -99,9 +112,7 @@ async def get_data_from_db(msg: str) -> dict:
 
     try:
         async with aiosqlite.connect(settings.db_name) as connection:
-            await connection.create_function(
-                "street_or_city_exists", 3, street_or_city_exists
-            )
+            await connection.create_function("street_or_city_exists", 3, street_or_city_exists)
 
             query = f"""
                 SELECT *
@@ -145,9 +156,7 @@ async def get_data_from_db(msg: str) -> dict:
                             f"{shortest_city}, {street_type} {street}, дом {house}",
                         )
                         result.setdefault("data", {})
-                        result["data"].setdefault(entrance, []).append(
-                            (code, code_type)
-                        )
+                        result["data"].setdefault(entrance, []).append((code, code_type))
 
         return result
 

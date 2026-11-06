@@ -46,3 +46,17 @@ def test_long_queries_are_rejected_without_truncating_to_another_house(monkeypat
         result = client.get("/api/v2/codes/msg", params={"message": "House 1 " + "x" * 50 + " House 99"})
         assert result.status_code == 200
         assert result.json()["status"] == "invalid_query"
+
+
+def test_v2_does_not_return_legacy_house_number_reinterpretation(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "search_catalog_path", str(tmp_path / "missing.db"))
+    monkeypatch.setattr(settings, "opensearch_url", None)
+
+    async def legacy(message):
+        return {"address": "Москва, улица 1-я Парковая, дом 2", "data": {"1": [["CODE", "test"]]}}
+
+    monkeypatch.setattr(v2, "get_data_from_db", legacy)
+    with TestClient(app) as client:
+        result = client.get("/api/v2/codes/msg", params={"message": "Москва Парковая 12"}).json()
+        assert result["status"] == "not_found"
+        assert result["fallback_rejected"] == "house_conflict"

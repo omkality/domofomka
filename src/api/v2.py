@@ -114,6 +114,17 @@ async def uncached_lookup(message: str) -> dict:
         logger.warning("V2 unavailable error=%s; using legacy search", type(exc).__name__)
         reason = "unavailable"
     result = await get_data_from_db(message)
+    if result.get("data"):
+        from src.search.normalize import legacy_house_matches
+
+        if not legacy_house_matches(message, result.get("address", "")):
+            return {
+                "status": "not_found",
+                "engine": "v2",
+                "data": {},
+                "fallback_reason": reason,
+                "fallback_rejected": "house_conflict",
+            }
     return dict(
         result,
         status="found" if result.get("data") else "not_found",

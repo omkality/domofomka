@@ -12,6 +12,10 @@ from tools.build_catalog import SCHEMA
     ("value", "words", "house", "entrance"),
     [
         ("Перерва, 62к1, подъезд 1", "перерва", "62к1", "1"),
+        ("Свободы 75 к2", "свободы", "75к2", None),
+        ("Куусинена 6 к 13", "куусинена", "6к13", None),
+        ("Барклая 16 с 4", "барклая", "16с4", None),
+        ("Болотниковская 2 к А", "болотниковская", "2ка", None),
         ("Дежнева17", "дежнева", "17", None),
         ("Свободы4одинцово", "свободы одинцово", "4", None),
         ("Южная 27дрожжино", "южная дрожжино", "27", None),
@@ -88,6 +92,7 @@ def test_no_wrong_house_or_neighbor_code(catalog):
 
 def test_numbers_are_not_fuzzy(catalog):
     assert catalog.resolve("Москва первая парковая 3")["building_id"] == "d"
+    assert catalog.resolve("Москва Парковая 3")["status"] == "not_found"
     assert catalog.resolve("Москва вторая парковая 3")["building_id"] == "e"
     assert catalog.resolve("Москва десятая парковая 3")["status"] == "not_found"
 

@@ -140,6 +140,8 @@ STOP = [
 ]
 STOP.extend(
     [
+        "ал",
+        "туп",
         "квартал",
         "микрорайон",
         "мкр",
@@ -185,6 +187,10 @@ def street_kind(value: str) -> str:
         "пл": "пл",
         "микрорайон": "мкр",
         "мкр": "мкр",
+        "аллея": "ал",
+        "ал": "ал",
+        "тупик": "туп",
+        "туп": "туп",
     }.get(value, value)
 
 
@@ -209,7 +215,8 @@ def parse_query(value: str) -> Query:
     value = re.sub(r"\b(\d+)(?=(?:марта|мая|года|лет)\b)", r"\1 ", value)
     value = ordinals(value, protect_street_numbers=True)
     kinds = re.findall(
-        r"\b(?:улица|ул|проспект|просп|пр-кт|переулок|пер|проезд|пр-д|шоссе|бульвар|набережная|площадь|микрорайон)\b",
+        r"\b(?:улица|ул|проспект|просп|пр-кт|переулок|пер|проезд|пр-д|шоссе|бульвар|"
+        r"набережная|площадь|микрорайон|аллея|ал|тупик|туп)\b",
         value,
     )
     kind = street_kind(kinds[-1]) if kinds else None
@@ -220,6 +227,8 @@ def parse_query(value: str) -> Query:
     value = re.sub(r"(?<![а-яa-z])корп(?:ус)?\.?\s*(?=\d)", "к", value)
     value = re.sub(r"(?<![а-яa-z])стр(?:оение)?\.?\s*(?=\d)", "с", value)
     value = re.sub(r"(?<=\d)[,;]\s*(?=[кс]\s*\d)", " ", value)
+    # Do not let a separated к/с become a house suffix and the component become a new house.
+    value = re.sub(r"(?<=\d)\s*([кс])\s*(?=\d|[а-я](?![а-я]))", r"\1", value)
     # Last number is the building: numeric street names (1905 года, 1-я) stay in words.
     candidates = list(
         re.finditer(
@@ -236,3 +245,9 @@ def parse_query(value: str) -> Query:
     house = house_key(match[0])
     words = address_words(unmark(value[: match.start()] + " " + value[match.end() :]))
     return Query(unmark(value), words, house, entrance, kind)
+
+
+def legacy_house_matches(message: str, address: str) -> bool:
+    requested = parse_query(message).house
+    returned = house_key(address.rsplit(", дом ", 1)[-1])
+    return not requested or requested == returned

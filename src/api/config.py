@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     api_host: str
     api_port: int
     db_name: str
+    legacy_index_path: str = '/backend/catalog/legacy-index.db'
     dadata_token: str
     dadata_proxy_url: str | None = None
     search_catalog_path: str = "/backend/catalog/serving.db"

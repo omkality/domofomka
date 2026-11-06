@@ -235,6 +235,9 @@ class Catalog:
                 # compatibility fallback preserve v1 until the row is reviewed.
                 continue
             street_words = address_words(row["street"]).split()
+            # A missing ordinal must not silently select another named street.
+            if any(part.isdigit() and part not in query.words.split() for part in street_words):
+                continue
             if not any(
                 (word == part if any(c.isdigit() for c in word) else ratio(word, part) / 100 >= self.minimum_similarity)
                 for variant in variants

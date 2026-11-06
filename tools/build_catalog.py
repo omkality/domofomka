@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -23,6 +24,14 @@ CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT);
 """
 
 
+def source_street(value: str, city: str) -> str:
+    # Only remove an explicit repeat of this source row's city, never another locality.
+    suffix = re.search(r"\s*\(([^()]+)\)\s*$", value)
+    if suffix and text(suffix[1]) == text(city):
+        value = value[: suffix.start()]
+    return text(value)
+
+
 def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict) -> None:
     source = sqlite3.connect(f"file:{legacy.resolve().as_posix()}?mode=ro", uri=True)
     # Stream grouped rows: all source IDs retained, but identical codes merge.
@@ -35,7 +44,7 @@ def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict) -> None:
         if raw != last_raw:
             key = (
                 text(row["city"] or ""),
-                text(row["street"] or ""),
+                source_street(row["street"] or "", row["city"] or ""),
                 house_key(row["house"] or ""),
                 street_kind(row["street_type"] or ""),
             )
@@ -74,6 +83,10 @@ def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict) -> None:
                 )
             db.execute("INSERT OR IGNORE INTO aliases VALUES(?,?,?,?)", (building_id, city, street, house))
             last_key = key
+        db.execute(
+            "INSERT OR IGNORE INTO aliases VALUES(?,?,?,?)",
+            (building_id, text(row["city"]), text(row["street"]), key[2]),
+        )
         db.execute(
             "INSERT OR IGNORE INTO codes VALUES(?,?,?,?)",
             (building_id, str(row["entrance"]), str(row["code_type"]), str(row["code"])),
@@ -139,7 +152,7 @@ def build(legacy: Path, regions: Path, output: Path):
         "linked_groups": 0,
         "unresolved_groups": 0,
         "ambiguous_groups": 0,
-        "normalization_schema": 2,
+        "normalization_schema": 3,
     }
     files = [p for p in sorted(regions.glob("gar-*.db")) if ".building." not in p.name]
     for region in files:
@@ -191,7 +204,7 @@ def relink(legacy: Path, output: Path) -> None:
     stats["unique_codes"] = db.execute("SELECT count(*) FROM codes").fetchone()[0]
     stats["buildings_with_codes"] = db.execute("SELECT count(distinct building_id) FROM codes").fetchone()[0]
     stats["identity_schema"] = 2
-    stats["normalization_schema"] = 2
+    stats["normalization_schema"] = 3
     db.execute("UPDATE metadata SET value=? WHERE key='build'", (json.dumps(stats),))
     db.commit()
     db.close()
@@ -213,7 +226,7 @@ if __name__ == "__main__":
             index_streets(db)
             stats = json.loads(db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()[0])
             stats["street_documents"] = db.execute("SELECT count(*) FROM streets").fetchone()[0]
-            stats["normalization_schema"] = 2
+            stats["normalization_schema"] = 3
             db.execute("UPDATE metadata SET value=? WHERE key='build'", (json.dumps(stats),))
         print(json.dumps({"keys_refreshed": True}), flush=True)
     elif a.relink_only:
