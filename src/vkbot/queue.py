@@ -52,6 +52,9 @@ ALTER TABLE bot_outbox ADD COLUMN IF NOT EXISTS completed_at DOUBLE PRECISION;
 ALTER TABLE bot_message_context ADD COLUMN IF NOT EXISTS updated_at DOUBLE PRECISION
  NOT NULL DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS bot_inbox_completed ON bot_inbox(group_id,completed_at) WHERE status='done';
+CREATE INDEX IF NOT EXISTS bot_inbox_unfinished_peer ON bot_inbox(group_id,peer_id) WHERE status<>'done';
+CREATE INDEX IF NOT EXISTS bot_outbox_unfinished_peer ON bot_outbox(group_id,peer_id) WHERE status<>'done';
+CREATE INDEX IF NOT EXISTS bot_context_expiry ON bot_message_context(group_id,updated_at);
 """
 
 
