@@ -34,6 +34,8 @@ def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
 
 
 def validate_manifest(value: dict, target: str) -> dict:
+    if value.get("runtime", "v2") != "v2":
+        raise ValueError("Legacy runtime is only allowed in an administrator-frozen baseline")
     if value.get("environment") != target or not SHA.fullmatch(value.get("revision", "")):
         raise ValueError("Invalid release environment or commit")
     for service, pattern in IMAGES.items():
@@ -77,16 +79,21 @@ class Deployment:
 
     def compose(self, release: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess:
         manifest = json.loads((Path(release) / "release.json").read_text())
+        legacy = manifest.get("runtime") == "legacy-v1"
+        snapshot = Path(release) / "legacy-snapshot"
+        env_file = snapshot / ".env" if legacy else self.env_file
         env = dict(
             os.environ,
             APP_ROOT=str(self.root),
-            DEPLOY_ENV_FILE=str(self.env_file),
+            DEPLOY_ENV_FILE=str(env_file),
             API_IMAGE=manifest["api"],
             BOT_IMAGE=manifest["bot"],
             APP_REVISION=manifest["revision"],
             DEPLOY_GROUP_ID=self.group,
             API_PUBLISH_PORT=self.port,
+            LEGACY_SNAPSHOT_ROOT=str(snapshot),
         )
+        overlays = ["-f", str(Path(release) / "compose.legacy-v1.yml")] if legacy else []
         return run(
             [
                 "docker",
@@ -94,9 +101,10 @@ class Deployment:
                 "-p",
                 self.project,
                 "--env-file",
-                str(self.env_file),
+                str(env_file),
                 "-f",
                 str(Path(release) / "compose.deploy.yml"),
+                *overlays,
                 *args,
             ],
             env=env,
@@ -120,6 +128,28 @@ class Deployment:
     def free_space(self, extra: int = 0) -> None:
         if shutil.disk_usage(self.root).free < self.reserve + extra:
             raise RuntimeError("Insufficient free disk; running release unchanged")
+
+    def verify_legacy_retry(self, current: Path) -> None:
+        if json.loads((current / "release.json").read_text()).get("runtime") != "legacy-v1":
+            return
+        command = ["docker", "exec", f"{self.project}-queue-1", "psql", "-U", "domofomka", "-d", "domofomka", "-Atc"]
+        exists = run(
+            command + ["SELECT to_regclass('public.bot_inbox') IS NOT NULL"], capture_output=True
+        ).stdout.strip()
+        if exists == "f":
+            return
+        if exists != "t":
+            raise ValueError("Cannot verify the queue before leaving legacy runtime")
+        pending = run(
+            command
+            + [
+                "SELECT (SELECT count(*) FROM bot_inbox WHERE group_id=" + self.group + " AND status<>'done')+"
+                "(SELECT count(*) FROM bot_outbox WHERE group_id=" + self.group + " AND status<>'done')"
+            ],
+            capture_output=True,
+        ).stdout.strip()
+        if not pending.isdigit() or int(pending):
+            raise RuntimeError("Unfinished v2 work after legacy rollback; reconcile deliveries before retrying")
 
     def catalog_revision(self, database: str) -> str:
         return run(
@@ -273,14 +303,22 @@ class Deployment:
         self.set_catalog_revision(target)
 
     def check(self, release: Path) -> None:
+        manifest = json.loads((Path(release) / "release.json").read_text())
+        legacy = manifest.get("runtime") == "legacy-v1"
         # Выполняется внутри готового API, без зависимости хоста от Python-пакетов.
         # Прямая проверка каталога выявляет ошибку, которую fallback v1 мог бы скрыть.
         probe = """
 import http.client,json,os
+c=http.client.HTTPConnection('127.0.0.1',int(os.environ.get('API_PORT','8000')),timeout=10)
+c.request('GET','/version'); r=c.getresponse(); assert r.status==200
+info=json.loads(r.read()); assert info['name']=='domofomka'
+"""
+        if legacy:
+            probe += "assert info['version']=='1.5.6'\n"
+        else:
+            probe += """
 from src.api.config import settings
 from src.api.v2 import get_catalog
-c=http.client.HTTPConnection('127.0.0.1',int(os.environ.get('API_PORT','8000')),timeout=10)
-c.request('GET','/version'); r=c.getresponse(); assert r.status==200; assert json.loads(r.read())['name']=='domofomka'
 if settings.search_backend=='postgres':
     catalog=get_catalog()
     assert catalog.resolve('мичурина 1а')['status']=='found'
@@ -306,6 +344,28 @@ from src.vkbot.runtime import Runtime
 r=Runtime(settings)
 with r.store.connect() as db:
     assert db.execute('SELECT NOT pg_try_advisory_lock(20261021,%s) AS active',(r.store.group_id,)).fetchone()['active']
+"""
+        if legacy:
+            probe_bot = """
+import asyncio,os
+from redis.asyncio import Redis
+from vk_api import VkApi
+from src.network import network_settings
+from src.vkbot.config import settings
+from src.vkbot.http import TimeoutSession
+assert settings.vk_group_id==os.environ['EXPECTED_VK_GROUP_ID']
+with TimeoutSession() as session:
+    VkApi(token=settings.vk_group_token,api_version='5.199',session=session).method(
+        'groups.getLongPollServer',{'group_id':settings.vk_group_id})
+async def redis_ready():
+    client=Redis(host=settings.redis_host,port=settings.redis_port,password=settings.redis_password,
+        socket_connect_timeout=network_settings.redis_connect_timeout_seconds,
+        socket_timeout=network_settings.redis_socket_timeout_seconds)
+    try:
+        assert await client.ping()
+    finally:
+        await client.aclose()
+asyncio.run(redis_ready())
 """
         self.compose(
             release,
@@ -347,6 +407,7 @@ with r.store.connect() as db:
         previous = json.loads(self.state_path.read_text())
         manifest = validate_manifest(json.loads((release / "release.json").read_text()), self.target)
         self.verify_environment()
+        self.verify_legacy_retry(Path(previous["current"]))
         self.free_space()
         for service in ("api", "bot"):
             cached = subprocess.run(
@@ -421,11 +482,22 @@ with r.store.connect() as db:
         self.cleanup()
         sys.stdout.write(f"Healthy {self.target} release {manifest['revision']}\n")
 
-    def rollback(self) -> None:
+    def rollback(self, legacy_v1: bool = False) -> None:
         state = json.loads(self.state_path.read_text())
+        if legacy_v1:
+            baseline = self.home / "releases/baseline"
+            if self.target != "prod":
+                raise ValueError("Legacy rollback is only allowed on prod")
+            target = json.loads((baseline / "release.json").read_text())
+            if target.get("runtime") != "legacy-v1" or str(baseline) == state["current"]:
+                raise ValueError("No distinct frozen legacy baseline")
+            if state.get("catalog_transition"):
+                raise ValueError("Complete the catalog transition before selecting legacy runtime")
+            state["previous"] = str(baseline)
         if not state.get("previous"):
             raise ValueError("No previous release")
         self.verify_environment()
+        self.verify_legacy_retry(Path(state["current"]))
         catalog = state.get("catalog_transition")
         reverse = state.get("catalog_direction", "forward") == "forward"
         journal = self.home / "transaction.json"
@@ -487,6 +559,9 @@ with r.store.connect() as db:
             if str(path) in keep or not path.is_dir():
                 continue
             manifest = json.loads((path / "release.json").read_text())
+            if manifest.get("runtime") == "legacy-v1":
+                # One frozen first-release fallback; later v2 deployments must not erase its env/source.
+                continue
             for service in ("api", "bot"):
                 image = manifest[service]
                 if image not in protected and IMAGES[service].fullmatch(image):
@@ -508,7 +583,10 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--environment", choices=TARGETS, required=True)
     parser.add_argument("--release", type=Path)
+    parser.add_argument("--legacy-v1", action="store_true")
     args = parser.parse_args()
+    if args.legacy_v1 and args.action != "rollback":
+        raise ValueError("Legacy selection is only valid for rollback")
     deployment = Deployment(args.root, args.environment)
 
     def interrupted(signum: int, frame: Any) -> None:
@@ -520,7 +598,7 @@ def main() -> None:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         deployment.recover_pending()
         if args.action == "rollback":
-            deployment.rollback()
+            deployment.rollback(args.legacy_v1)
         else:
             deployment.deploy(args.release.resolve())
 

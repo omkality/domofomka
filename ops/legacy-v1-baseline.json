@@ -1,0 +1,29 @@
+{
+  "revision": "367563c1ff3c9a79d3e38cdecd0398d4d061aedd",
+  "version": "1.5.6",
+  "files": {
+    "pyproject.toml": "10d3f3ce2e30748ca2d1aee3661d69609f861d3f90012ce25ab4a726617286e3",
+    "src/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/api/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/api/app.py": "5322b6e417fc7af62bcf0d59fba8a9ffde96f8d27edafce159256a4a7f31874b",
+    "src/api/config.py": "9b7366baa5fa844e22e46bbf55a9d9840334ec340578d1c4003802b40710a3d3",
+    "src/api/routes.py": "bfaf9c804c5ff75524dd8f1d6bf57938316b4202ae253c0ebb40a99d3735cf5f",
+    "src/network.py": "f85837bd1ce4242a7fcb67a2ab824779ee6ee959f6ee5a53eafd0703dca7a01c",
+    "src/services/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/services/codes.py": "ca8bd7d3fe437d58cde3a839fa99a18c5836f180f599238216fd60204769b2cf",
+    "src/services/dadata_client.py": "c0b39a6acba572a1ad54f2b64aae963339b9cb727600d45a527a09721b4689d1",
+    "src/services/outbound.py": "478ed454ae20297467b17c50ae6067946e33786c11bc13fd33fd91b7689e2ca1",
+    "src/storages/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/storages/interfaces.py": "3991618baf5e7a5196cc40445d642c58fb12eb77d619c96c117cc2c5f0892b27",
+    "src/storages/redis.py": "a917be4fffdff86b98732985860d2289d5a67d77995e705d89b08685d0c980bf",
+    "src/version.py": "1042a49044bc38835b5f28f4a957dbfc3345d8bc39bf4536e35f6a72340d56df",
+    "src/vkbot/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "src/vkbot/config.py": "efc2bb92c820132eccaafbccb64a4a0fbea7601fed6bccb3bff0b06a53bc5b75",
+    "src/vkbot/handlers.py": "d03b966824f64a66f672d909979a371c5e6f579bcd826d4276999010d6d4d431",
+    "src/vkbot/http.py": "1e6078fe1efa43b42b87eea525859fb4bc800b9bd84604004bcd0c849348f9ee",
+    "src/vkbot/keyboard.py": "667f4e6491800e15621f6bbb9fccae8b011dee50eddafaaa4197ccd7cf08af8e",
+    "src/vkbot/main.py": "e36b38844fd949b370065099fdf2db0c542b54299b55afc05859cb5bdeefd300",
+    "start_message.txt": "7efb43be8a6ec9c3fbe00d5d93e38a18df37b94ffd6741b9e3ee47b69a79b723",
+    "uv.lock": "a9e0e82a8d20747076bda82f4315b1a3771dc918f0d76fd9a4dadca3951e7c73"
+  }
+}

@@ -10,6 +10,8 @@ from pathlib import Path
 
 def main():
     action = os.environ.get("DEPLOY_ACTION", "deploy")
+    if action not in {"deploy", "rollback", "rollback-legacy"}:
+        raise ValueError("Unsupported deployment action")
     args = [
         "ssh",
         "-i",
@@ -31,7 +33,7 @@ def main():
         "root@" + os.environ["DEPLOY_HOST"],
         action,
     ]
-    if action == "rollback":
+    if action in {"rollback", "rollback-legacy"}:
         subprocess.run(args, check=True)
         return
     manifest = {

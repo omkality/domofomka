@@ -8,6 +8,12 @@ on:
         options: [dev, prod]
         default: dev
         required: true
+      restore:
+        description: Previous release or the frozen v1 baseline (prod only)
+        type: choice
+        options: [previous, legacy-v1]
+        default: previous
+        required: true
 permissions:
   contents: read
 jobs:
@@ -18,9 +24,11 @@ jobs:
           REF: ${{ github.ref }}
           TARGET: ${{ inputs.environment }}
           PROD_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
+          RESTORE: ${{ inputs.restore }}
         run: |
           if [ "$TARGET" = dev ]; then test "$REF" = refs/heads/dev;
           else test "$REF" = refs/heads/master && test "$PROD_ENABLED" = true; fi
+          if [ "$RESTORE" = legacy-v1 ]; then test "$TARGET" = prod; fi
   rollback:
     needs: policy
     runs-on: ubuntu-latest
@@ -38,7 +46,7 @@ jobs:
           KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           HOST_KEYS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_ACTION: rollback
+          DEPLOY_ACTION: ${{ inputs.restore == 'legacy-v1' && 'rollback-legacy' || 'rollback' }}
         run: |
           umask 077
           export DEPLOY_KEY_FILE="$RUNNER_TEMP/deploy-key"

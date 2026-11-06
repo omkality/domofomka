@@ -61,11 +61,22 @@ def main() -> None:
     args = parser.parse_args()
     home = args.root / ".ci"
     action = os.environ.get("SSH_ORIGINAL_COMMAND", "")
-    if action == "rollback":
+    if action in {"rollback", "rollback-legacy"}:
+        if action == "rollback-legacy" and args.environment != "prod":
+            raise ValueError("Legacy rollback is only allowed on prod")
         state = json.loads((home / "state.json").read_text())
         script = Path(state["current"]) / "ops/deploy.py"
         subprocess.run(
-            ["python3", str(script), "rollback", "--root", str(args.root), "--environment", args.environment],
+            [
+                "python3",
+                str(script),
+                "rollback",
+                "--root",
+                str(args.root),
+                "--environment",
+                args.environment,
+                *(["--legacy-v1"] if action == "rollback-legacy" else []),
+            ],
             check=True,
         )
         return
