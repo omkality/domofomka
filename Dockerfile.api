@@ -11,4 +11,4 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --group api
 
 COPY src/ ./src/
-COPY codes.db ./codes.db
+# Исходная база v1 подключается Compose только для чтения; не дублируем её в образе.
