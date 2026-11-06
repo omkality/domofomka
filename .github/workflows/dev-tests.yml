@@ -39,3 +39,11 @@ jobs:
       - run: uv sync --frozen --all-groups
       - run: uv run ruff check --no-cache src tests tools
       - run: uv run python -m pytest -q -p no:cacheprovider
+      - name: Build runtime images without development dependencies
+        run: |
+          docker build -t domofomka-api-check -f Dockerfile.api .
+          docker build -t domofomka-bot-check -f Dockerfile.vkbot .
+      - name: Check runtime imports
+        run: |
+          docker run --rm --network none -e API_HOST -e API_PORT -e DB_NAME -e DADATA_TOKEN domofomka-api-check uv run --frozen python -c 'import src.api.app; import granian; from src.search.postgres import PostgresCatalog'
+          docker run --rm --network none -e VK_GROUP_TOKEN -e VK_GROUP_ID -e EXPECTED_VK_GROUP_ID -e QUEUE_DATABASE_URL -e CACHE_EXPIRE_TIME -e ANTI_SPAM_TIME -e DOMOFOMKA_API_HOST -e DOMOFOMKA_API_PORT domofomka-bot-check uv run --frozen python -c 'import src.vkbot.main'
