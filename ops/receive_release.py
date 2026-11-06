@@ -13,8 +13,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from urllib.request import Request, urlopen
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 FILES = {"compose.deploy.yml", "ops/deploy.py", "release.json"}
 
