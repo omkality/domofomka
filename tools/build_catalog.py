@@ -7,6 +7,11 @@ import re
 import sqlite3
 from pathlib import Path
 
+from src.search.localities import (
+    load_facts,
+    match as locality_match,
+    urban_city,
+)
 from src.search.normalize import address_words, house_key, street_kind, text
 from tools.refresh_aliases import refresh
 
@@ -32,7 +37,7 @@ def source_street(value: str, city: str) -> str:
     return text(value)
 
 
-def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict) -> None:
+def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict, locality_facts: dict | None = None) -> None:
     source = sqlite3.connect(f"file:{legacy.resolve().as_posix()}?mode=ro", uri=True)
     # Stream grouped rows: all source IDs retained, but identical codes merge.
     last_key, building_id = None, None
@@ -52,12 +57,12 @@ def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict) -> None:
         if key != last_key:
             city, street, house, kind = key
             candidates = db.execute(
-                "SELECT id,city_key,lineage,display FROM buildings WHERE city_key=? AND street_key=? AND house=? AND guid IS NOT NULL",
+                "SELECT id,city_key,lineage,display,region FROM buildings WHERE city_key=? AND street_key=? AND house=? AND guid IS NOT NULL",
                 (city, street, house),
             ).fetchall()
             if not candidates:
                 candidates = db.execute(
-                    "SELECT id,city_key,lineage,display FROM buildings WHERE street_key=? AND house=? AND guid IS NOT NULL",
+                    "SELECT id,city_key,lineage,display,region FROM buildings WHERE street_key=? AND house=? AND guid IS NOT NULL",
                     (street, house),
                 ).fetchall()
             city_words = set(address_words(city).split())
@@ -67,6 +72,16 @@ def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict) -> None:
                 if (c[1] == city or (city_words and city_words <= set(address_words(c[2]).split())))
                 and street_kind(c[3].split(", ", 1)[1].split(" ", 1)[0]) == kind
             ]
+            if not exact and locality_facts:
+                constraint = urban_city(row["city"] or "")
+                exact = [
+                    c
+                    for c in candidates
+                    if locality_match(constraint, c[1], c[4], c[2], locality_facts)
+                    and street_kind(c[3].split(", ", 1)[1].split(" ", 1)[0]) == kind
+                ]
+                if len(exact) == 1:
+                    stats["municipal_linked_groups"] = stats.get("municipal_linked_groups", 0) + 1
             if len(exact) == 1:
                 building_id = exact[0][0]
                 resolution = "gar_exact"
@@ -138,7 +153,7 @@ def index_streets(db: sqlite3.Connection) -> None:
     refresh(db)
 
 
-def build(legacy: Path, regions: Path, output: Path):
+def build(legacy: Path, regions: Path, output: Path, locality_facts: Path | None = None):
     output.parent.mkdir(parents=True, exist_ok=True)
     work = output.with_suffix(".building.db")
     if work.exists():
@@ -152,8 +167,11 @@ def build(legacy: Path, regions: Path, output: Path):
         "linked_groups": 0,
         "unresolved_groups": 0,
         "ambiguous_groups": 0,
-        "normalization_schema": 3,
+        "normalization_schema": 4 if locality_facts else 3,
     }
+    if locality_facts:
+        with locality_facts.open("rb") as stream:
+            stats["locality_facts_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
     files = [p for p in sorted(regions.glob("gar-*.db")) if ".building." not in p.name]
     for region in files:
         db.execute("ATTACH DATABASE ? AS region", (str(region.resolve()),))
@@ -166,7 +184,7 @@ def build(legacy: Path, regions: Path, output: Path):
         "CREATE INDEX building_lookup ON buildings(street_key,house); CREATE INDEX building_street ON buildings(city_key,street_key,house);"
     )
     normalize_keys(db)
-    link_codes(db, legacy, stats)
+    link_codes(db, legacy, stats, load_facts(locality_facts))
     index_streets(db)
     stats["street_documents"] = db.execute("SELECT count(*) FROM streets").fetchone()[0]
     stats["unique_codes"] = db.execute("SELECT count(*) FROM codes").fetchone()[0]
@@ -182,11 +200,11 @@ def build(legacy: Path, regions: Path, output: Path):
     print(json.dumps(stats), flush=True)
 
 
-def relink(legacy: Path, output: Path) -> None:
+def relink(legacy: Path, output: Path, locality_facts: Path | None = None, source_catalog: Path | None = None) -> None:
     import shutil
 
     work = output.with_suffix(".relink.db")
-    shutil.copyfile(output, work)
+    shutil.copyfile(source_catalog or output, work)
     db = sqlite3.connect(work)
     stats = json.loads(db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()[0])
     with legacy.open("rb") as source:
@@ -198,13 +216,17 @@ def relink(legacy: Path, output: Path) -> None:
     for k in ["legacy_rows", "linked_groups", "unresolved_groups", "ambiguous_groups"]:
         stats[k] = 0
     normalize_keys(db)
-    link_codes(db, legacy, stats)
+    stats.pop("municipal_linked_groups", None)
+    link_codes(db, legacy, stats, load_facts(locality_facts))
     index_streets(db)
     stats["street_documents"] = db.execute("SELECT count(*) FROM streets").fetchone()[0]
     stats["unique_codes"] = db.execute("SELECT count(*) FROM codes").fetchone()[0]
     stats["buildings_with_codes"] = db.execute("SELECT count(distinct building_id) FROM codes").fetchone()[0]
     stats["identity_schema"] = 2
-    stats["normalization_schema"] = 3
+    stats["normalization_schema"] = 4 if locality_facts else 3
+    if locality_facts:
+        with locality_facts.open("rb") as stream:
+            stats["locality_facts_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
     db.execute("UPDATE metadata SET value=? WHERE key='build'", (json.dumps(stats),))
     db.commit()
     db.close()
@@ -218,6 +240,8 @@ if __name__ == "__main__":
     p.add_argument("--regions", type=Path, default=Path("artifacts/catalog"))
     p.add_argument("--output", type=Path, default=Path("artifacts/search/catalog.db"))
     p.add_argument("--relink-only", action="store_true")
+    p.add_argument("--locality-facts", type=Path)
+    p.add_argument("--source-catalog", type=Path, help="Immutable source for a separate relink candidate")
     p.add_argument("--refresh-keys-only", action="store_true")
     a = p.parse_args()
     if a.refresh_keys_only:
@@ -226,10 +250,10 @@ if __name__ == "__main__":
             index_streets(db)
             stats = json.loads(db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()[0])
             stats["street_documents"] = db.execute("SELECT count(*) FROM streets").fetchone()[0]
-            stats["normalization_schema"] = 3
+            stats["normalization_schema"] = max(3, stats.get("normalization_schema", 3))
             db.execute("UPDATE metadata SET value=? WHERE key='build'", (json.dumps(stats),))
         print(json.dumps({"keys_refreshed": True}), flush=True)
     elif a.relink_only:
-        relink(a.legacy, a.output)
+        relink(a.legacy, a.output, a.locality_facts, a.source_catalog)
     else:
-        build(a.legacy, a.regions, a.output)
+        build(a.legacy, a.regions, a.output, a.locality_facts)

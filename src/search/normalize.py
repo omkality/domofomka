@@ -217,12 +217,18 @@ def parse_query(value: str) -> Query:
     value = re.sub(r"(?<=\d)(?=[а-яa-z]{3,}\b)", " ", value)
     value = re.sub(r"\b(\d+)(?=(?:марта|мая|года|лет)\b)", r"\1 ", value)
     value = ordinals(value, protect_street_numbers=True)
-    kinds = re.findall(
-        r"\b(?:улица|ул|проспект|просп|пр-кт|переулок|пер|проезд|пр-д|шоссе|бульвар|"
-        r"набережная|площадь|микрорайон|аллея|ал|тупик|туп)\b",
-        value,
+    markers = list(
+        re.finditer(
+            r"\b(?:улица|ул|проспект|просп|пр-кт|переулок|пер|проезд|пр-д|шоссе|бульвар|"
+            r"набережная|площадь|микрорайон|аллея|ал|тупик|туп)\b",
+            value,
+        )
     )
-    kind = street_kind(kinds[-1]) if kinds else None
+    kind = street_kind(markers[-1][0]) if markers else None
+    if markers:
+        from src.search.localities import clean_structured_prefix
+
+        value = clean_structured_prefix(value, markers[-1].start())
     entrance_match = re.search(r"(?:под[ъь]?езд|под[.]|пд[.]?)\s*№?\s*(\d+)", value)
     entrance = entrance_match[1] if entrance_match else None
     value = re.sub(r"(?:под[ъь]?езд|под[.]|пд[.]?)\s*№?\s*\d+", " ", value)
