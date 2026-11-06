@@ -193,3 +193,5 @@ OpenSearch сохраняет его для fuzzy. Это конкретный �
 [Агрегаты этого цикла](search-lexical-summary.json) не содержат переписок или кодов домофонов.
 Профили и анализаторы заданы в `tools/search_lexical_profiles.py`, построитель запросов —
 в `tools/benchmark_native_search.py`, оценка контекста — в `tools/review_search_differences.py`.
+
+Продолжение: [сравнение BM25 и boolean внутри OpenSearch](search-scoring-review.md).

@@ -1,0 +1,1560 @@
+{
+  "date": "2026-11-07",
+  "release_approved": false,
+  "runtime_strategy_changed": false,
+  "cases": {
+    "records": 1550,
+    "unique_query_texts": 1246,
+    "context_labeled": 193,
+    "note": "Регрессионные страты с повторяющимися запросами; это не независимая временная выборка и не оценка универсальной точности."
+  },
+  "catalog_sha256": "f8f351f58188210ea2d352902ee4416e740835f3c4f6c8931a2bedc4a3c00495",
+  "source_sha256": {
+    "compose.search.yml": "5031b4672bb18668d71cb19488478d5735e7eed6c166ed5022700a0adf6db9c3",
+    "src/search/__init__.py": "3babb60c72c06d43967492a96c801d836a4da4576ea26bae72db71297e61f311",
+    "src/search/catalog_update.py": "3e97d26793fa34d47ffd7688c0168ed3a401a0ca991cdabea282410018563933",
+    "src/search/engine.py": "0cb93862beeb8b77ab30c3ca15ffafe265ade494ac730d54cc7249df069a7148",
+    "src/search/localities.py": "d8b46bc27a850ebeef1842ddaca4c7926d8096a34e03eddf627ae40c023612fb",
+    "src/search/normalize.py": "819978c6ce3e42d4d06a9286eb3f710d9fca67faf721bacd4c0ff0c229e5d1e5",
+    "src/search/postgres.py": "7f930080f0e32237bdbcf0798fcf5ac9d79d76b62c02e95bc9cc39dd429d5f1e",
+    "src/services/codes.py": "1e2e939ab19af744b4b2186b2bf2d93ddc7f639c1c48b81366c0b028da924c99",
+    "tools/benchmark_native_search.py": "dc1a23a2c5684882eece34acc468129020164ec71b40184c97eb6387b2c8c6e1",
+    "tools/compare_postgres_catalog.py": "c29b410805382589de76d34d74e8fbc506a0c1becfe52f9afa5e3c9effb12cd4",
+    "tools/evaluate_search.py": "7e897db2d3f3cdc09265348d2ab57bc38d96f09d8cddd342559afd804835def0",
+    "tools/quality_suite.py": "2c62c15bf5547fee9ffaf98b93f259a80513d652072d42cf7d967a4a4665a619",
+    "tools/search_lexical_profiles.py": "791a663a0b82ac1b28aadf70cb023d3074319a81f9bd672bad4cba24f647cbab",
+    "uv.lock": "883c7bd3de81f797f8e2906c388283f6343c0c5caa2896d4e8dd170c1172a880"
+  },
+  "experiments": [
+    {
+      "name": "b075",
+      "index_similarity": {},
+      "engine_version": "3.3.2",
+      "input_sha256": "bf8a6d676e629872cee762185272289bfef229b5097b33523a2520801f951386",
+      "results": [
+        {
+          "variant": "catalog",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 381,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 366,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "hybrid",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 403,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 366,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.strict-AUTO-r1.0",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 499,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 405,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.strict-AUTO-r0.9",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 499,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 405,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.strict-AUTO-r0.8",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 499,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 405,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.roles-AUTO-r1.0",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 439,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.roles-AUTO-r0.9",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 439,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.roles-AUTO-r0.8",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 439,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        }
+      ],
+      "context_scores": {
+        "scoring.strict-AUTO-r1.0": {
+          "labeled": 193,
+          "literal_conflicts": 1,
+          "with_observed_target": 32,
+          "target_offered": 24,
+          "target_code_offered": 24,
+          "other_automatic_target": 1
+        },
+        "scoring.strict-AUTO-r0.9": {
+          "labeled": 193,
+          "literal_conflicts": 1,
+          "with_observed_target": 32,
+          "target_offered": 25,
+          "target_code_offered": 25,
+          "other_automatic_target": 0
+        },
+        "scoring.strict-AUTO-r0.8": {
+          "labeled": 193,
+          "literal_conflicts": 1,
+          "with_observed_target": 32,
+          "target_offered": 25,
+          "target_code_offered": 25,
+          "other_automatic_target": 0
+        },
+        "scoring.roles-AUTO-r1.0": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 28,
+          "target_code_offered": 28,
+          "other_automatic_target": 1
+        },
+        "scoring.roles-AUTO-r0.9": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 29,
+          "target_code_offered": 29,
+          "other_automatic_target": 0
+        },
+        "scoring.roles-AUTO-r0.8": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 29,
+          "target_code_offered": 29,
+          "other_automatic_target": 0
+        },
+        "catalog": {
+          "labeled": 193,
+          "literal_conflicts": 3,
+          "with_observed_target": 32,
+          "target_offered": 7,
+          "target_code_offered": 7,
+          "other_automatic_target": 7
+        },
+        "hybrid": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 11,
+          "target_code_offered": 11,
+          "other_automatic_target": 5
+        }
+      },
+      "route_counts": {
+        "catalog": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 381
+        },
+        "hybrid": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 403
+        },
+        "scoring.strict-AUTO-r1.0": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 1,
+          "possible_typo:reference_v2": 405
+        },
+        "scoring.strict-AUTO-r0.9": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 1,
+          "possible_typo:reference_v2": 405
+        },
+        "scoring.strict-AUTO-r0.8": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 1,
+          "possible_typo:reference_v2": 405
+        },
+        "scoring.roles-AUTO-r1.0": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 439
+        },
+        "scoring.roles-AUTO-r0.9": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 439
+        },
+        "scoring.roles-AUTO-r0.8": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 439
+        }
+      },
+      "raw_summary_sha256": "8c690cc87e3e6140f2901531baad3dbad3d89c2635e98c98acd83be5c1f97949"
+    },
+    {
+      "name": "b0",
+      "index_similarity": {
+        "default": {
+          "type": "BM25",
+          "b": "0.0",
+          "k1": "1.2"
+        }
+      },
+      "engine_version": "3.3.2",
+      "input_sha256": "bf8a6d676e629872cee762185272289bfef229b5097b33523a2520801f951386",
+      "results": [
+        {
+          "variant": "catalog",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 381,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 366,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "hybrid",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 403,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 366,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.strict-AUTO-r1.0",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 499,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 405,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.strict-AUTO-r0.9",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 499,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 405,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.strict-AUTO-r0.8",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 499,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 405,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.roles-AUTO-r1.0",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 439,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.roles-AUTO-r0.9",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 439,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.roles-AUTO-r0.8",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 439,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        }
+      ],
+      "context_scores": {
+        "scoring.strict-AUTO-r1.0": {
+          "labeled": 193,
+          "literal_conflicts": 1,
+          "with_observed_target": 32,
+          "target_offered": 25,
+          "target_code_offered": 25,
+          "other_automatic_target": 0
+        },
+        "scoring.strict-AUTO-r0.9": {
+          "labeled": 193,
+          "literal_conflicts": 1,
+          "with_observed_target": 32,
+          "target_offered": 25,
+          "target_code_offered": 25,
+          "other_automatic_target": 0
+        },
+        "scoring.strict-AUTO-r0.8": {
+          "labeled": 193,
+          "literal_conflicts": 1,
+          "with_observed_target": 32,
+          "target_offered": 25,
+          "target_code_offered": 25,
+          "other_automatic_target": 0
+        },
+        "scoring.roles-AUTO-r1.0": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 29,
+          "target_code_offered": 29,
+          "other_automatic_target": 0
+        },
+        "scoring.roles-AUTO-r0.9": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 29,
+          "target_code_offered": 29,
+          "other_automatic_target": 0
+        },
+        "scoring.roles-AUTO-r0.8": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 29,
+          "target_code_offered": 29,
+          "other_automatic_target": 0
+        },
+        "catalog": {
+          "labeled": 193,
+          "literal_conflicts": 3,
+          "with_observed_target": 32,
+          "target_offered": 7,
+          "target_code_offered": 7,
+          "other_automatic_target": 7
+        },
+        "hybrid": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 11,
+          "target_code_offered": 11,
+          "other_automatic_target": 5
+        }
+      },
+      "route_counts": {
+        "catalog": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 381
+        },
+        "hybrid": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 403
+        },
+        "scoring.strict-AUTO-r1.0": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 1,
+          "possible_typo:reference_v2": 405
+        },
+        "scoring.strict-AUTO-r0.9": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 1,
+          "possible_typo:reference_v2": 405
+        },
+        "scoring.strict-AUTO-r0.8": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 1,
+          "possible_typo:reference_v2": 405
+        },
+        "scoring.roles-AUTO-r1.0": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 439
+        },
+        "scoring.roles-AUTO-r0.9": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 439
+        },
+        "scoring.roles-AUTO-r0.8": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 439
+        }
+      },
+      "raw_summary_sha256": "63bdf715634fbb66559c73bc0fc02b0dc143f571fb920608c7ecd7247bcfd563"
+    },
+    {
+      "name": "b02",
+      "index_similarity": {
+        "default": {
+          "type": "BM25",
+          "b": "0.2",
+          "k1": "1.2"
+        }
+      },
+      "engine_version": "3.3.2",
+      "input_sha256": "bf8a6d676e629872cee762185272289bfef229b5097b33523a2520801f951386",
+      "results": [
+        {
+          "variant": "catalog",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 381,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 366,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "hybrid",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 403,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 366,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.strict-AUTO-r1.0",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 499,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 405,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.strict-AUTO-r0.9",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 499,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 405,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.strict-AUTO-r0.8",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 499,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 405,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.roles-AUTO-r1.0",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 439,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.roles-AUTO-r0.9",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 439,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.roles-AUTO-r0.8",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 439,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        }
+      ],
+      "context_scores": {
+        "scoring.strict-AUTO-r1.0": {
+          "labeled": 193,
+          "literal_conflicts": 1,
+          "with_observed_target": 32,
+          "target_offered": 25,
+          "target_code_offered": 25,
+          "other_automatic_target": 0
+        },
+        "scoring.strict-AUTO-r0.9": {
+          "labeled": 193,
+          "literal_conflicts": 1,
+          "with_observed_target": 32,
+          "target_offered": 25,
+          "target_code_offered": 25,
+          "other_automatic_target": 0
+        },
+        "scoring.strict-AUTO-r0.8": {
+          "labeled": 193,
+          "literal_conflicts": 1,
+          "with_observed_target": 32,
+          "target_offered": 25,
+          "target_code_offered": 25,
+          "other_automatic_target": 0
+        },
+        "scoring.roles-AUTO-r1.0": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 29,
+          "target_code_offered": 29,
+          "other_automatic_target": 0
+        },
+        "scoring.roles-AUTO-r0.9": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 29,
+          "target_code_offered": 29,
+          "other_automatic_target": 0
+        },
+        "scoring.roles-AUTO-r0.8": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 29,
+          "target_code_offered": 29,
+          "other_automatic_target": 0
+        },
+        "catalog": {
+          "labeled": 193,
+          "literal_conflicts": 3,
+          "with_observed_target": 32,
+          "target_offered": 7,
+          "target_code_offered": 7,
+          "other_automatic_target": 7
+        },
+        "hybrid": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 11,
+          "target_code_offered": 11,
+          "other_automatic_target": 5
+        }
+      },
+      "route_counts": {
+        "catalog": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 381
+        },
+        "hybrid": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 403
+        },
+        "scoring.strict-AUTO-r1.0": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 1,
+          "possible_typo:reference_v2": 405
+        },
+        "scoring.strict-AUTO-r0.9": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 1,
+          "possible_typo:reference_v2": 405
+        },
+        "scoring.strict-AUTO-r0.8": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 1,
+          "possible_typo:reference_v2": 405
+        },
+        "scoring.roles-AUTO-r1.0": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 439
+        },
+        "scoring.roles-AUTO-r0.9": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 439
+        },
+        "scoring.roles-AUTO-r0.8": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 439
+        }
+      },
+      "raw_summary_sha256": "90802b92c1bf95752409e8a7fbbdba368d153f08dc1773c68cb21b619a65c447"
+    },
+    {
+      "name": "boolean",
+      "index_similarity": {
+        "default": {
+          "type": "boolean"
+        }
+      },
+      "engine_version": "3.3.2",
+      "input_sha256": "bf8a6d676e629872cee762185272289bfef229b5097b33523a2520801f951386",
+      "results": [
+        {
+          "variant": "catalog",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 381,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 366,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "hybrid",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 403,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 366,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.strict-AUTO-r1.0",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 499,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 405,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.strict-AUTO-r0.9",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 499,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 405,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.strict-AUTO-r0.8",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 499,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 405,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.roles-AUTO-r1.0",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 439,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.roles-AUTO-r0.9",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 439,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        },
+        {
+          "variant": "scoring.roles-AUTO-r0.8",
+          "cohorts": {
+            "historical": {
+              "total": 500,
+              "reference_retained": 500,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "possible_typo": {
+              "total": 453,
+              "reference_retained": 439,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            },
+            "reviewed": {
+              "total": 399,
+              "reference_retained": 394,
+              "automatic_literal_conflict": 0,
+              "choice_literal_conflict": 0,
+              "backend_error": 0
+            }
+          },
+          "backend_errors": 0
+        }
+      ],
+      "context_scores": {
+        "scoring.strict-AUTO-r1.0": {
+          "labeled": 193,
+          "literal_conflicts": 1,
+          "with_observed_target": 32,
+          "target_offered": 25,
+          "target_code_offered": 25,
+          "other_automatic_target": 0
+        },
+        "scoring.strict-AUTO-r0.9": {
+          "labeled": 193,
+          "literal_conflicts": 1,
+          "with_observed_target": 32,
+          "target_offered": 25,
+          "target_code_offered": 25,
+          "other_automatic_target": 0
+        },
+        "scoring.strict-AUTO-r0.8": {
+          "labeled": 193,
+          "literal_conflicts": 1,
+          "with_observed_target": 32,
+          "target_offered": 25,
+          "target_code_offered": 25,
+          "other_automatic_target": 0
+        },
+        "scoring.roles-AUTO-r1.0": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 29,
+          "target_code_offered": 29,
+          "other_automatic_target": 0
+        },
+        "scoring.roles-AUTO-r0.9": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 29,
+          "target_code_offered": 29,
+          "other_automatic_target": 0
+        },
+        "scoring.roles-AUTO-r0.8": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 29,
+          "target_code_offered": 29,
+          "other_automatic_target": 0
+        },
+        "catalog": {
+          "labeled": 193,
+          "literal_conflicts": 3,
+          "with_observed_target": 32,
+          "target_offered": 7,
+          "target_code_offered": 7,
+          "other_automatic_target": 7
+        },
+        "hybrid": {
+          "labeled": 193,
+          "literal_conflicts": 2,
+          "with_observed_target": 32,
+          "target_offered": 11,
+          "target_code_offered": 11,
+          "other_automatic_target": 5
+        }
+      },
+      "route_counts": {
+        "catalog": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 381
+        },
+        "hybrid": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 403
+        },
+        "scoring.strict-AUTO-r1.0": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 1,
+          "possible_typo:reference_v2": 405
+        },
+        "scoring.strict-AUTO-r0.9": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 1,
+          "possible_typo:reference_v2": 405
+        },
+        "scoring.strict-AUTO-r0.8": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 1,
+          "possible_typo:reference_v2": 405
+        },
+        "scoring.roles-AUTO-r1.0": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 439
+        },
+        "scoring.roles-AUTO-r0.9": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 439
+        },
+        "scoring.roles-AUTO-r0.8": {
+          "historical:reference_v2": 498,
+          "historical:reference_v1": 2,
+          "possible_typo:reference_v2": 439
+        }
+      },
+      "raw_summary_sha256": "5530d22547f1c89db8716860b2eca0b765c349157c9f2371c2216ad1a3a8cac9"
+    }
+  ],
+  "paired_to_default_b075": {
+    "b0": {
+      "catalog": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 0,
+        "different_full_ordered_result": 0,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "hybrid": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 0,
+        "different_full_ordered_result": 0,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "scoring.strict-AUTO-r1.0": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 6,
+        "different_full_ordered_result": 6,
+        "reference_gained": 1,
+        "reference_lost": 0
+      },
+      "scoring.strict-AUTO-r0.9": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 5,
+        "different_full_ordered_result": 5,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "scoring.strict-AUTO-r0.8": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 11,
+        "different_full_ordered_result": 11,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "scoring.roles-AUTO-r1.0": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 6,
+        "different_full_ordered_result": 6,
+        "reference_gained": 1,
+        "reference_lost": 0
+      },
+      "scoring.roles-AUTO-r0.9": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 5,
+        "different_full_ordered_result": 5,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "scoring.roles-AUTO-r0.8": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 11,
+        "different_full_ordered_result": 11,
+        "reference_gained": 0,
+        "reference_lost": 0
+      }
+    },
+    "b02": {
+      "catalog": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 0,
+        "different_full_ordered_result": 0,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "hybrid": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 0,
+        "different_full_ordered_result": 0,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "scoring.strict-AUTO-r1.0": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 2,
+        "different_full_ordered_result": 2,
+        "reference_gained": 1,
+        "reference_lost": 0
+      },
+      "scoring.strict-AUTO-r0.9": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 5,
+        "different_full_ordered_result": 5,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "scoring.strict-AUTO-r0.8": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 6,
+        "different_full_ordered_result": 6,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "scoring.roles-AUTO-r1.0": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 2,
+        "different_full_ordered_result": 2,
+        "reference_gained": 1,
+        "reference_lost": 0
+      },
+      "scoring.roles-AUTO-r0.9": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 5,
+        "different_full_ordered_result": 5,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "scoring.roles-AUTO-r0.8": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 6,
+        "different_full_ordered_result": 6,
+        "reference_gained": 0,
+        "reference_lost": 0
+      }
+    },
+    "boolean": {
+      "catalog": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 0,
+        "different_full_ordered_result": 0,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "hybrid": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 0,
+        "different_full_ordered_result": 0,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "scoring.strict-AUTO-r1.0": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 6,
+        "different_full_ordered_result": 6,
+        "reference_gained": 1,
+        "reference_lost": 0
+      },
+      "scoring.strict-AUTO-r0.9": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 5,
+        "different_full_ordered_result": 5,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "scoring.strict-AUTO-r0.8": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 12,
+        "different_full_ordered_result": 12,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "scoring.roles-AUTO-r1.0": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 6,
+        "different_full_ordered_result": 6,
+        "reference_gained": 1,
+        "reference_lost": 0
+      },
+      "scoring.roles-AUTO-r0.9": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 5,
+        "different_full_ordered_result": 5,
+        "reference_gained": 0,
+        "reference_lost": 0
+      },
+      "scoring.roles-AUTO-r0.8": {
+        "cases": 1550,
+        "different_choices_or_selected_address": 13,
+        "different_full_ordered_result": 13,
+        "reference_gained": 0,
+        "reference_lost": 0
+      }
+    }
+  },
+  "limitations": [
+    "Исторические подсказки и наблюдаемые уточнения не равны установленному намерению.",
+    "Сложные случаи выбраны для разработки, а не случайной оценки точности.",
+    "Задержки измерены при параллельных локальных прогонах и не оценивают скорость VDS.",
+    "Разбор дома, словарь и индексируемые документы общие; similarity не исправляет потерянные слова."
+  ]
+}
