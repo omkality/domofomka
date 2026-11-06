@@ -1,97 +1,98 @@
 # domofomka
 
-Application for getting the intercom code at the given address.
-Used stack: *Litestar*, *Granian*, *SQLite* (legacy source and indexed read-only catalog), *PostgreSQL* (bot queue), optional *OpenSearch*, *VK API*.
+Бот для поиска кодов домофонов по адресу.
+Технологии: *Litestar*, *Granian*, *SQLite* (исходная база и индексированный каталог только для чтения), *PostgreSQL* (очередь бота), необязательный *OpenSearch*, *VK API*.
 
-## Architecture
+## Устройство
 
 ```mermaid
 flowchart LR
-    VK[VK] <-->|Long Poll| B[Bot]
-    B --> I[(PostgreSQL inbox)]
-    H[VK history recovery] --> I
-    I --> W[Workers]
+    VK[VK] <-->|Long Poll| B[Бот]
+    B --> I[(Входящие события PostgreSQL)]
+    H[Сверка истории VK] --> I
+    I --> W[Обработчики]
     W --> A[HTTP API]
-    A --> V2[API v2: query normalization]
-    V2 --> C[(Catalog: street index, exact house and codes)]
-    V2 --> OS[Optional OpenSearch candidates]
+    A --> V2[API v2: нормализация запроса]
+    V2 --> C[(Каталог: индекс улиц, точный дом и коды)]
+    V2 --> OS[Кандидаты OpenSearch — по настройке]
     OS --> C
-    V2 -->|Unavailable or no match| V1[API v1: legacy search]
-    V1 --> DB[(Original SQLite codes)]
-    A --> D[DaData geocoding]
-    W --> O[(PostgreSQL outbox)]
-    O -->|Send or edit with retries| VK
+    V2 -->|Сбой или адрес не найден| V1[API v1: прежний поиск]
+    V1 --> DB[(Исходная SQLite с кодами)]
+    A --> D[Геокодирование DaData]
+    W --> O[(Исходящие действия PostgreSQL)]
+    O -->|Отправка или редактирование с повторами| VK
 ```
 
-Events and replies survive restarts. Saved button clicks can be retried; clicks never received from VK cannot be recovered from history.
+События и подготовленные ответы сохраняются при перезапуске. Записанные нажатия кнопок можно повторить; нажатия, которые VK не доставил боту, из истории восстановить нельзя.
 
 ```mermaid
 flowchart LR
-    A[VK and DaData clients] --> P{Proxy connection available?}
-    P -->|Yes| T[SSH tunnel]
-    T --> R[Tinyproxy in Russia]
-    R --> S[VK or DaData]
-    P -->|No| D[Direct connection from Europe]
+    A[Клиенты VK и DaData] --> P{Соединение с прокси доступно?}
+    P -->|Да| T[SSH-туннель]
+    T --> R[Tinyproxy в России]
+    R --> S[VK или DaData]
+    P -->|Нет| D[Прямое соединение из Европы]
     D --> S
-    D -.->|Retry proxy after 30 to 300 seconds| P
+    D -.->|Повтор прокси через 30–300 секунд| P
 ```
 
-Optional `VK_PROXY_URL` and `DADATA_PROXY_URL` point to the host-side SSH tunnel; empty values use direct connections. Tinyproxy listens on localhost and forwards HTTPS with CONNECT without decrypting it. OpenSSH and systemd maintain the tunnel outside Docker.
+Необязательные `VK_PROXY_URL` и `DADATA_PROXY_URL` указывают на SSH-туннель на хосте; пустые значения включают прямые запросы. Tinyproxy слушает localhost и передаёт HTTPS через CONNECT без расшифровки. OpenSSH и systemd поддерживают туннель вне Docker.
 
-Only connection failures trigger direct fallback. API errors and response timeouts do not switch routes. Safe VK retries keep the same `random_id` or edit result. Timeouts, retries and recovery intervals are configurable in `.env`; see [`.env.example`](.env.example) for defaults. Restart containers after changing them.
+Переход к прямому соединению происходит при ошибке подключения к прокси. Ошибки API и таймауты ожидания ответа маршрут не меняют. Безопасные повторы VK сохраняют `random_id` или тот же результат редактирования. Таймауты, повторы и интервалы восстановления задаются в `.env`; значения по умолчанию приведены в [`.env.example`](.env.example). После изменения настроек перезапустите контейнеры.
 
-## Search v2
+## Поиск v2
 
-`/api/v1/codes/msg` and `/api/v1/codes/geo` preserve the legacy API; `/codes/*` remains compatible.
-`/api/v2/codes/*` handles noisy input, city aliases and written street numbers. House numbers and blocks remain exact.
-Ambiguous addresses require a choice. A recognized house without codes gets an explicit answer.
+`/api/v1/codes/msg` и `/api/v1/codes/geo` сохраняют прежний поиск; `/codes/*` остаётся совместимым.
+`/api/v2/codes/*` обрабатывает лишние символы, сокращения городов и номера улиц, написанные словами. Номера домов, корпусов и строений проверяются точно.
+При неоднозначности бот предлагает выбрать адрес. Если дом распознан, но кодов в базе нет, бот сообщает об этом явно.
 
 ```mermaid
 flowchart LR
-    GAR[GAR XML: active houses and hierarchy] --> IMP[Streaming import by region]
-    OLD[Original codes.db] --> N[Canonical identities, aliases and provenance]
+    GAR[XML ГАР: действующие дома и иерархия] --> IMP[Потоковый импорт по регионам]
+    OLD[Исходная codes.db] --> N[Адреса, варианты написания и происхождение записей]
     IMP --> N
-    N --> CAT[Read-only catalog]
-    N --> IDX[Versioned OpenSearch index]
-    HISTORY[Private VK history export] --> AUDIT[Aggregate audit and dialog-split regression corpus]
-    AUDIT --> TEST[Compare v1 and v2 before release]
+    N --> CAT[Каталог только для чтения]
+    N --> IDX[Версионируемый индекс OpenSearch]
+    HISTORY[Закрытая выгрузка истории VK] --> AUDIT[Аудит и набор проверок с разделением по диалогам]
+    AUDIT --> TEST[Сравнение v1 и v2 перед выпуском]
 ```
 
-The full GAR build is kept offline; the serving catalog stores packed known house numbers and separate code-bearing identities.
-Large datasets and raw message histories stay in ignored `artifacts/`. They never go into Git or Docker build contexts.
-The compact serving catalog runs beside the German test bot; it does not depend on a development PC.
-OpenSearch is optional: its candidates are merged with exact catalog candidates to protect recall. The local Docker lab supports comparative testing before moving OpenSearch to a suitably sized host.
-Build and validation details: [search v2 notes](docs/search-v2.md).
+Полная сборка ГАР хранится отдельно от рабочего сервера. Компактный каталог содержит упакованные номера известных домов и отдельные записи домов с кодами.
+Большие данные и исходные переписки остаются в игнорируемой папке `artifacts/`. Они не попадают в Git и контекст сборки Docker.
+Компактный каталог работает рядом с тестовым ботом на Германии и не зависит от компьютера разработчика.
+OpenSearch подключается по настройке: его кандидаты объединяются с кандидатами каталога, чтобы не потерять уже найденные адреса. Локальное окружение Docker позволяет сравнивать варианты поиска перед переносом OpenSearch на сервер с достаточными ресурсами.
+Подробности: [поиск и результаты проверок](docs/search-v2.md), [очередь и сценарии отказов](docs/message-delivery.md), [тестовое окружение](docs/dev-stand.md).
 
-## Prerequisites
+## Требования
+
 * Docker & Docker Compose
-* Python 3.12+ (for local development)
+* Python 3.12+ для локальной разработки
 
-## Install
+## Установка
 
-Build `domofomka` from source:
+Склонируйте проект:
 ~~~~bash
-git clone https://github.com/omka0708/domofomka
+git clone https://github.com/omkality/domofomka
 cd domofomka
 ~~~~
 
-You should have `.env` file and SQLite3 database with `DB_NAME` name (configured in environment file) at the */domofomka* folder.
+В корне проекта нужны `.env` и база SQLite3 с именем из `DB_NAME`.
 
-Environment file `.env` should contain:
+Основные параметры `.env`:
 
 ```dosini
-# API Configuration
+# Настройки API
 API_HOST=0.0.0.0
 API_PORT=8000
 DB_NAME=codes.db
 DADATA_TOKEN=your_dadata_token_here
 
-# VK Bot Configuration
+# Настройки бота VK
 VK_GROUP_TOKEN=your_vk_group_token_here
 VK_GROUP_ID=your_vk_group_id_here
 VK_PROXY_URL=
 
-# Durable VK queue (required for this development version)
+# Постоянная очередь VK — обязательна для этой версии dev
 EXPECTED_VK_GROUP_ID=your_vk_group_id_here
 POSTGRES_PASSWORD=replace_with_long_random_password
 QUEUE_DATABASE_URL=postgresql://domofomka:${POSTGRES_PASSWORD}@queue:5432/domofomka
@@ -99,12 +100,12 @@ QUEUE_DATABASE_URL=postgresql://domofomka:${POSTGRES_PASSWORD}@queue:5432/domofo
 CACHE_EXPIRE_TIME=1200
 ANTI_SPAM_TIME=5
 
-# API for VK Bot
+# Внутренний API для бота VK
 DOMOFOMKA_API_HOST=api
 DOMOFOMKA_API_PORT=8000
 ```
 
-Your SQLite3 database should contain table `codes`, that has the structure:
+Исходная база SQLite3 должна содержать таблицу `codes`:
 
 ~~~~sql
 CREATE TABLE codes (
@@ -119,23 +120,24 @@ CREATE TABLE codes (
 );
 ~~~~
 
-## Run
+## Запуск
 
-Run this command at the working directory */domofomka*:
+Выполните в корне проекта:
 
 ~~~~bash
 docker compose up --build -d
 ~~~~
 
 ## API
-### Get codes by message
-#### Request
+### Поиск кодов по тексту
+
+#### Запрос
 
 `GET /codes/msg/`
 
     GET http://localhost:8000/codes/msg?message=трофимова 3
 
-#### Response
+#### Ответ
 
 ~~~~json
 {
@@ -148,13 +150,13 @@ docker compose up --build -d
 }
 ~~~~
 
-### Get codes by latitude and longitude
+### Поиск кодов по координатам
 
 `GET /codes/geo/`
 
     GET http://localhost:8000/codes/geo?lat=55.617586&lon=37.495482
 
-#### Response
+#### Ответ
 
 ~~~~json
 {
@@ -171,15 +173,18 @@ docker compose up --build -d
 }
 ~~~~
 
-## VK Bot
-### Get codes by message
-![codes_by_msg](https://github.com/omka0708/domofomka/assets/56554057/d21e6146-95a7-4f09-a501-31d8fd2ae7df)
+## Бот VK
 
-### Get codes by latitude and longitude
-![codes_by_lat_lon](https://github.com/omka0708/domofomka/assets/56554057/85f2b4f6-7634-4b3a-b7a7-5ae10cdc9219)
+### Поиск по тексту
 
-## Telegram Bot
+![Поиск кодов по тексту](https://github.com/omka0708/domofomka/assets/56554057/d21e6146-95a7-4f09-a501-31d8fd2ae7df)
 
-*soon*
+### Поиск по координатам
 
-The service API is published on localhost only. Container memory, process counts, queue resources and log rotation are configurable in `.env`.
+![Поиск кодов по координатам](https://github.com/omka0708/domofomka/assets/56554057/85f2b4f6-7634-4b3a-b7a7-5ae10cdc9219)
+
+## Бот Telegram
+
+Пока не реализован.
+
+API опубликован только на localhost. Лимиты памяти и процессов контейнеров, ресурсы очереди и ротация журналов настраиваются в `.env`.

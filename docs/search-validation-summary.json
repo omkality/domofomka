@@ -37,7 +37,7 @@
     },
     "p50_ms": 11.814,
     "p95_ms": 189.152,
-    "note": "Historical answers and correction hypotheses are weak labels. Ambiguous choices are separate from correct automatic answers."
+    "note": "Прежние ответы и предполагаемые исправления — предварительная разметка. Варианты выбора считаются отдельно от правильных автоматических ответов."
   },
   "baseline_retention": {
     "train:total": 37588,
@@ -90,7 +90,7 @@
     },
     "p50_ms": 35.58,
     "p95_ms": 296.386,
-    "note": "Historical answers and correction hypotheses are weak labels. Ambiguous choices are separate from correct automatic answers."
+    "note": "Прежние ответы и предполагаемые исправления — предварительная разметка. Варианты выбора считаются отдельно от правильных автоматических ответов."
   },
   "empty_answer_replay": {
     "counts": {
@@ -113,17 +113,17 @@
       "mentions_apartment": 9
     },
     "seconds": 280.42,
-    "note": "Candidates are potential recoveries, not verified intended addresses. Repeated requests count separately."
+    "note": "Кандидаты — возможные восстановленные ответы, а не подтверждённые адреса, которые имел в виду пользователь. Повторные запросы считаются отдельно."
   },
   "tests": {
     "passed": 137,
     "skipped_legacy_runtime_loop": 1
   },
   "limitations": [
-    "Bot outputs and correction pairs are weak labels, not verified user intent.",
-    "Both dialog partitions have been inspected during tuning; neither is now an untouched blind test.",
-    "Clarification choices count separately from automatic matches.",
-    "The two baseline disagreements require intent review: city substring and street/house number reversal.",
-    "The browser site gate prevented real UI-click verification; real SDK/queue tests use synthetic incoming events."
+    "Ответы бота и пары исправлений — предварительная разметка, а не подтверждение намерения пользователя.",
+    "Обе части корпуса диалогов просматривались при настройке; ни одна больше не является независимым набором для слепой проверки.",
+    "Предложенные варианты адресов считаются отдельно от автоматических совпадений.",
+    "Два расхождения с v1 требуют проверки намерения: частичное совпадение города и перестановка номера улицы с номером дома.",
+    "Ограничение доступа к сайту не позволило проверить реальные клики в браузере. Проверки настоящего SDK и очереди используют программно созданные входящие события."
   ]
 }

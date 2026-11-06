@@ -162,7 +162,7 @@ if __name__ == "__main__":
         "counts": dict(counters),
         "p50_ms": times[len(times) // 2] if times else 0,
         "p95_ms": times[int(len(times) * 0.95)] if times else 0,
-        "note": "Historical answers and correction hypotheses are weak labels. Ambiguous choices are separate from correct automatic answers.",
+        "note": "Прежние ответы и предполагаемые исправления — предварительная разметка. Варианты выбора считаются отдельно от правильных автоматических ответов.",
     }
-    (a.output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf8")
+    (a.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf8")
     print(json.dumps(summary), flush=True)

@@ -69,7 +69,7 @@ if __name__ == "__main__":
         "counts": dict(counts),
         "potential_recovery_features": dict(patterns),
         "seconds": round(time.monotonic() - started, 2),
-        "note": "Candidates are potential recoveries, not verified intended addresses. Repeated requests count separately.",
+        "note": "Кандидаты — возможные восстановленные ответы, а не подтверждённые адреса, которые имел в виду пользователь. Повторные запросы считаются отдельно.",
     }
-    (args.output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf8")
+    (args.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf8")
     print(json.dumps(summary), flush=True)

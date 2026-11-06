@@ -101,13 +101,13 @@ def audit(source: Path, output: Path):
         "failed_message_features": dict(failure_patterns),
         "correction_hypotheses": len(pairs),
         "complete": False,
-        "note": "Raw histories and derived query text stay in ignored artifacts; bot responses and correction pairs are weak labels, not verified truth.",
+        "note": "Исходные переписки и тексты запросов остаются в игнорируемой папке artifacts. Ответы бота и пары исправлений — предварительная разметка, а не подтверждённая истина.",
     }
     manifest = source / "conversations.json"
     if manifest.exists():
         total = len(json.loads(manifest.read_text(encoding="utf8"))["peers"])
         summary.update(dialogs_total=total, complete=counts["dialogs"] == total)
-    (output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf8")
+    (output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf8")
     print(json.dumps(summary), flush=True)
 
 

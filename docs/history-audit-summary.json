@@ -27,6 +27,6 @@
   },
   "correction_hypotheses": 2623,
   "complete": true,
-  "note": "Raw histories and derived query text stay in ignored artifacts; bot responses and correction pairs are weak labels, not verified truth.",
+  "note": "Исходные переписки и тексты запросов остаются в игнорируемой папке artifacts. Ответы бота и пары исправлений — предварительная разметка, а не подтверждённая истина.",
   "dialogs_total": 2282
 }
