@@ -1,7 +1,7 @@
 # domofomka
 
 Бот для поиска кодов домофонов по адресу.
-Технологии: *Litestar*, *Granian*, *SQLite* (исходная база и индексированный каталог только для чтения), *PostgreSQL* (очередь бота), необязательный *OpenSearch*, *VK API*.
+Технологии: *Litestar*, *Granian*, *PostgreSQL* (каталог v2, очередь и диагностика), *SQLite* (источник v1), необязательный *OpenSearch*, *VK API*.
 
 ## Устройство
 
@@ -13,7 +13,7 @@ flowchart LR
     I --> W[Обработчики]
     W --> A[HTTP API]
     A --> V2[API v2: нормализация запроса]
-    V2 --> C[(Каталог: индекс улиц, точный дом и коды)]
+    V2 --> C[(PostgreSQL: улицы, точный дом и коды)]
     V2 --> OS[Кандидаты OpenSearch — по настройке]
     OS --> C
     V2 -->|Сбой или адрес не найден| V1[API v1: прежний поиск]
@@ -28,6 +28,17 @@ flowchart LR
 резервные копии и контроль ресурсов описаны в [инструкции эксплуатации](docs/operations.md).
 Этапы поиска и сетевые маршруты описаны в [измерениях запросов](docs/telemetry.md),
 ближайшие задачи — в [плане dev](docs/roadmap.md).
+
+```mermaid
+erDiagram
+    buildings ||--o{ entrances : "дом"
+    entrances ||--o{ codes : "подъезд"
+    code_sources ||--o{ codes : "источник"
+    buildings ||--o{ aliases : "варианты адреса"
+    buildings ||--o{ provenance : "исходные строки"
+```
+
+[Полная схема БД](docs/database.md) показывает поля, ключи, поисковые таблицы и очередь.
 
 ```mermaid
 flowchart LR
@@ -57,7 +68,7 @@ flowchart LR
     GAR[XML ГАР: действующие дома и иерархия] --> IMP[Потоковый импорт по регионам]
     OLD[Исходная codes.db] --> N[Адреса, варианты написания и происхождение записей]
     IMP --> N
-    N --> CAT[Каталог только для чтения]
+    N --> CAT[Новая БД каталога PostgreSQL]
     N --> IDX[Версионируемый индекс OpenSearch]
     HISTORY[Закрытая выгрузка истории VK] --> AUDIT[Аудит и набор проверок с разделением по диалогам]
     AUDIT --> TEST[Сравнение v1 и v2 перед выпуском]
@@ -65,8 +76,10 @@ flowchart LR
 
 Полная сборка ГАР хранится отдельно от рабочего сервера. Компактный каталог содержит упакованные номера известных домов и отдельные записи домов с кодами.
 Большие данные и исходные переписки остаются в игнорируемой папке `artifacts/`. Они не попадают в Git и контекст сборки Docker.
-Компактный каталог работает рядом с тестовым ботом на Германии и не зависит от компьютера разработчика.
-OpenSearch подключается по настройке: его кандидаты объединяются с кандидатами каталога, чтобы не потерять уже найденные адреса. Локальное окружение Docker позволяет сравнивать варианты поиска перед переносом OpenSearch на сервер с достаточными ресурсами.
+Каталог v2 работает в отдельной БД существующего PostgreSQL рядом с тестовым ботом на Германии
+и не зависит от компьютера разработчика. API читает его через отдельную роль с ограниченными правами;
+при сбое поиска сохраняется fallback на исходную SQLite v1. Файловый каталог v2 поддержан для отката.
+OpenSearch подключается по настройке и остаётся локальным инструментом сравнения, на VDS он не запущен.
 Подробности: [поиск и результаты проверок](docs/search-v2.md), [очередь и сценарии отказов](docs/message-delivery.md), [тестовое окружение](docs/dev-stand.md).
 
 ## Требования
@@ -103,6 +116,11 @@ EXPECTED_VK_GROUP_ID=your_vk_group_id_here
 POSTGRES_PASSWORD=replace_with_long_random_password
 QUEUE_DATABASE_URL=postgresql://domofomka:${POSTGRES_PASSWORD}@queue:5432/domofomka
 
+# Каталог v2 — отдельная опубликованная БД и роль только для чтения
+SEARCH_BACKEND=postgres
+CATALOG_DATABASE_URL=postgresql://catalog_reader:replace_with_reader_password@queue:5432/domofomka_catalog_release
+CATALOG_REVISION=replace_with_published_catalog_sha256
+
 CACHE_EXPIRE_TIME=1200
 ANTI_SPAM_TIME=5
 
@@ -111,7 +129,11 @@ DOMOFOMKA_API_HOST=api
 DOMOFOMKA_API_PORT=8000
 ```
 
-Исходная база SQLite3 должна содержать таблицу `codes`:
+До запуска PostgreSQL-варианта нужно загрузить проверенный каталог и выдать роли API права чтения:
+[публикация и восстановление](docs/database.md#обновление-и-восстановление).
+SQLite-вариант выбирается через `SEARCH_BACKEND=sqlite` и `SEARCH_CATALOG_PATH`.
+
+Исходная база SQLite3 для v1 должна содержать таблицу `codes`:
 
 ~~~~sql
 CREATE TABLE codes (

@@ -57,3 +57,15 @@ OpenSearch остаётся локальным инструментом срав
   `tools/build_locality_facts.py`, `tests/test_localities.py`.
 - `ee05e55` — отдельная причина привязки муниципального варианта в происхождении исходных строк.
   Файлы: `tools/build_catalog.py`, `tests/test_localities.py`.
+
+- `321152e` — рабочий PostgreSQL-клиент v2 с ограниченными соединениями и ожиданиями,
+  проверкой ревизии, кешем и fallback v1.
+  Файлы: `src/search/postgres.py`, `src/api/`, `pyproject.toml`, `uv.lock`,
+  `tools/build_postgres_catalog.py`, `tools/compare_postgres_catalog.py`, `tests/test_postgres_catalog.py`.
+- `530adcb` — пределы WAL/временных файлов и исключение дублирующей codes.db из API-образа.
+  Файлы: `docker-compose.yml`, `Dockerfile.api`, примеры `.env`.
+- `87295aa` — рабочие образы без dev-зависимостей и кеша, стандартная проверка HTTP,
+  одинаковые ограничения PostgreSQL в обоих вариантах Compose.
+  Файлы: Dockerfile API/бота, `docker-compose.yml`, `compose.dev.yml`, уточнение комментария `src/api/telemetry.py`.
+- `4c2df8e` — сборка минимальных образов и проверка их рабочих импортов в CI.
+  Файл: `.github/workflows/dev-tests.yml`.

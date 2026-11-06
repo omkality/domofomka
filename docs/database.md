@@ -1,0 +1,220 @@
+# Схема баз данных dev
+
+Один экземпляр PostgreSQL обслуживает две отдельные БД:
+
+- `domofomka` — inbox/outbox, контекст сообщений и ограниченная диагностика;
+- `domofomka_catalog_<версия>` — нормализованные адреса, подъезды, коды и поисковые данные v2.
+
+API читает каталог через отдельную роль без права записи. Бот записывает очередь в свою БД.
+Исходная `codes.db` и её небольшой индекс остаются для v1 и проверки происхождения старых строк.
+Полный XML ГАР и промежуточная сборка не переносятся на VDS.
+
+## Каталог адресов и кодов
+
+```mermaid
+erDiagram
+    buildings ||--o{ entrances : "дом"
+    entrances ||--o{ codes : "подъезд"
+    code_sources ||--o{ codes : "источник"
+    buildings ||--o{ aliases : "вариант адреса"
+    buildings ||--o{ alias_search : "поисковый документ"
+    buildings ||--o{ provenance : "исходная строка"
+    streets ||--o| street_houses : "набор домов"
+
+    buildings {
+        text id PK
+        text guid "GUID ГАР или NULL"
+        text display
+        text city
+        text street
+        text house
+        text street_key
+        text city_key
+        text region
+        text lineage
+    }
+    entrances {
+        text building_id PK,FK
+        text number PK
+    }
+    code_sources {
+        text kind PK
+    }
+    codes {
+        text building_id PK,FK
+        text entrance PK,FK
+        text kind PK,FK
+        text code PK
+    }
+    aliases {
+        text building_id PK,FK
+        text city_key PK
+        text street_key PK
+        text house PK
+    }
+    alias_search {
+        bigint seq PK
+        text building_id FK
+        text house
+        text words
+    }
+    provenance {
+        bigint source_id PK
+        text building_id FK
+        text resolution
+    }
+    streets {
+        text id PK
+        text city_key
+        text street_key
+        text words
+        int has_codes
+    }
+    street_houses {
+        text id PK,FK
+        bytea data
+    }
+    vocabulary {
+        text term PK
+    }
+    metadata {
+        text key PK
+        text value
+    }
+```
+
+Линии на схеме соответствуют внешним ключам. Сопоставление дома с документом улицы по
+`city_key` и `street_key` — часть поискового алгоритма, а не внешний ключ.
+Идентичность физического дома задаёт `buildings.id`; совпадение названия улицы в разных городах
+не объединяет дома. GUID ГАР сохраняется только при подтверждённой привязке.
+
+У кода составной первичный ключ `(building_id, entrance, kind, code)`.
+Два одинаковых кода одного источника в одном подъезде объединяются;
+другие коды, подъезды и источники сохраняются. Номер подъезда хранится текстом,
+чтобы не терять исторические обозначения. В `code_sources` пока хранится только тип источника:
+лишние сущности и выдуманные сведения об источниках не добавляются.
+
+`provenance.source_id` — ID строки неизменённой исходной `codes.db`.
+В `resolution` различаются `gar_exact`, `gar_locality_alias`, `ambiguous` и `unresolved`.
+Это позволяет отличить точное совпадение от подтверждённого муниципального варианта
+и проследить объединённые дубли. Контрольная сумма исходной базы находится в метаданных сборки.
+
+`aliases` сохраняет варианты написания исходных адресов. `alias_search` — подготовленные слова для поиска
+этих вариантов; `seq` сохраняет стабильный порядок кандидатов.
+`vocabulary` — небольшой словарь для ограниченного исправления опечаток.
+
+В `street_houses.data` находятся сжатые zlib JSON-наборы номеров домов, адресных префиксов и иерархий.
+Так полный набор известных домов не разворачивается в десятки миллионов строк PostgreSQL.
+Дома с кодами представлены обычными реляционными строками; для известного адреса без кодов
+API создаёт устойчивый ключ `address:...`, не выдумывая GUID физического дома.
+Это рабочий поисковый слой, а не полный редактируемый реестр ГАР.
+
+Основные индексы:
+
+- B-tree для дома, улицы, подъезда, источника и исходного ID;
+- GIN по `to_tsvector('simple', words)` в `streets` и `alias_search`;
+- отдельный частичный GIN для `streets WHERE has_codes=1` — быстрый первый поиск по адресам с кодами.
+
+DDL и загрузка находятся в [`tools/build_postgres_catalog.py`](../tools/build_postgres_catalog.py).
+Схема каталога имеет версию `1`, независимо от версии REST API. Читатель проверяет версию, отметку готовности и заданную
+контрольную сумму каталога; незавершённая или другая сборка не обслуживает v2.
+
+## Очередь и измерения
+
+```mermaid
+erDiagram
+    bot_inbox ||--o{ bot_outbox : "подготовленные действия"
+    request_log ||--o{ request_spans : "этапы попыток"
+    request_spans ||--o| search_runs : "поиск v1 или v2"
+    request_spans ||--o| network_attempts : "сетевое обращение"
+
+    bot_inbox {
+        bigint id PK
+        bigint group_id
+        text event_key
+        bigint peer_id
+        text kind
+        jsonb payload
+        text status
+        int attempts
+        float next_at
+    }
+    bot_outbox {
+        bigint id PK
+        bigint inbox_id FK
+        bigint group_id
+        bigint peer_id
+        text method
+        jsonb params
+        jsonb context
+        text status
+        int attempts
+    }
+    request_log {
+        uuid id PK
+        bigint group_id
+        bigint inbox_id
+        uuid parent_request_id
+        text query_text
+        jsonb outcome
+        text telemetry_state
+    }
+    request_spans {
+        uuid id PK
+        uuid request_id FK
+        text stage
+        float duration_ms
+        text status
+        jsonb attributes
+    }
+    search_runs {
+        uuid span_id PK,FK
+        text engine
+        text result
+        text building_id
+        jsonb candidates
+        jsonb attributes
+    }
+    network_attempts {
+        uuid span_id PK,FK
+        text target
+        text operation
+        text route
+        text route_reason
+        int attempt
+        jsonb attributes
+    }
+```
+
+Это сокращённая схема полей очереди; ключ события уникален по паре `(group_id, event_key)`.
+Пара `(inbox_id, effect_index)` уникальна в outbox. Контекст кнопок хранится в
+`bot_message_context` по сообществу, пользователю и ID сообщения.
+`bot_state` хранит рабочие отметки, `bot_receipts` — идентификаторы для защиты от дублей после очистки тел заданий.
+
+Между `request_log` и inbox нет внешнего ключа: срок хранения диагностики независим от очистки очереди.
+Связь логическая, по сообществу и ID задания; сводку даёт представление `request_summary`.
+Контекст и записи диагностики не ссылаются внешним ключом на каталог:
+подготовленный ответ и записанное нажатие переживают смену версии каталога.
+
+Поведение при повторах описано в [сценариях доставки](message-delivery.md),
+поля измерений и ограничения — в [диагностике](telemetry.md).
+
+## Обновление и восстановление
+
+Каталог публикуется целиком в новую БД: загрузка, индексы, внешние ключи, проверка корпуса,
+резервная копия и проверка восстановления. После этого меняются `CATALOG_DATABASE_URL`
+и `CATALOG_REVISION`, API перезапускается. Прямое редактирование рабочего каталога пока не предусмотрено.
+
+Загрузчик работает только с отдельной локальной БД `domofomka_catalog_build_*`
+и отказывается перезаписывать уже загруженные таблицы.
+Подготовленные дампы и исходные файлы остаются вне Git. При переносе дамп можно подать
+через SSH прямо в `pg_restore`, чтобы не занимать на VDS место промежуточным файлом.
+
+БД очереди резервируется ежедневно отдельно. Неизменяемый каталог получает снимок при публикации,
+сохранённый вне VDS; ежедневное копирование гигабайтного каталога не требуется.
+Восстановление ролей и выдача `CONNECT`, `USAGE`, `SELECT` — отдельный шаг от восстановления данных.
+Роль API не получает прав создания объектов, изменения таблиц или записи кодов.
+
+Ограничения RAM, WAL, временных файлов, соединений и таймаутов задаются в `.env`.
+`max_wal_size` — целевой размер для контрольных точек, а не жёсткий предел диска,
+поэтому при восстановлении дополнительно контролируется свободное место.
