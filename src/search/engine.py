@@ -219,6 +219,12 @@ class Catalog:
         for row in candidates:
             if row["house"] != query.house:
                 continue
+            if not row["guid"] and re.search(
+                r"\b(?:ул|улица|проспект|пр-кт|шоссе|бульвар|набережная|переулок|проезд)\b", row["city"], re.I
+            ):
+                # Misaligned source columns are not a verified v2 address. Let
+                # compatibility fallback preserve v1 until the row is reviewed.
+                continue
             street_words = address_words(row["street"]).split()
             if not any(
                 (word == part if any(c.isdigit() for c in word) else ratio(word, part) / 100 >= self.minimum_similarity)

@@ -145,3 +145,17 @@ def test_split_street_prefix_preserves_the_explicit_city_and_house(catalog, quer
     assert catalog.resolve(f"Москва {query} 6", [proper])["building_id"] == "proper"
     assert catalog.resolve(f"Подольск {query} 6", [proper])["status"] == "not_found"
     assert catalog.resolve(f"Москва {query} 7", [proper])["status"] == "not_found"
+
+
+def test_misaligned_legacy_city_and_street_do_not_become_an_automatic_v2_answer(catalog):
+    corrupt = {
+        "id": "legacy:bad",
+        "guid": None,
+        "city": "Санкт-Петербург, Заречная ул.",
+        "street": "Парнас",
+        "house": "33",
+        "display": "Санкт-Петербург, Заречная ул., улица Парнас, дом 33",
+        "region": "78",
+        "lineage": "",
+    }
+    assert catalog.resolve("Парнас Заречная 33", [corrupt])["status"] == "not_found"
