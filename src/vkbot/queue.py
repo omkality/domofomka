@@ -13,7 +13,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from src.network import network_settings
-from src.telemetry import measured
+from src.telemetry import active, measured
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bot_inbox (
@@ -99,7 +99,9 @@ class QueueStore:
         self.environment = "unknown"
 
     def _observe(self, conn: psycopg.Connection, inbox_id: int) -> None:
-        if self.telemetry:
+        # A measured worker flushes once after the operation. Ingest, failures
+        # outside that scope and callers without Capture still snapshot here.
+        if self.telemetry and not active():
             from src.vkbot.telemetry import guarded, refresh, register
 
             def update() -> None:

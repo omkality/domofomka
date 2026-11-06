@@ -343,3 +343,22 @@ def test_schema_failure_disables_only_telemetry(observed_store, monkeypatch):
     store.initialize()
     assert store.telemetry is False
     assert store.ingest([incoming(store)]) == 1
+
+
+def test_maintenance_repairs_state_when_process_dies_before_diagnostic_flush(observed_store):
+    store = observed_store
+    store.ingest([incoming(store)])
+    job = store.claim("bot_inbox")
+    with Capture():
+        store.plan(job, [{"method": "send", "params": {"peer_id": 10, "message": "answer"}}])
+    # Simulate losing the capture after commit: no persist() call.
+    outgoing = store.claim("bot_outbox")
+    with Capture():
+        store.finish(outgoing)
+    database.maintain(store, 10)
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT telemetry_state,outcome FROM request_log WHERE group_id=%s", (store.group_id,)
+        ).fetchone()
+        assert row["telemetry_state"] == "partial"
+        assert row["outcome"]["delivery_status"] == "accepted_by_vk"

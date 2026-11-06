@@ -241,12 +241,10 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
             if not register(conn, store.group_id, inbox, environment):
                 return
             rid = identity(store.group_id, inbox)
+            spans, searches, attempts = [], [], []
             for row in packet["spans"]:
                 attrs = row["attributes"]
-                conn.execute(
-                    """INSERT INTO request_spans(id,request_id,parent_span_id,queue,job_id,attempt,service,stage,
-                    started_at,duration_ms,status,error_type,error_code,attributes,instance_id)
-                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,to_timestamp(%s),%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                spans.append(
                     (
                         row["id"],
                         rid,
@@ -267,8 +265,7 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                 )
                 if row["kind"] == "search":
                     result = attrs.get("result", {})
-                    conn.execute(
-                        """INSERT INTO search_runs VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                    searches.append(
                         (
                             row["id"],
                             attrs["engine"],
@@ -284,8 +281,7 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                         ),
                     )
                 if row["kind"] == "network":
-                    conn.execute(
-                        "INSERT INTO network_attempts VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                    attempts.append(
                         (
                             row["id"],
                             attrs["target"],
@@ -297,6 +293,22 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                             attrs.get("provider_error_code"),
                             Jsonb(attrs),
                         ),
+                    )
+            with conn.cursor() as cursor:
+                cursor.executemany(
+                    """INSERT INTO request_spans(id,request_id,parent_span_id,queue,job_id,attempt,service,stage,
+                    started_at,duration_ms,status,error_type,error_code,attributes,instance_id)
+                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,to_timestamp(%s),%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                    spans,
+                )
+                if searches:
+                    cursor.executemany(
+                        "INSERT INTO search_runs VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", searches
+                    )
+                if attempts:
+                    cursor.executemany(
+                        "INSERT INTO network_attempts VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                        attempts,
                     )
             notes = packet["notes"]
             if queue == "bot_outbox" and notes.get("decision") == "delivery_obsolete":
@@ -331,11 +343,23 @@ def maintain(store: Any, batch: int) -> dict:
         # Refresh terminal transitions made without a worker (expiry, superseding).
         changed = conn.execute(
             """SELECT r.inbox_id FROM request_log r JOIN bot_inbox i ON i.id=r.inbox_id AND i.group_id=r.group_id
-            WHERE r.group_id=%s AND r.outcome->>'inbox_status' IS DISTINCT FROM i.status LIMIT %s""",
+            WHERE r.group_id=%s AND (
+              r.outcome->>'inbox_status' IS DISTINCT FROM i.status OR
+              coalesce((r.outcome->>'outbox_total')::int,0)<>
+                (SELECT count(*) FROM bot_outbox o WHERE o.inbox_id=i.id) OR
+              coalesce((r.outcome->>'outbox_done')::int,0)+coalesce((r.outcome->>'outbox_skipped')::int,0)<>
+                (SELECT count(*) FROM bot_outbox o WHERE o.inbox_id=i.id AND o.status='done') OR
+              coalesce((r.outcome->>'outbox_failed')::int,0)<>
+                (SELECT count(*) FROM bot_outbox o WHERE o.inbox_id=i.id AND o.status='failed')
+            ) LIMIT %s""",
             (store.group_id, batch),
         ).fetchall()
         for row in changed:
             refresh(conn, store.group_id, row["inbox_id"])
+            conn.execute(
+                "UPDATE request_log SET telemetry_state='partial' WHERE id=%s",
+                (identity(store.group_id, row["inbox_id"]),),
+            )
         deleted = conn.execute(
             """DELETE FROM request_log WHERE id IN (
             SELECT r.id FROM request_log r WHERE r.group_id=%s AND r.updated_at<to_timestamp(%s)

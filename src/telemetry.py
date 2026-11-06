@@ -224,8 +224,3 @@ def merge(packet: dict) -> None:
         capture.add(row)
     note(**packet.get("notes", {}))
     capture.dropped += packet.get("dropped", 0)
-
-
-def current_packet() -> dict | None:
-    capture = _capture.get()
-    return capture.packet() if capture else None
