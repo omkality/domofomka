@@ -1,0 +1,28 @@
+{
+  "source_rows": 1008682,
+  "unique_code_records": 1002183,
+  "exact_duplicate_code_records": 6499,
+  "gar_buildings": 34851597,
+  "code_bearing_identities": 108533,
+  "street_documents": 1077597,
+  "resolution": [
+    {
+      "resolution": "ambiguous",
+      "source_rows": 9100,
+      "identities": 2003
+    },
+    {
+      "resolution": "gar_exact",
+      "source_rows": 792465,
+      "identities": 68004
+    },
+    {
+      "resolution": "unresolved",
+      "source_rows": 207117,
+      "identities": 38526
+    }
+  ],
+  "source_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
+  "normalization_schema": 2,
+  "serving_bytes": 824918016
+}

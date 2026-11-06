@@ -1,7 +1,7 @@
 # domofomka
 
 Application for getting the intercom code at the given address.
-Used stack: *Litestar*, *Granian*, *SQLite*, *PostgreSQL* (bot queue), *VK API*.
+Used stack: *Litestar*, *Granian*, *SQLite* (legacy source and indexed read-only catalog), *PostgreSQL* (bot queue), optional *OpenSearch*, *VK API*.
 
 ## Architecture
 
@@ -12,7 +12,12 @@ flowchart LR
     H[VK history recovery] --> I
     I --> W[Workers]
     W --> A[HTTP API]
-    A --> DB[(SQLite codes)]
+    A --> V2[API v2: query normalization]
+    V2 --> C[(Catalog: street index, exact house and codes)]
+    V2 --> OS[Optional OpenSearch candidates]
+    OS --> C
+    V2 -->|Unavailable or no match| V1[API v1: legacy search]
+    V1 --> DB[(Original SQLite codes)]
     A --> D[DaData geocoding]
     W --> O[(PostgreSQL outbox)]
     O -->|Send or edit with retries| VK
@@ -34,6 +39,29 @@ flowchart LR
 Optional `VK_PROXY_URL` and `DADATA_PROXY_URL` point to the host-side SSH tunnel; empty values use direct connections. Tinyproxy listens on localhost and forwards HTTPS with CONNECT without decrypting it. OpenSSH and systemd maintain the tunnel outside Docker.
 
 Only connection failures trigger direct fallback. API errors and response timeouts do not switch routes. Safe VK retries keep the same `random_id` or edit result. Timeouts, retries and recovery intervals are configurable in `.env`; see [`.env.example`](.env.example) for defaults. Restart containers after changing them.
+
+## Search v2
+
+`/api/v1/codes/msg` and `/api/v1/codes/geo` preserve the legacy API; `/codes/*` remains compatible.
+`/api/v2/codes/*` handles noisy input, city aliases and written street numbers. House numbers and blocks remain exact.
+Ambiguous addresses require a choice. A recognized house without codes gets an explicit answer.
+
+```mermaid
+flowchart LR
+    GAR[GAR XML: active houses and hierarchy] --> IMP[Streaming import by region]
+    OLD[Original codes.db] --> N[Canonical identities, aliases and provenance]
+    IMP --> N
+    N --> CAT[Read-only catalog]
+    N --> IDX[Versioned OpenSearch index]
+    HISTORY[Private VK history export] --> AUDIT[Aggregate audit and dialog-split regression corpus]
+    AUDIT --> TEST[Compare v1 and v2 before release]
+```
+
+The full GAR build is kept offline; the serving catalog stores packed known house numbers and separate code-bearing identities.
+Large datasets and raw message histories stay in ignored `artifacts/`. They never go into Git or Docker build contexts.
+The compact serving catalog runs beside the German test bot; it does not depend on a development PC.
+OpenSearch is optional: its candidates are merged with exact catalog candidates to protect recall. The local Docker lab supports comparative testing before moving OpenSearch to a suitably sized host.
+Build and validation details: [search v2 notes](docs/search-v2.md).
 
 ## Prerequisites
 * Docker & Docker Compose
@@ -68,10 +96,6 @@ EXPECTED_VK_GROUP_ID=your_vk_group_id_here
 POSTGRES_PASSWORD=replace_with_long_random_password
 QUEUE_DATABASE_URL=postgresql://domofomka:${POSTGRES_PASSWORD}@queue:5432/domofomka
 
-# Redis Configuration
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_PASSWORD=
 CACHE_EXPIRE_TIME=1200
 ANTI_SPAM_TIME=5
 
@@ -158,4 +182,4 @@ docker compose up --build -d
 
 *soon*
 
-The service API is published on localhost only. Container memory, process counts, Redis cache size and log rotation are configurable in `.env`.
+The service API is published on localhost only. Container memory, process counts, queue resources and log rotation are configurable in `.env`.
