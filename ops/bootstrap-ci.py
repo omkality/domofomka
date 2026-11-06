@@ -20,7 +20,7 @@ def retire_build_cache() -> None:
     records = {row["ID"]: row for row in (json.loads(line) for line in raw.splitlines())}
 
     def depth(key: str) -> int:
-        return 1 + max((depth(p) for p in records[key].get("Parents", []) if p in records), default=0)
+        return 1 + max((depth(p) for p in (records[key].get("Parents") or []) if p in records), default=0)
 
     patterns = (
         "uv sync --frozen --group api",

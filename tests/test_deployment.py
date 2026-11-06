@@ -2,8 +2,10 @@
 
 import io
 import json
+import runpy
 import subprocess
 import tarfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -130,3 +132,24 @@ def test_failed_manual_rollback_restores_current_release(tmp_path, monkeypatch):
         deployment.rollback()
     assert calls == [old, new]
     assert json.loads(deployment.state_path.read_text()) == state
+
+
+def test_bootstrap_cache_cleanup_handles_root_and_ignores_shared_or_foreign_steps(monkeypatch):
+    function = runpy.run_path(str(Path(__file__).parents[1] / "ops/bootstrap-ci.py"))["retire_build_cache"]
+    records = [
+        {"ID": "base", "Parents": None, "Reclaimable": True, "Shared": False, "Description": "python base"},
+        {
+            "ID": "old",
+            "Parents": ["base"],
+            "Reclaimable": True,
+            "Shared": False,
+            "Description": "mount / from exec /bin/sh -c uv sync --frozen --group api",
+        },
+        {"ID": "vpn", "Parents": None, "Reclaimable": True, "Shared": False, "Description": "amnezia"},
+        {"ID": "active", "Parents": ["base"], "Reclaimable": True, "Shared": True, "Description": "COPY src/ ./src/"},
+    ]
+    monkeypatch.setattr(subprocess, "check_output", lambda *a, **k: "\n".join(map(json.dumps, records)))
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: calls.append(args))
+    function()
+    assert calls == [["docker", "buildx", "prune", "--filter", "id=old", "--force"]]
