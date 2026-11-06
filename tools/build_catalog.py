@@ -133,7 +133,14 @@ def build(legacy: Path, regions: Path, output: Path):
     db = sqlite3.connect(work)
     db.executescript(SCHEMA)
     db.execute("PRAGMA cache_size=-524288")
-    stats = {"gar_buildings": 0, "legacy_rows": 0, "linked_groups": 0, "unresolved_groups": 0, "ambiguous_groups": 0}
+    stats = {
+        "gar_buildings": 0,
+        "legacy_rows": 0,
+        "linked_groups": 0,
+        "unresolved_groups": 0,
+        "ambiguous_groups": 0,
+        "normalization_schema": 2,
+    }
     files = [p for p in sorted(regions.glob("gar-*.db")) if ".building." not in p.name]
     for region in files:
         db.execute("ATTACH DATABASE ? AS region", (str(region.resolve()),))
@@ -184,6 +191,7 @@ def relink(legacy: Path, output: Path) -> None:
     stats["unique_codes"] = db.execute("SELECT count(*) FROM codes").fetchone()[0]
     stats["buildings_with_codes"] = db.execute("SELECT count(distinct building_id) FROM codes").fetchone()[0]
     stats["identity_schema"] = 2
+    stats["normalization_schema"] = 2
     db.execute("UPDATE metadata SET value=? WHERE key='build'", (json.dumps(stats),))
     db.commit()
     db.close()
@@ -203,6 +211,10 @@ if __name__ == "__main__":
         with sqlite3.connect(a.output) as db:
             normalize_keys(db)
             index_streets(db)
+            stats = json.loads(db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()[0])
+            stats["street_documents"] = db.execute("SELECT count(*) FROM streets").fetchone()[0]
+            stats["normalization_schema"] = 2
+            db.execute("UPDATE metadata SET value=? WHERE key='build'", (json.dumps(stats),))
         print(json.dumps({"keys_refreshed": True}), flush=True)
     elif a.relink_only:
         relink(a.legacy, a.output)

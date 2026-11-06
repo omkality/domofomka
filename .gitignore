@@ -12,6 +12,6 @@ test_main.http
 .venv/
 *.tar
 *.tar.gz
-/artifacts
 /artifacts/
+/.codex-local/
 /history.txt
