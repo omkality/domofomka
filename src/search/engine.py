@@ -424,7 +424,7 @@ def street_vocabulary(path: str, revision: int) -> list[str]:
         return [r[0] for r in db.execute("SELECT term FROM vocabulary")]
 
 
-def documents(path: str) -> Iterator[dict]:
+def documents(path: str, *, structured: bool = False) -> Iterator[dict]:
     catalog = Catalog(path)
     with catalog.connect() as db:
         compact = catalog._compact(db)
@@ -440,4 +440,22 @@ def documents(path: str) -> Iterator[dict]:
                         (row["city_key"], row["street_key"]),
                     )
                 ]
-            yield {"id": row["id"], "words": row["words"], "house": houses}
+            document = {"id": row["id"], "words": row["words"], "house": houses}
+            if structured:
+                document.update(
+                    city=row["city_key"],
+                    street=row["street_key"],
+                    coded_house=(
+                        [
+                            r[0]
+                            for r in db.execute(
+                                "SELECT DISTINCT house FROM buildings WHERE city_key=? AND street_key=? "
+                                "AND EXISTS(SELECT 1 FROM codes c WHERE c.building_id=buildings.id)",
+                                (row["city_key"], row["street_key"]),
+                            )
+                        ]
+                        if not compact or row["has_codes"]
+                        else []
+                    ),
+                )
+            yield document

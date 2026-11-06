@@ -7,6 +7,7 @@ million identical street/code rows for every query. Only aggregate metrics publi
 import argparse
 import collections
 import concurrent.futures
+import hashlib
 import json
 import re
 import sqlite3
@@ -25,6 +26,19 @@ expected_ids = {}
 catalogs = []
 search_clients = []
 search_config = {}
+
+
+def source_fingerprints() -> dict[str, str]:
+    root = Path(__file__).resolve().parents[1]
+    return {
+        name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+        for name in [
+            "tools/evaluate_search.py",
+            "src/search/normalize.py",
+            "src/search/engine.py",
+            "src/services/codes.py",
+        ]
+    }
 
 
 def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_config: dict | None = None):
@@ -128,6 +142,9 @@ if __name__ == "__main__":
     p.add_argument("--candidate-limit", type=int, default=100)
     p.add_argument("--output", type=Path, default=Path("artifacts/private/evaluation"))
     a = p.parse_args()
+    sources = source_fingerprints()
+    with Path(a.catalog).open("rb") as catalog_file:
+        catalog_sha256 = hashlib.file_digest(catalog_file, "sha256").hexdigest()
     a.output.mkdir(parents=True, exist_ok=True)
     records = []
     seen = set()
@@ -138,10 +155,23 @@ if __name__ == "__main__":
             if identity not in seen:
                 records.append(row)
                 seen.add(identity)
-    import hashlib
-
     records.sort(key=lambda r: hashlib.sha256(json.dumps(r, sort_keys=True).encode()).hexdigest())
     records = records[: a.limit] if a.limit else records
+    (a.output / "inputs.json").write_text(
+        json.dumps(
+            {
+                "source_sha256": sources,
+                "catalog_sha256": catalog_sha256,
+                "records_sha256": hashlib.sha256(
+                    json.dumps(records, ensure_ascii=False, sort_keys=True).encode()
+                ).hexdigest(),
+                "queries": len(records),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf8",
+    )
     counters = collections.Counter()
     times = []
     with (
@@ -169,11 +199,15 @@ if __name__ == "__main__":
             if i % 500 == 0:
                 print(json.dumps({"evaluated": i + 1, "total": len(records)}), flush=True)
     times.sort()
+    if source_fingerprints() != sources:
+        raise RuntimeError("Source changed during replay; discard these results and rerun on a frozen revision")
     summary = {
         "queries": len(records),
-        "query_configuration": {"fuzziness": a.fuzziness, "prefix_length": a.prefix_length, "limit": a.candidate_limit}
-        if a.opensearch_url
-        else None,
+        "query_configuration": (
+            {"fuzziness": a.fuzziness, "prefix_length": a.prefix_length, "limit": a.candidate_limit}
+            if a.opensearch_url
+            else None
+        ),
         "counts": dict(counters),
         "p50_ms": times[len(times) // 2] if times else 0,
         "p95_ms": times[int(len(times) * 0.95)] if times else 0,
