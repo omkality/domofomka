@@ -26,6 +26,8 @@ def settings() -> SimpleNamespace:
         domofomka_api_host="api",
         domofomka_api_port=8000,
         anti_spam_time=5,
+        geo_retry_delay_seconds=60,
+        geo_retry_max_age_seconds=1800,
         recovery_overlap_seconds=15,
         recovery_bootstrap_seconds=100,
     )

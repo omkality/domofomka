@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Domofomka dev queue backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

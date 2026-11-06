@@ -11,19 +11,23 @@ from src.vkbot.runtime import validate_environment
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["status", "pause", "resume", "retry-failed", "fault"])
+    parser.add_argument("command", choices=["status", "health", "pause", "resume", "retry-failed", "fault"])
     parser.add_argument("name", nargs="?", choices=["api", "vk-send", "vk-send-after", "vk-edit", "vk-edit-after"])
     parser.add_argument("count", nargs="?", type=int, default=1)
     args = parser.parse_args()
     validate_environment(settings)
     store = QueueStore(settings.queue_database_url, int(settings.vk_group_id), settings.queue_lease_seconds)
     store.initialize()
-    if args.command == "status":
+    if args.command == "health":
+        from src.vkbot.maintenance import health
+
+        sys.stdout.write(json.dumps(health(store)) + "\n")
+    elif args.command == "status":
         sys.stdout.write(json.dumps(store.stats(), ensure_ascii=False, default=str) + "\n")
     elif args.command in {"pause", "resume"}:
         store.set_state("paused", args.command == "pause")
     elif args.command == "retry-failed":
-        store.retry_failed()
+        store.retry_failed(settings.geo_retry_max_age_seconds)
     elif args.command == "fault":
         if not settings.dev_faults_enabled or args.name is None:
             parser.error("Fault injection is disabled or no fault name provided")

@@ -132,7 +132,7 @@ class Processor:
             raise LookupUnavailable("Lookup API is temporarily unavailable") from None
 
     def plan(self, job: dict) -> None:
-        if job["kind"] == "message_new":
+        if job["kind"] in {"message_new", "geo_retry"}:
             self._message(job)
         elif job["kind"] == "message_event":
             self._callback(job)
@@ -140,6 +140,9 @@ class Processor:
             raise ValueError("Unsupported inbox event")
 
     def _message(self, job: dict) -> None:
+        if job["kind"] == "geo_retry" and self.store.geo_retry_current(job) is False:
+            self.store.defer_geo_retry(job, self.settings.geo_retry_delay_seconds)
+            return
         message = job["payload"]["message"]
         peer = job["peer_id"]
         base = {"peer_id": peer}
@@ -171,8 +174,9 @@ class Processor:
             except LookupUnavailable:
                 if not geo:
                     raise
-                # Respond to an unavailable geocoder, rather than blocking this
-                # peer indefinitely behind retries of the same geolocation.
+                if job["kind"] == "geo_retry":
+                    self.store.defer_geo_retry(job, self.settings.geo_retry_delay_seconds)
+                    return
                 self.store.plan(
                     job,
                     [
@@ -181,9 +185,15 @@ class Processor:
                             "params": dict(
                                 base,
                                 message=(
-                                    "Не удалось определить адрес по геолокации. Пожалуйста, отправьте адрес текстом."
+                                    "Не удалось определить адрес по геолокации. "
+                                    "Запрос сохранён, попробую повторить позже. "
+                                    "Можно отправить адрес текстом — он заменит отложенный запрос."
                                 ),
                             ),
+                            "defer_geo": {
+                                "delay": self.settings.geo_retry_delay_seconds,
+                                "max_age": self.settings.geo_retry_max_age_seconds,
+                            },
                         }
                     ],
                 )
@@ -261,6 +271,27 @@ class Processor:
         cmid = int(obj["conversation_message_id"])
         result = self.store.message_context(peer, cmid)
         choice_action = any(key in payload for key in ("dismiss_choices", "select_building", "choice_page"))
+        if choice_action and result is None:
+            self.store.plan(
+                job,
+                [
+                    {
+                        "method": "edit",
+                        "params": {
+                            "peer_id": peer,
+                            "conversation_message_id": cmid,
+                            "message": (
+                                "Срок хранения вариантов истёк. Пришлите адрес целиком одним сообщением: "
+                                "город, улицу и номер дома."
+                            ),
+                            "keyboard": serialize_inline_keyboard([]),
+                        },
+                        "context": {"status": "dismissed", "data": {}},
+                        "close_choices": True,
+                    }
+                ],
+            )
+            return
         if (
             (choice_action and self.store.choices_closed(peer, cmid) is True)
             or (choice_action and result and result.get("status") != "ambiguous" and not result.get("candidates"))
@@ -402,6 +433,9 @@ class Processor:
         params = dict(job["params"])
         if not self.store.renew("bot_outbox", job):
             raise RuntimeError("Queue lease lost before dispatch")
+        if job.get("result") is None and self.store.outbox_geo_current(job) is False:
+            self.store.finish(job)
+            return
         if job["method"] == "send":
             # The database sequence is persistent and unique for this queue.
             if job["id"] > 2147483647:

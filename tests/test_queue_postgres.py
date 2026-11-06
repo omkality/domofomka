@@ -19,7 +19,7 @@ def store() -> QueueStore:
     queue.initialize()
     yield queue
     with queue.connect() as conn:
-        for table in ("bot_outbox", "bot_inbox", "bot_state", "bot_message_context"):
+        for table in ("bot_outbox", "bot_inbox", "bot_state", "bot_message_context", "bot_receipts"):
             conn.execute(f"DELETE FROM {table} WHERE group_id=%s", (group,))
 
 
@@ -38,6 +38,154 @@ def record(store: QueueStore, peer: int = 10, cmid: int = 1) -> dict:
             }
         },
     )
+
+
+def test_retention_preserves_delivery_receipts_and_active_work(store):
+    from src.vkbot.maintenance import compact
+
+    first = record(store, 10, 1)
+    store.ingest([first, record(store, 20, 2)])
+    job = store.claim("bot_inbox")
+    store.plan(job, [{"method": "send", "params": {"peer_id": 10, "message": "answer"}}])
+    # Planned but undelivered work must survive regardless of inbox age.
+    with store.connect() as db:
+        db.execute("UPDATE bot_inbox SET completed_at=1 WHERE group_id=%s AND status='done'", (store.group_id,))
+    assert compact(store, 60, 60, 50)["inbox_removed"] == 0
+    outgoing = store.claim("bot_outbox")
+    store.finish(outgoing)
+    with store.connect() as db:
+        db.execute("UPDATE bot_outbox SET completed_at=1 WHERE group_id=%s", (store.group_id,))
+    assert compact(store, 60, 60, 50) == {"inbox_removed": 1, "outbox_removed": 1, "contexts_removed": 0}
+    assert store.ingest([first], cursor="retained") == 0
+    assert store.get_state("longpoll_ts") == "retained"
+    pending = store.claim("bot_inbox")
+    assert pending["peer_id"] == 20
+    store.fail("bot_inbox", pending, "test", 0, permanent=True)
+    assert compact(store, 60, 60, 50)["inbox_removed"] == 0
+
+
+def test_retention_and_concurrent_replay_do_not_resurrect_a_completed_message(store):
+    from src.vkbot.maintenance import compact
+
+    first = record(store)
+    store.ingest([first])
+    store.plan(store.claim("bot_inbox"), [])
+    with store.connect() as db:
+        db.execute("UPDATE bot_inbox SET completed_at=1 WHERE group_id=%s", (store.group_id,))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        tasks = [pool.submit(compact, store, 60, 60, 50), pool.submit(store.ingest, [first])]
+        for task in tasks:
+            task.result()
+    assert store.ingest([first]) == 0
+    assert store.claim("bot_inbox") is None
+
+
+def deferred_geo(store):
+    store.ingest([record(store)])
+    original = store.claim("bot_inbox")
+    store.plan(
+        original,
+        [
+            {
+                "method": "send",
+                "params": {"peer_id": 10, "message": "saved"},
+                "defer_geo": {"delay": 3600, "max_age": 7200},
+            }
+        ],
+    )
+    with store.connect() as db:
+        child = db.execute(
+            "SELECT * FROM bot_inbox WHERE group_id=%s AND kind='geo_retry'", (store.group_id,)
+        ).fetchone()
+    return original, child
+
+
+def test_deferred_geo_survives_restart_and_new_text_supersedes_it(store):
+    _, child = deferred_geo(store)
+    recreated = QueueStore(store.dsn, store.group_id)
+    assert recreated.claim("bot_inbox") is None
+    store.ingest([record(store, cmid=2)])
+    with store.connect() as db:
+        db.execute("UPDATE bot_inbox SET next_at=0 WHERE id=%s", (child["id"],))
+    latest = recreated.claim("bot_inbox")
+    assert latest["kind"] == "message_new"
+    with store.connect() as db:
+        assert db.execute("SELECT status FROM bot_inbox WHERE id=%s", (child["id"],)).fetchone()["status"] == "done"
+
+
+def test_deferred_geo_retries_without_new_notices_and_expires(store):
+    _, child = deferred_geo(store)
+    with store.connect() as db:
+        db.execute("UPDATE bot_inbox SET next_at=0 WHERE id=%s", (child["id"],))
+    retry = store.claim("bot_inbox")
+    assert store.geo_retry_current(retry)
+    store.defer_geo_retry(retry, 60)
+    assert store.claim("bot_inbox") is None
+    with store.connect() as db:
+        db.execute(
+            "UPDATE bot_inbox SET payload=jsonb_set(payload,'{_geo_deadline}','1'),next_at=0 WHERE id=%s",
+            (child["id"],),
+        )
+    assert store.claim("bot_inbox") is None
+
+
+def test_new_request_cancels_already_prepared_geo_answer_before_delivery(store):
+    _, child = deferred_geo(store)
+    notice = store.claim("bot_outbox")
+    store.finish(notice)
+    with store.connect() as db:
+        db.execute("UPDATE bot_inbox SET next_at=0 WHERE id=%s", (child["id"],))
+    retry = store.claim("bot_inbox")
+    store.plan(retry, [{"method": "send", "params": {"peer_id": 10, "message": "old geo result"}}])
+    store.ingest([record(store, cmid=2)])
+    outgoing = store.claim("bot_outbox")
+    assert store.outbox_geo_current(outgoing) is False
+
+
+def test_expired_geo_is_retained_as_failure_and_can_be_explicitly_retried(store):
+    _, child = deferred_geo(store)
+    with store.connect() as db:
+        db.execute(
+            "UPDATE bot_inbox SET payload=jsonb_set(payload,'{_geo_deadline}','1'),next_at=0 WHERE id=%s",
+            (child["id"],),
+        )
+    assert store.claim("bot_inbox") is None
+    with store.connect() as db:
+        expired = db.execute("SELECT status,last_error FROM bot_inbox WHERE id=%s", (child["id"],)).fetchone()
+        assert expired["status"] == "failed"
+        assert "GeoRetryExpired" in expired["last_error"]
+    store.retry_failed(60)
+    retry = store.claim("bot_inbox")
+    assert retry["id"] == child["id"]
+    assert store.geo_retry_current(retry)
+
+
+def test_prepared_geo_answer_survives_retry_deadline_if_not_superseded(store):
+    _, child = deferred_geo(store)
+    store.finish(store.claim("bot_outbox"))
+    with store.connect() as db:
+        db.execute("UPDATE bot_inbox SET next_at=0 WHERE id=%s", (child["id"],))
+    retry = store.claim("bot_inbox")
+    with store.connect() as db:
+        db.execute("UPDATE bot_inbox SET payload=jsonb_set(payload,'{_geo_deadline}','1') WHERE id=%s", (child["id"],))
+    store.plan(retry, [{"method": "send", "params": {"peer_id": 10, "message": "ready answer"}}])
+    outgoing = store.claim("bot_outbox")
+    assert store.outbox_geo_current(outgoing) is True
+
+
+def test_retention_expires_context_but_does_not_remove_pending_peer_context(store):
+    from src.vkbot.maintenance import compact
+
+    with store.connect() as db:
+        for peer in (10, 20):
+            db.execute("INSERT INTO bot_message_context VALUES(%s,%s,42,'{}',1)", (store.group_id, peer))
+            db.execute("INSERT INTO bot_state VALUES(%s,%s,'true')", (store.group_id, f"choices_closed:{peer}:42"))
+    store.ingest([record(store, 20)])
+    assert compact(store, 60, 60, 50)["contexts_removed"] == 1
+    assert store.message_context(10, 42) is None
+    assert store.choices_closed(10, 42) is False
+    assert store.message_context(20, 42) == {}
+    assert store.choices_closed(20, 42) is True
 
 
 def test_duplicate_batches_and_checkpoint_are_atomic(store: QueueStore) -> None:

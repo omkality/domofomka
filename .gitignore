@@ -13,5 +13,6 @@ test_main.http
 *.tar
 *.tar.gz
 /artifacts/
+/backups/
 /.codex-local/
 /history.txt

@@ -2,6 +2,7 @@
 .venv
 .codex-local
 artifacts
+backups
 history.txt
 .env*
 docs

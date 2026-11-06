@@ -44,6 +44,14 @@ CREATE TABLE IF NOT EXISTS bot_message_context (
  group_id BIGINT NOT NULL, peer_id BIGINT NOT NULL, conversation_message_id BIGINT NOT NULL,
  result JSONB NOT NULL, PRIMARY KEY(group_id,peer_id,conversation_message_id)
 );
+CREATE TABLE IF NOT EXISTS bot_receipts (
+ group_id BIGINT NOT NULL,event_key TEXT NOT NULL,PRIMARY KEY(group_id,event_key)
+);
+ALTER TABLE bot_inbox ADD COLUMN IF NOT EXISTS completed_at DOUBLE PRECISION;
+ALTER TABLE bot_outbox ADD COLUMN IF NOT EXISTS completed_at DOUBLE PRECISION;
+ALTER TABLE bot_message_context ADD COLUMN IF NOT EXISTS updated_at DOUBLE PRECISION
+ NOT NULL DEFAULT EXTRACT(EPOCH FROM CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS bot_inbox_completed ON bot_inbox(group_id,completed_at) WHERE status='done';
 """
 
 
@@ -97,6 +105,11 @@ class QueueStore:
     def initialize(self) -> None:
         with self.connect() as conn:
             conn.execute(SCHEMA)
+            for table in ("bot_inbox", "bot_outbox"):
+                conn.execute(
+                    f"UPDATE {table} SET completed_at=%s WHERE group_id=%s AND status='done' AND completed_at IS NULL",
+                    (time.time(), self.group_id),
+                )
             conn.execute(
                 "INSERT INTO bot_state VALUES (%s,'tracking_started',%s) ON CONFLICT DO NOTHING",
                 (self.group_id, Jsonb(time.time())),
@@ -129,8 +142,15 @@ class QueueStore:
     ) -> int:
         added = 0
         with self.connect() as conn:
+            # Serializes receipt compaction with both collector and history replay.
+            conn.execute("SELECT pg_advisory_xact_lock(20261106,%s)", (self.group_id,))
             for record in records:
                 assert record["group_id"] == self.group_id
+                if conn.execute(
+                    "SELECT 1 FROM bot_receipts WHERE group_id=%s AND event_key=%s",
+                    (self.group_id, record["event_key"]),
+                ).fetchone():
+                    continue
                 row = conn.execute(
                     """INSERT INTO bot_inbox
                     (group_id,event_key,peer_id,kind,payload,occurred_at,created_at,status)
@@ -155,6 +175,14 @@ class QueueStore:
                             (safe_error(exc), row["id"]),
                         )
                 added += bool(row)
+                if row and record["kind"] == "message_new":
+                    conn.execute(
+                        """UPDATE bot_inbox SET status='done',completed_at=%s WHERE group_id=%s AND peer_id=%s
+                        AND kind='geo_retry' AND status IN ('deferred','failed') AND id<%s""",
+                        (time.time(), self.group_id, record["peer_id"], row["id"]),
+                    )
+                if row and record.get("status") == "done":
+                    conn.execute("UPDATE bot_inbox SET completed_at=%s WHERE id=%s", (time.time(), row["id"]))
             if cursor is not None:
                 self._state(conn, "longpoll_ts", str(cursor))
         return added
@@ -237,8 +265,13 @@ class QueueStore:
         }
         stored = dict(obj, _queue_receipt=receipt)
         conn.execute(
-            "UPDATE bot_inbox SET payload=%s,status=%s WHERE id=%s",
-            (Jsonb(stored), "done" if throttled else record.get("status", "pending"), inbox_id),
+            "UPDATE bot_inbox SET payload=%s,status=%s,completed_at=%s WHERE id=%s",
+            (
+                Jsonb(stored),
+                "done" if throttled else record.get("status", "pending"),
+                now if throttled else None,
+                inbox_id,
+            ),
         )
         self._state(conn, name, state)
 
@@ -270,10 +303,23 @@ class QueueStore:
         now = time.time()
         owner = str(uuid.uuid4())
         with self.connect() as conn:
+            if table == "bot_inbox":
+                conn.execute(
+                    """UPDATE bot_inbox i SET status='done',completed_at=%s
+                    WHERE i.group_id=%s AND i.status='deferred' AND EXISTS(
+                    SELECT 1 FROM bot_inbox newer WHERE newer.group_id=i.group_id AND newer.peer_id=i.peer_id
+                    AND newer.kind='message_new' AND newer.id>(i.payload->>'_geo_source_id')::bigint)""",
+                    (now, self.group_id),
+                )
+                conn.execute(
+                    """UPDATE bot_inbox SET status='failed',last_error=%s WHERE group_id=%s AND status='deferred'
+                    AND (payload->>'_geo_deadline')::double precision<=%s""",
+                    (json.dumps({"type": "GeoRetryExpired"}), self.group_id, now),
+                )
             row = conn.execute(
                 f"""SELECT q.* FROM {table} q
                 WHERE q.group_id=%s AND (
-                  (q.status='pending' AND q.next_at<=%s) OR
+                  (q.status IN ('pending','deferred') AND q.next_at<=%s) OR
                   (q.status='processing' AND q.lease_until<%s))
                 AND NOT EXISTS (SELECT 1 FROM {table} older
                   WHERE older.group_id=q.group_id AND older.peer_id=q.peer_id
@@ -304,7 +350,28 @@ class QueueStore:
     def plan(self, job: dict, effects: list[dict], callback_at: float | None = None) -> None:
         with self.connect() as conn:
             self._owned(conn, "bot_inbox", job)
+            if job["kind"] == "geo_retry" and self._geo_superseded(conn, job["peer_id"], job["payload"]):
+                effects = []
             for index, effect in enumerate(effects):
+                if effect.get("defer_geo"):
+                    retry = effect["defer_geo"]
+                    payload = dict(
+                        job["payload"], _geo_source_id=job["id"], _geo_deadline=time.time() + retry["max_age"]
+                    )
+                    conn.execute(
+                        """INSERT INTO bot_inbox
+                        (group_id,event_key,peer_id,kind,payload,occurred_at,created_at,status,next_at)
+                        VALUES(%s,%s,%s,'geo_retry',%s,%s,%s,'deferred',%s) ON CONFLICT DO NOTHING""",
+                        (
+                            self.group_id,
+                            "geo-retry:" + job["event_key"],
+                            job["peer_id"],
+                            Jsonb(payload),
+                            job["occurred_at"],
+                            time.time(),
+                            time.time() + retry["delay"],
+                        ),
+                    )
                 if effect.get("close_choices"):
                     cmid = int(effect["params"]["conversation_message_id"])
                     self._state(conn, f"choices_closed:{job['peer_id']}:{cmid}", True)
@@ -324,11 +391,56 @@ class QueueStore:
             if callback_at is not None:
                 self._state(conn, f"callback:{job['peer_id']}", callback_at)
             conn.execute(
-                "UPDATE bot_inbox SET status='done',owner=NULL,lease_until=NULL,last_error=NULL WHERE id=%s",
-                (job["id"],),
+                "UPDATE bot_inbox SET status='done',owner=NULL,lease_until=NULL,last_error=NULL,"
+                "completed_at=%s WHERE id=%s",
+                (time.time(), job["id"]),
             )
             if not effects:
                 self._callback_completed(conn, job["peer_id"], job["id"])
+
+    def _geo_current(self, conn: psycopg.Connection, peer: int, payload: dict) -> bool:
+        if time.time() >= payload["_geo_deadline"]:
+            return False
+        return not conn.execute(
+            "SELECT 1 FROM bot_inbox WHERE group_id=%s AND peer_id=%s AND kind='message_new' AND id>%s LIMIT 1",
+            (self.group_id, peer, payload["_geo_source_id"]),
+        ).fetchone()
+
+    def geo_retry_current(self, job: dict) -> bool:
+        with self.connect() as conn:
+            return self._geo_current(conn, job["peer_id"], job["payload"])
+
+    def outbox_geo_current(self, job: dict) -> bool:
+        with self.connect() as conn:
+            parent = conn.execute(
+                "SELECT kind,payload FROM bot_inbox WHERE group_id=%s AND id=%s", (self.group_id, job["inbox_id"])
+            ).fetchone()
+            return parent["kind"] != "geo_retry" or not self._geo_superseded(conn, job["peer_id"], parent["payload"])
+
+    def defer_geo_retry(self, job: dict, delay: float) -> None:
+        with self.connect() as conn:
+            self._owned(conn, "bot_inbox", job)
+            current = self._geo_current(conn, job["peer_id"], job["payload"])
+            expired = not current and not self._geo_superseded(conn, job["peer_id"], job["payload"])
+            conn.execute(
+                "UPDATE bot_inbox SET status=%s,next_at=%s,owner=NULL,lease_until=NULL,"
+                "completed_at=%s,last_error=%s WHERE id=%s",
+                (
+                    "deferred" if current else ("failed" if expired else "done"),
+                    min(time.time() + delay, job["payload"]["_geo_deadline"]),
+                    None if current or expired else time.time(),
+                    json.dumps({"type": "GeoRetryExpired"}) if expired else None,
+                    job["id"],
+                ),
+            )
+
+    def _geo_superseded(self, conn: psycopg.Connection, peer: int, payload: dict) -> bool:
+        return bool(
+            conn.execute(
+                "SELECT 1 FROM bot_inbox WHERE group_id=%s AND peer_id=%s AND kind='message_new' AND id>%s LIMIT 1",
+                (self.group_id, peer, payload["_geo_source_id"]),
+            ).fetchone()
+        )
 
     def _owned(self, conn: psycopg.Connection, table: str, job: dict) -> None:
         row = conn.execute(
@@ -350,13 +462,16 @@ class QueueStore:
             if context:
                 cmid, result = context
                 conn.execute(
-                    """INSERT INTO bot_message_context VALUES (%s,%s,%s,%s)
-                    ON CONFLICT(group_id,peer_id,conversation_message_id) DO UPDATE SET result=excluded.result""",
-                    (self.group_id, job["peer_id"], cmid, Jsonb(result)),
+                    """INSERT INTO bot_message_context(group_id,peer_id,conversation_message_id,result,updated_at)
+                    VALUES (%s,%s,%s,%s,%s)
+                    ON CONFLICT(group_id,peer_id,conversation_message_id) DO UPDATE SET result=excluded.result,
+                    updated_at=excluded.updated_at""",
+                    (self.group_id, job["peer_id"], cmid, Jsonb(result), time.time()),
                 )
             conn.execute(
-                "UPDATE bot_outbox SET status='done',owner=NULL,lease_until=NULL,last_error=NULL WHERE id=%s",
-                (job["id"],),
+                "UPDATE bot_outbox SET status='done',owner=NULL,lease_until=NULL,last_error=NULL,"
+                "completed_at=%s WHERE id=%s",
+                (time.time(), job["id"]),
             )
             self._callback_completed(conn, job["peer_id"], job["inbox_id"])
 
@@ -425,8 +540,13 @@ class QueueStore:
             result["last_reconciliation"] = self.get_state("reconcile_watermark")
         return result
 
-    def retry_failed(self) -> None:
+    def retry_failed(self, geo_max_age: float = 1800) -> None:
         with self.connect() as conn:
+            conn.execute(
+                """UPDATE bot_inbox SET payload=jsonb_set(payload,'{_geo_deadline}',%s) WHERE group_id=%s
+                AND kind='geo_retry' AND status='failed'""",
+                (Jsonb(time.time() + geo_max_age), self.group_id),
+            )
             for table in ("bot_inbox", "bot_outbox"):
                 conn.execute(
                     f"UPDATE {table} SET status='pending',next_at=0,last_error=NULL "

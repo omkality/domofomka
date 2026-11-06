@@ -1,0 +1,12 @@
+[Unit]
+Description=Domofomka dev queue backup
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Environment=DOMOFOMKA_ROOT=/root/domofomka-dev
+Environment=COMPOSE_PROJECT_NAME=domofomka-dev
+Environment=DOMOFOMKA_ENV_FILE=.env.dev
+ExecStart=/bin/bash /root/domofomka-dev/ops/queue-backup.sh
+TimeoutStartSec=600

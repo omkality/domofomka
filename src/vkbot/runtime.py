@@ -64,11 +64,53 @@ class Runtime:
                 tasks.create_task(self._guard(guard))
                 tasks.create_task(self._collect())
                 tasks.create_task(self._reconcile())
+                tasks.create_task(self._maintenance())
                 for index in range(self.settings.queue_workers):
                     tasks.create_task(self._worker("bot_inbox", index))
                     tasks.create_task(self._worker("bot_outbox", index))
         finally:
             guard.close()
+
+    async def _maintenance(self) -> None:
+        from src.vkbot.maintenance import compact, health
+
+        while True:
+            try:
+                result = await asyncio.to_thread(
+                    compact,
+                    self.store,
+                    self.settings.queue_retention_days * 86400,
+                    self.settings.queue_context_retention_days * 86400,
+                    self.settings.queue_maintenance_batch,
+                )
+                snapshot = await asyncio.to_thread(health, self.store)
+                logger.info("Queue maintenance result=%s health=%s", result, snapshot)
+                import shutil
+
+                free = shutil.disk_usage(".").free
+                stale = any(
+                    row["status"] in {"pending", "processing"}
+                    and row["oldest_age_seconds"] > self.settings.queue_oldest_pending_warn_seconds
+                    for rows in snapshot["queues"].values()
+                    for row in rows
+                )
+                failed = any(row["status"] == "failed" for rows in snapshot["queues"].values() for row in rows)
+                if (
+                    free < self.settings.queue_disk_free_min_bytes
+                    or snapshot["database_bytes"] > self.settings.queue_database_warn_bytes
+                    or stale
+                    or failed
+                ):
+                    logger.warning(
+                        "Operational warning free_bytes=%s database_bytes=%s stale_jobs=%s failed_jobs=%s",
+                        free,
+                        snapshot["database_bytes"],
+                        stale,
+                        failed,
+                    )
+            except Exception as exc:
+                logger.warning("Queue maintenance unavailable error=%s", safe_error(exc))
+            await asyncio.sleep(self.settings.queue_maintenance_interval_seconds)
 
     async def _guard(self, connection: Any) -> None:
         while True:

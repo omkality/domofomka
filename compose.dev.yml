@@ -7,6 +7,7 @@ x-logging: &id001
 services:
   queue:
     image: postgres:17-alpine
+    command: [postgres, -c, 'shared_buffers=${QUEUE_SHARED_BUFFERS:-32MB}', -c, 'work_mem=${QUEUE_WORK_MEM:-2MB}', -c, 'maintenance_work_mem=${QUEUE_MAINTENANCE_WORK_MEM:-16MB}', -c, 'autovacuum_max_workers=${QUEUE_AUTOVACUUM_WORKERS:-1}', -c, 'max_connections=${QUEUE_MAX_CONNECTIONS:-30}']
     init: true
     restart: always
     mem_limit: ${QUEUE_MEM_LIMIT:-192m}
