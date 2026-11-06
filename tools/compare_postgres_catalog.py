@@ -5,12 +5,14 @@ import asyncio
 import collections
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 
 from src.api import v2
 from src.api.config import settings
 from src.search.engine import Catalog
+from src.search.postgres import PostgresCatalog
 from tools.postgres_search_experiment import PostgresExperiment
 
 
@@ -44,7 +46,14 @@ async def compare(args):
     settings.legacy_index_path = str(args.legacy_index)
     settings.opensearch_url = None
     settings.search_cache_ttl_seconds = 0
-    postgres = PostgresExperiment(settings.search_min_similarity, settings.search_ambiguity_margin)
+    postgres = (
+        PostgresCatalog(
+            os.environ.get("CATALOG_BUILD_DSN") or os.environ["CATALOG_BENCHMARK_DSN"],
+            settings.search_min_similarity, settings.search_ambiguity_margin,
+        )
+        if args.implementation == "production"
+        else PostgresExperiment(settings.search_min_similarity, settings.search_ambiguity_margin)
+    )
     baseline_factory = v2.Catalog
     records = select(args.corpus, args.limit)
     times = {"sqlite": [], "postgres": []}
@@ -89,6 +98,7 @@ async def compare(args):
                         flush=True,
                     )
         summary = {
+            "postgres_implementation": args.implementation,
             "queries": len(records),
             "fingerprint": fingerprint,
             "counts": dict(counts),
@@ -110,6 +120,7 @@ async def compare(args):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--implementation", choices=["production", "experiment"], default="production")
     p.add_argument("--catalog", type=Path, default=Path("artifacts/search/serving.db"))
     p.add_argument("--legacy", type=Path, default=Path("codes.db"))
     p.add_argument("--legacy-index", type=Path, default=Path("artifacts/search/legacy-index.db"))

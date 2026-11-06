@@ -20,6 +20,7 @@ async def observed(operation: Callable[[], Awaitable[dict]], requested: bool) ->
                 name: getattr(api_settings, name)
                 for name in (
                     "search_min_similarity",
+                    "search_backend",
                     "search_ambiguity_margin",
                     "search_candidate_limit",
                     "search_cache_ttl_seconds",

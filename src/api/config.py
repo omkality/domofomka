@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,10 +11,17 @@ class Settings(BaseSettings):
     api_host: str
     api_port: int
     db_name: str
-    legacy_index_path: str = '/backend/catalog/legacy-index.db'
+    legacy_index_path: str = "/backend/catalog/legacy-index.db"
     dadata_token: str
     dadata_proxy_url: str | None = None
     search_catalog_path: str = "/backend/catalog/serving.db"
+    search_backend: Literal["sqlite", "postgres"] = "sqlite"
+    catalog_database_url: SecretStr | None = None
+    catalog_revision: str = "unknown"
+    catalog_connect_timeout_seconds: int = Field(default=3, ge=1, le=30)
+    catalog_statement_timeout_ms: int = Field(default=2000, ge=50, le=30000)
+    catalog_lock_timeout_seconds: float = Field(default=2, gt=0, le=30)
+    catalog_operation_timeout_seconds: float = Field(default=5, gt=0, le=30)
     opensearch_url: str | None = None
     opensearch_index: str = "domofomka-buildings"
     opensearch_timeout_seconds: float = Field(default=2, gt=0)

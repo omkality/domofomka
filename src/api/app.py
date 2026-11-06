@@ -8,7 +8,7 @@ from litestar.response import Redirect
 
 from src.api.config import settings
 from src.api.routes import codes_router
-from src.api.v2 import building_codes, v2_router
+from src.api.v2 import building_codes, close_catalog, v2_router
 from src.version import get_app_info
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ async def version() -> dict[str, str]:
 
 
 app = Litestar(
+    on_shutdown=[close_catalog],
     route_handlers=[
         redirect_to_docs,
         version,

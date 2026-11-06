@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import logging
+import threading
 from datetime import timedelta
 from pathlib import Path
 
@@ -16,6 +18,48 @@ from src.telemetry import note, search_result, span
 
 logger = logging.getLogger(__name__)
 result_cache = LookupCache()
+_postgres_readers: dict = {}
+_postgres_guard = threading.Lock()
+
+
+def close_catalog() -> None:
+    with _postgres_guard:
+        for reader in _postgres_readers.values():
+            reader.close()
+        _postgres_readers.clear()
+
+
+def get_catalog() -> Catalog:
+    if settings.search_backend == "sqlite":
+        return Catalog(settings.search_catalog_path, settings.search_min_similarity, settings.search_ambiguity_margin)
+    if not settings.catalog_database_url:
+        raise ValueError("CATALOG_DATABASE_URL required for PostgreSQL catalog")
+    from src.search.postgres import PostgresCatalog
+
+    config = (
+        settings.catalog_database_url.get_secret_value(),
+        settings.search_min_similarity,
+        settings.search_ambiguity_margin,
+        settings.catalog_connect_timeout_seconds,
+        settings.catalog_statement_timeout_ms,
+        settings.catalog_lock_timeout_seconds,
+        settings.catalog_operation_timeout_seconds,
+        settings.catalog_revision,
+    )
+    with _postgres_guard:
+        if config not in _postgres_readers:
+            for reader in _postgres_readers.values():
+                reader.close()
+            _postgres_readers.clear()
+            _postgres_readers[config] = PostgresCatalog(
+                *config[:3],
+                connect_timeout_seconds=config[3],
+                statement_timeout_ms=config[4],
+                lock_timeout_seconds=config[5],
+                operation_timeout_seconds=config[6],
+                revision=config[7],
+            )
+        return _postgres_readers[config]
 
 
 def cache_key(request: tuple) -> tuple | None:
@@ -26,7 +70,10 @@ def cache_key(request: tuple) -> tuple | None:
         return None
     try:
         files = []
-        for filename in (settings.search_catalog_path, settings.db_name):
+        filenames = [settings.db_name]
+        if settings.search_backend == "sqlite":
+            filenames.insert(0, settings.search_catalog_path)
+        for filename in filenames:
             path = Path(filename).resolve()
             stat = path.stat()
             files.append((str(path), stat.st_ino, stat.st_mtime_ns, stat.st_size))
@@ -34,6 +81,11 @@ def cache_key(request: tuple) -> tuple | None:
         return None
     return (
         *files,
+        settings.search_backend,
+        settings.catalog_revision,
+        hashlib.sha256(
+            (settings.catalog_database_url.get_secret_value() if settings.catalog_database_url else "").encode()
+        ).hexdigest(),
         settings.opensearch_url,
         settings.opensearch_index,
         settings.opensearch_fuzziness,
@@ -55,6 +107,7 @@ def remember(key: tuple | None, result: dict) -> None:
 
 
 async def lookup(message: str) -> dict:
+    note(catalog_backend=settings.search_backend)
     key = cache_key(("text", message))
     cached = result_cache.get(key) if key is not None else None
     if cached is not None:
@@ -69,9 +122,7 @@ async def lookup(message: str) -> dict:
 async def uncached_lookup(message: str) -> dict:
     reason = None
     try:
-        catalog = Catalog(
-            settings.search_catalog_path, settings.search_min_similarity, settings.search_ambiguity_margin
-        )
+        catalog = get_catalog()
         candidates = None
         if settings.opensearch_url:
             try:
@@ -110,7 +161,13 @@ async def uncached_lookup(message: str) -> dict:
                 candidates = candidates or None
             except Exception as exc:
                 logger.warning("OpenSearch unavailable error=%s; using catalog index", type(exc).__name__)
-        with span("search.v2", kind="search", engine="v2", query=message[: settings.search_max_query_length]) as detail:
+        with span(
+            "search.v2",
+            kind="search",
+            engine="v2",
+            storage_backend=settings.search_backend,
+            query=message[: settings.search_max_query_length],
+        ) as detail:
             result = await asyncio.to_thread(catalog.resolve, message, candidates)
             detail["result"] = search_result(result)
         note(result=search_result(result))
@@ -159,6 +216,7 @@ async def geo_codes(lat: float, lon: float, observe: bool = False) -> dict:
 
 
 async def geo_lookup(lat: float, lon: float) -> dict:
+    note(catalog_backend=settings.search_backend)
     from litestar.exceptions import ServiceUnavailableException
 
     from src.services.dadata_client import DadataUnavailable
@@ -188,15 +246,21 @@ async def building_codes(building_id: str, observe: bool = False) -> dict:
 
 
 async def read_building(building_id: str) -> dict:
-    from litestar.exceptions import NotFoundException
+    from litestar.exceptions import NotFoundException, ServiceUnavailableException
 
-    catalog = Catalog(settings.search_catalog_path)
+    note(catalog_backend=settings.search_backend)
 
     def read() -> dict | None:
+        catalog = get_catalog()
         row = catalog.building(building_id)
         return catalog.answer(row) if row else None
 
-    result = await asyncio.to_thread(read)
+    try:
+        with span("search.v2.building", kind="search", engine="v2", storage_backend=settings.search_backend) as detail:
+            result = await asyncio.to_thread(read)
+            detail["result"] = search_result(result) if result is not None else {"status": "not_found"}
+    except Exception as exc:
+        raise ServiceUnavailableException(detail="Catalog unavailable") from exc
     if result is None:
         raise NotFoundException()
     return result
