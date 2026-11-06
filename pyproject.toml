@@ -1,6 +1,6 @@
 [project]
 name = "domofomka"
-version = "2.0.0.dev1"
+version = "2.0.0"
 description = "Application for getting the intercom code at the given address"
 readme = "README.md"
 requires-python = ">=3.12"
