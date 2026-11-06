@@ -94,6 +94,7 @@ def text(value: str) -> str:
     value = ordinals(value)
     value = re.sub(r"\bпр[\s.-]*кт\b", "проспект", value)
     value = re.sub(r"\bб[.-]р\b", "бульвар", value)
+    value = re.sub(r"\bкв[.-]л\b", "квартал", value)
     value = re.sub(r"\bмск\b", "москва", value)
     value = re.sub(r"\b(?:спб|питер|санктпетербург)\b", "санкт петербург", value)
     value = re.sub(r"\b(\d+)\s*[- ]?\s*(?:ая|я|й|ый|ой)\b", r"\1", value)
@@ -199,6 +200,9 @@ def street_kind(value: str) -> str:
         "пл": "пл",
         "микрорайон": "мкр",
         "мкр": "мкр",
+        "мкрн": "мкр",
+        "квартал": "квартал",
+        "квл": "квартал",
         "аллея": "ал",
         "ал": "ал",
         "тупик": "туп",
@@ -214,6 +218,18 @@ class Query:
     entrance: str | None
     kind: str | None = None
     search_text: str = ""
+
+
+def building_kind_matches(query: Query, row: dict) -> bool:
+    if not query.kind:
+        return True
+    display_kind = street_kind(row["display"].removeprefix(row["city"] + ", ").split(" ", 1)[0])
+    if display_kind == query.kind:
+        return True
+    # «Большая Набережная» can be an official street name; a shared type word alone is insufficient.
+    return query.kind in {street_kind(word) for word in row["street"].split()} and (
+        " " + text(row["street"]) + " " in " " + text(query.raw) + " "
+    )
 
 
 @measured("search.normalize")
@@ -237,10 +253,14 @@ def parse_query(value: str) -> Query:
     markers = list(
         re.finditer(
             r"\b(?:улица|ул|проспект|просп|пр-кт|переулок|пер|проезд|пр-д|шоссе|бульвар|"
-            r"набережная|площадь|микрорайон|аллея|ал|тупик|туп)\b",
+            r"набережная|площадь|микрорайон|мкр|мкрн|аллея|ал|тупик|туп)\b",
             value,
         )
     )
+    # A named street can contain «квартал»; otherwise it is an explicit address element type.
+    if not markers or all(street_kind(marker[0]) == "мкр" for marker in markers):
+        markers.extend(re.finditer(r"\b(?:квартал|кв-л)\b", value))
+        markers.sort(key=lambda marker: marker.start())
     kind = street_kind(markers[-1][0]) if markers else None
     if markers:
         from src.search.localities import clean_structured_prefix

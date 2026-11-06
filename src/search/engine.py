@@ -15,7 +15,7 @@ from pathlib import Path
 from rapidfuzz.fuzz import ratio
 from rapidfuzz.process import extract
 
-from src.search.normalize import Query, address_words, parse_query, street_kind
+from src.search.normalize import Query, address_words, building_kind_matches, parse_query
 from src.telemetry import measured, note
 
 
@@ -321,11 +321,7 @@ class Catalog:
                 for part in street_words
             ):
                 continue
-            if (
-                query.kind
-                and street_kind(row["display"].removeprefix(row["city"] + ", ").split(" ", 1)[0]) != query.kind
-                and query.kind not in {street_kind(word) for word in row["street"].split()}
-            ):
+            if not building_kind_matches(query, row):
                 continue
             score = max(
                 self.similarity(variant.words, document)
