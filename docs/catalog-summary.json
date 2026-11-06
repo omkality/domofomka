@@ -1,28 +1,40 @@
 {
   "source_rows": 1008682,
-  "unique_code_records": 1002183,
-  "exact_duplicate_code_records": 6499,
+  "unique_code_records": 1001755,
+  "exact_duplicate_code_records": 6927,
   "gar_buildings": 34851597,
-  "code_bearing_identities": 108533,
-  "street_documents": 1077597,
+  "code_bearing_identities": 106272,
+  "street_documents": 1076730,
   "resolution": [
     {
       "resolution": "ambiguous",
-      "source_rows": 9100,
-      "identities": 2003
+      "source_rows": 9108,
+      "identities": 2005
     },
     {
       "resolution": "gar_exact",
-      "source_rows": 792465,
-      "identities": 68004
+      "source_rows": 795372,
+      "identities": 68162
+    },
+    {
+      "resolution": "gar_locality_alias",
+      "source_rows": 2582,
+      "identities": 424
+    },
+    {
+      "resolution": "gar_street_word_order",
+      "source_rows": 11226,
+      "identities": 1554
     },
     {
       "resolution": "unresolved",
-      "source_rows": 207117,
-      "identities": 38526
+      "source_rows": 190394,
+      "identities": 35554
     }
   ],
   "source_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
-  "normalization_schema": 2,
-  "serving_bytes": 824918016
+  "normalization_schema": 5,
+  "catalog_revision": "d6f3b871a4c2d377b0e1d8a1aac128cc6938dc833c5fd1195e1356a755f0459a",
+  "runtime_storage": "PostgreSQL",
+  "build_artifact_bytes": 824393728
 }
