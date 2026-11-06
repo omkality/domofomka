@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from src.network import network_settings
+from src.network import network_settings, tls_context
 from src.services.outbound import proxy_health
 from src.telemetry import amend, note, span
 
@@ -85,6 +85,7 @@ class DadataClient:
 
     async def _request(self, url: str, payload: dict, use_proxy: bool) -> dict:
         async with httpx.AsyncClient(
+            verify=tls_context(),
             proxy=self.proxy_url if use_proxy else None,
             trust_env=False,
             timeout=httpx.Timeout(

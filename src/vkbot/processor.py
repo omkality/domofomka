@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 from vk_api import VkApi
 
-from src.network import network_settings
+from src.network import network_settings, tls_context
 from src.telemetry import active, measured, merge, note, search_result, span
 from src.vkbot.http import TimeoutSession
 from src.vkbot.keyboard import INLINE_BUTTON_LIMIT, build_many_buttons, get_location_keyboard, serialize_inline_keyboard
@@ -109,6 +109,7 @@ class Processor:
             async with (
                 asyncio.timeout(total),
                 httpx.AsyncClient(
+                    verify=tls_context(),
                     trust_env=False,
                     timeout=httpx.Timeout(
                         total, connect=min(network_settings.internal_api_connect_timeout_seconds, total)

@@ -7,7 +7,7 @@ import httpx
 from vk_api.utils import get_random_id
 from vk_api.vk_api import VkApiMethod
 
-from src.network import network_settings
+from src.network import network_settings, tls_context
 from src.storages.interfaces import KeyValueClientProtocol
 from src.vkbot.config import settings
 from src.vkbot.keyboard import build_many_buttons, get_location_keyboard
@@ -51,6 +51,7 @@ class MessageHandler:
         async with (
             asyncio.timeout(timeout),
             httpx.AsyncClient(
+                verify=tls_context(),
                 trust_env=False,
                 timeout=httpx.Timeout(
                     timeout, connect=min(network_settings.internal_api_connect_timeout_seconds, timeout)

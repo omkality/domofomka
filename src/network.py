@@ -1,7 +1,10 @@
 """Validated runtime tuning. Override defaults through .env or process environment."""
 
 import logging
+from functools import lru_cache
+from ssl import SSLContext
 
+import httpx
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -43,5 +46,12 @@ class NetworkSettings(BaseSettings):
 
 for _library in ("httpx", "httpcore"):
     logging.getLogger(_library).setLevel(logging.WARNING)
+
+
+@lru_cache(maxsize=1)
+def tls_context() -> SSLContext:
+    """Переиспользовать проверяющий TLS-контекст без повторной загрузки CA на каждый запрос."""
+    return httpx.create_ssl_context(trust_env=False)
+
 
 network_settings = NetworkSettings()

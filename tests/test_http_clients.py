@@ -1,5 +1,6 @@
 import asyncio
 import os
+import ssl
 import subprocess
 import sys
 import time
@@ -7,6 +8,7 @@ import time
 import httpx
 import pytest
 
+from src.network import tls_context
 from src.services.dadata_client import DadataClient, DadataUnavailable
 from src.services.outbound import proxy_health
 from src.vkbot.processor import Processor
@@ -116,6 +118,7 @@ def test_geocoding_process_exits_cleanly_after_repeated_event_loops():
     script = r"""
 import asyncio, json, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from src.network import tls_context
 from src.services.dadata_client import DadataClient
 
 class Handler(BaseHTTPRequestHandler):
@@ -156,3 +159,15 @@ finally:
     )
     assert result.returncode == 0, result.stderr
     assert "geocoding_completed" in result.stdout
+
+
+def test_shared_tls_context_keeps_validation_and_ignores_environment(monkeypatch):
+    monkeypatch.setenv("SSL_CERT_FILE", "/not-a-real-certificate-store")
+    tls_context.cache_clear()
+    try:
+        context = tls_context()
+        assert tls_context() is context
+        assert context.check_hostname
+        assert context.verify_mode == ssl.CERT_REQUIRED
+    finally:
+        tls_context.cache_clear()

@@ -8,10 +8,12 @@ import time
 
 import httpx
 
+from src.network import tls_context
+
 
 def measure(url: str, version: str, queries: collections.abc.Iterable[str], workers: int) -> dict:
     def request(query: str) -> tuple:
-        with httpx.Client(trust_env=False, timeout=30) as client:
+        with httpx.Client(verify=tls_context(), trust_env=False, timeout=30) as client:
             started = time.perf_counter()
             response = client.get(f"{url}/api/{version}/codes/msg", params={"message": query})
             data = response.json()

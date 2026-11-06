@@ -11,6 +11,7 @@ from src.api.cache import LookupCache
 from src.api.config import settings
 from src.api.routes import get_dadata_client
 from src.api.telemetry import observed
+from src.network import tls_context
 from src.search.engine import Catalog, search_body
 from src.services.codes import get_data_from_db
 from src.telemetry import note, search_result, span
@@ -127,7 +128,9 @@ async def uncached_lookup(message: str) -> dict:
             try:
                 async with (
                     asyncio.timeout(settings.opensearch_timeout_seconds),
-                    httpx.AsyncClient(trust_env=False, timeout=settings.opensearch_timeout_seconds) as client,
+                    httpx.AsyncClient(
+                        verify=tls_context(), trust_env=False, timeout=settings.opensearch_timeout_seconds
+                    ) as client,
                 ):
                     response = await client.post(
                         settings.opensearch_url + "/" + settings.opensearch_index + "/_search",
