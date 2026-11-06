@@ -16,3 +16,5 @@ test_main.http
 /backups/
 /.codex-local/
 /history.txt
+/.ci/
+/release.json

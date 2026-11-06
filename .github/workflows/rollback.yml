@@ -1,0 +1,49 @@
+name: Rollback application
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Restore previous healthy application images (database is preserved)
+        type: choice
+        options: [dev, prod]
+        default: dev
+        required: true
+permissions:
+  contents: read
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          REF: ${{ github.ref }}
+          TARGET: ${{ inputs.environment }}
+          PROD_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
+        run: |
+          if [ "$TARGET" = dev ]; then test "$REF" = refs/heads/dev;
+          else test "$REF" = refs/heads/master && test "$PROD_ENABLED" = true; fi
+  rollback:
+    needs: policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-${{ inputs.environment }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Restore previous release
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST_KEYS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_ACTION: rollback
+        run: |
+          umask 077
+          export DEPLOY_KEY_FILE="$RUNNER_TEMP/deploy-key"
+          export DEPLOY_KNOWN_HOSTS_FILE="$RUNNER_TEMP/deploy-hosts"
+          trap 'rm -f "$DEPLOY_KEY_FILE" "$DEPLOY_KNOWN_HOSTS_FILE"' EXIT
+          printf '%s\n' "$KEY" > "$DEPLOY_KEY_FILE"
+          printf '%s\n' "$HOST_KEYS" > "$DEPLOY_KNOWN_HOSTS_FILE"
+          python tools/ci_send.py
