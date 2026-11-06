@@ -1,18 +1,18 @@
 {
   "enabled": true,
-  "source_revision": "6f248c30f31645a875425bff95d74d252aaa4e46b0148a46184eb394d3a060f6",
-  "target_revision": "d6f3b871a4c2d377b0e1d8a1aac128cc6938dc833c5fd1195e1356a755f0459a",
-  "patch_sha256": "0aa856c0fd85782473b7bc49a0270b3f805cbe90d77fcc18bf3f9a7d903179a1",
-  "patch_bytes": 6153482,
-  "raw_bytes": 26115501,
+  "source_revision": "d6f3b871a4c2d377b0e1d8a1aac128cc6938dc833c5fd1195e1356a755f0459a",
+  "target_revision": "91c5d5a57b6d07d574c1f2bb57fd7ec44211e80b6743ad91a7dfb0d7675efe55",
+  "patch_sha256": "489afb22c6c52daac53f3e849b5d83d872ee98cf07c7c0d45bff6c68878f387b",
+  "patch_bytes": 6553313,
+  "raw_bytes": 24091221,
   "changed_rows": {
-    "buildings": 1734,
-    "codes": 22349,
-    "aliases": 3132,
-    "streets": 279,
-    "street_houses": 363,
-    "alias_search": 109965,
+    "buildings": 1490,
+    "codes": 3079,
+    "aliases": 2514,
+    "streets": 702,
+    "street_houses": 663,
+    "alias_search": 110480,
     "metadata": 2,
-    "provenance": 11226
+    "provenance": 1584
   }
 }

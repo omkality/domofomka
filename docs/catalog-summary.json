@@ -1,15 +1,15 @@
 {
   "source_rows": 1008682,
-  "unique_code_records": 1001755,
-  "exact_duplicate_code_records": 6927,
+  "unique_code_records": 1001686,
+  "exact_duplicate_code_records": 6996,
   "gar_buildings": 34851597,
-  "code_bearing_identities": 106272,
-  "street_documents": 1076730,
+  "code_bearing_identities": 105258,
+  "street_documents": 1076094,
   "resolution": [
     {
       "resolution": "ambiguous",
-      "source_rows": 9108,
-      "identities": 2005
+      "source_rows": 8794,
+      "identities": 1811
     },
     {
       "resolution": "gar_exact",
@@ -22,19 +22,29 @@
       "identities": 424
     },
     {
+      "resolution": "gar_source_syntax_embedded_type",
+      "source_rows": 27,
+      "identities": 27
+    },
+    {
+      "resolution": "gar_source_syntax_explicit_region",
+      "source_rows": 1557,
+      "identities": 1225
+    },
+    {
       "resolution": "gar_street_word_order",
       "source_rows": 11226,
       "identities": 1554
     },
     {
       "resolution": "unresolved",
-      "source_rows": 190394,
-      "identities": 35554
+      "source_rows": 189124,
+      "identities": 34496
     }
   ],
   "source_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
-  "normalization_schema": 5,
-  "catalog_revision": "d6f3b871a4c2d377b0e1d8a1aac128cc6938dc833c5fd1195e1356a755f0459a",
+  "normalization_schema": 6,
+  "catalog_revision": "91c5d5a57b6d07d574c1f2bb57fd7ec44211e80b6743ad91a7dfb0d7675efe55",
   "runtime_storage": "PostgreSQL",
-  "build_artifact_bytes": 824393728
+  "build_artifact_bytes": 823488512
 }

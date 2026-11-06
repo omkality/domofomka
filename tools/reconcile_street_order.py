@@ -82,7 +82,14 @@ def mappings(db: sqlite3.Connection) -> tuple[list[dict], dict]:
     return result, {"unlinked_buildings": len(rows), "confirmed_groups": len(result), "skipped": dict(skipped)}
 
 
-def apply(source: Path, output: Path, links: list[dict]) -> None:
+def apply(
+    source: Path,
+    output: Path,
+    links: list[dict],
+    *,
+    resolution: str = "gar_street_word_order",
+    schema_version: int = 5,
+) -> None:
     if source.resolve() == output.resolve() or output.exists():
         raise FileExistsError("Use a fresh candidate; source catalog must remain immutable")
     if shutil.disk_usage(output.parent).free < source.stat().st_size + 1073741824:
@@ -107,20 +114,23 @@ def apply(source: Path, output: Path, links: list[dict]) -> None:
             )
             db.execute("DELETE FROM aliases WHERE building_id=?", (old,))
             db.execute(
-                "UPDATE provenance SET building_id=?,resolution='gar_street_word_order' WHERE building_id=?", (new, old)
+                "UPDATE provenance SET building_id=?,resolution=? WHERE building_id=?",
+                (new, link.get("resolution", resolution), old),
             )
             db.execute("DELETE FROM buildings WHERE id=? AND guid IS NULL", (old,))
         assert db.execute("SELECT count(*) FROM provenance").fetchone()[0] == before
         index_streets(db)
         stats = json.loads(db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()[0])
         stats.update(
-            normalization_schema=5,
-            street_order_linked_groups=len(links),
+            normalization_schema=schema_version,
             unique_codes=db.execute("SELECT count(*) FROM codes").fetchone()[0],
             buildings_with_codes=db.execute("SELECT count(DISTINCT building_id) FROM codes").fetchone()[0],
         )
-        stats["street_order_linked_source_rows"] = db.execute(
-            "SELECT count(*) FROM provenance WHERE resolution='gar_street_word_order'"
+        prefix = "street_order" if resolution == "gar_street_word_order" else "source_syntax"
+        stats[prefix + "_linked_groups"] = stats.get(prefix + "_linked_groups", 0) + len(links)
+        stats[prefix + "_linked_source_rows"] = db.execute(
+            "SELECT count(*) FROM provenance WHERE resolution=? OR substr(resolution,1,?)=?",
+            (resolution, len(resolution) + 1, resolution + "_"),
         ).fetchone()[0]
         previous_redirects = db.execute("SELECT value FROM metadata WHERE key='building_redirects'").fetchone()
         redirects = json.loads(previous_redirects[0]) if previous_redirects else {}
