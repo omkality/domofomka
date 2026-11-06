@@ -282,6 +282,51 @@ def test_postgres_budget_does_not_block_queue_and_retention_cascades(observed_st
         assert not conn.execute("SELECT id FROM request_spans WHERE request_id=%s", (rid,)).fetchone()
 
 
+def test_full_budget_replaces_old_completed_diagnostics_without_removing_queue(observed_store, monkeypatch):
+    store = observed_store
+    store.ingest([incoming(store)])
+    job = store.claim("bot_inbox")
+    store.plan(job, [])
+    with Capture() as capture, span("finished"):
+        pass
+    database.persist(store, "bot_inbox", job, capture.packet(), "development")
+    with store.connect() as conn:
+        used = database.budget_used(conn, store.group_id)
+    monkeypatch.setattr(settings, "telemetry_max_storage_bytes", used + 2000)
+    second = incoming(store)
+    second["event_key"] += ":second"
+    assert store.ingest([second]) == 1
+    with store.connect() as conn:
+        assert not conn.execute(
+            "SELECT id FROM request_log WHERE id=%s", (database.identity(store.group_id, job["id"]),)
+        ).fetchone()
+        assert conn.execute("SELECT status FROM bot_inbox WHERE id=%s", (job["id"],)).fetchone()["status"] == "done"
+        assert (
+            conn.execute("SELECT count(*) AS n FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()["n"]
+            == 1
+        )
+        assert not conn.execute(
+            "SELECT id FROM request_spans WHERE request_id=%s", (database.identity(store.group_id, job["id"]),)
+        ).fetchone()
+
+
+def test_budget_never_evicts_diagnostics_of_unfinished_work(observed_store, monkeypatch):
+    store = observed_store
+    store.ingest([incoming(store)])
+    with store.connect() as conn:
+        original = conn.execute("SELECT id FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()["id"]
+    monkeypatch.setattr(settings, "telemetry_max_storage_bytes", 4000)
+    second = incoming(store)
+    second["event_key"] += ":second"
+    assert store.ingest([second]) == 1
+    with store.connect() as conn:
+        assert conn.execute("SELECT id FROM request_log WHERE id=%s", (original,)).fetchone()
+        assert (
+            conn.execute("SELECT count(*) AS n FROM bot_inbox WHERE group_id=%s", (store.group_id,)).fetchone()["n"]
+            == 2
+        )
+
+
 def test_sql_timeout_in_diagnostics_preserves_queue_transaction(observed_store, monkeypatch):
     store = observed_store
     monkeypatch.setattr(settings, "telemetry_db_timeout_ms", 10)

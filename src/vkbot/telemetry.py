@@ -101,7 +101,7 @@ def register(conn: Any, group: int, inbox: int, environment: str) -> bool:
     message = row["payload"].get("message", {})
     text = message.get("text")
     charge = 2048 + len((text or "")[: settings.telemetry_query_max_chars].encode())
-    if budget_used(conn, group) + charge > settings.telemetry_max_storage_bytes:
+    if not make_room(conn, group, charge, identity(group, inbox)):
         dropped(conn, group)
         return False
     parent = row["payload"].get("_geo_source_id")
@@ -138,6 +138,35 @@ def budget_used(conn: Any, group: int) -> int:
     return conn.execute(
         "SELECT coalesce(sum(recorded_bytes),0) AS n FROM request_log WHERE group_id=%s", (group,)
     ).fetchone()["n"]
+
+
+def make_room(conn: Any, group: int, charge: int, exclude: uuid.UUID) -> bool:
+    """Освободить только необходимую часть старой диагностики завершённых задач."""
+    conn.execute("SELECT pg_advisory_xact_lock(20261107,%s)", (group,))
+    if charge > settings.telemetry_max_storage_bytes:
+        return False
+    needed = budget_used(conn, group) + charge - settings.telemetry_max_storage_bytes
+    if needed <= 0:
+        return True
+    rows = conn.execute(
+        """SELECT r.id,r.recorded_bytes FROM request_log r
+        WHERE r.group_id=%s AND r.id<>%s
+        AND NOT EXISTS(SELECT 1 FROM bot_inbox i WHERE i.group_id=r.group_id AND i.id=r.inbox_id
+            AND i.status<>'done')
+        AND NOT EXISTS(SELECT 1 FROM bot_outbox o WHERE o.group_id=r.group_id AND o.inbox_id=r.inbox_id
+            AND o.status<>'done')
+        ORDER BY r.updated_at,r.id LIMIT %s FOR UPDATE OF r SKIP LOCKED""",
+        (group, exclude, settings.telemetry_eviction_batch),
+    ).fetchall()
+    selected = []
+    for row in rows:
+        selected.append(row["id"])
+        needed -= row["recorded_bytes"]
+        if needed <= 0:
+            break
+    if selected:
+        conn.execute("DELETE FROM request_log WHERE id=ANY(%s)", (selected,))
+    return needed <= 0
 
 
 def dropped(conn: Any, group: int) -> None:
@@ -232,15 +261,15 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
             # Bound concurrent writers and charge a conservative live-data budget.
             conn.execute("SELECT pg_advisory_xact_lock(20261107,%s)", (store.group_id,))
             charge = len(json.dumps(packet, ensure_ascii=False).encode()) + 2048 * len(packet["spans"])
-            if budget_used(conn, store.group_id) + charge > settings.telemetry_max_storage_bytes:
+            if not register(conn, store.group_id, inbox, environment):
+                return
+            rid = identity(store.group_id, inbox)
+            if not make_room(conn, store.group_id, charge, rid):
                 dropped(conn, store.group_id)
                 conn.execute(
                     "UPDATE request_log SET telemetry_state='partial' WHERE id=%s", (identity(store.group_id, inbox),)
                 )
                 return
-            if not register(conn, store.group_id, inbox, environment):
-                return
-            rid = identity(store.group_id, inbox)
             spans, searches, attempts = [], [], []
             for row in packet["spans"]:
                 attrs = row["attributes"]

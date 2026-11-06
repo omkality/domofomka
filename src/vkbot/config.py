@@ -22,8 +22,8 @@ class VKBotSettings(BaseSettings):
     queue_workers: int = 2
     geo_retry_delay_seconds: float = Field(default=60, gt=0)
     geo_retry_max_age_seconds: float = Field(default=1800, gt=0)
-    queue_retention_days: int = Field(default=30, ge=1)
-    queue_context_retention_days: int = Field(default=60, ge=1)
+    queue_retention_days: int = Field(default=180, ge=1)
+    queue_context_retention_days: int = Field(default=90, ge=1)
     queue_maintenance_interval_seconds: float = Field(default=300, gt=0)
     queue_maintenance_batch: int = Field(default=500, ge=1, le=10000)
     queue_disk_free_min_bytes: int = Field(default=268435456, gt=0)
