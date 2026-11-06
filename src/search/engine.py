@@ -196,6 +196,13 @@ class Catalog:
             row = db.execute("SELECT * FROM buildings WHERE id=?", (id,)).fetchone()
             if row:
                 return dict(row)
+            redirects = db.execute("SELECT value FROM metadata WHERE key='building_redirects'").fetchone()
+            if redirects:
+                target = json.loads(redirects[0]).get(id)
+                if isinstance(target, str) and target != id:
+                    row = db.execute("SELECT * FROM buildings WHERE id=?", (target,)).fetchone()
+                    if row:
+                        return dict(row)
             if id.startswith("address:") and self._compact(db):
                 parts = id.split(":", 3)
                 if len(parts) != 4:

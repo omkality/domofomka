@@ -1,9 +1,10 @@
-"""Развёртывание двух приложений; PostgreSQL, туннели и данные не изменяются.
+"""Развёртывание приложений и проверенных обратимых обновлений каталога dev.
 
 Python 3.10+ на хосте, без сторонних зависимостей. Вызывается SSH-приёмником.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -11,9 +12,11 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, urlsplit
 
 SHA = re.compile(r"[0-9a-f]{40}")
 IMAGES = {
@@ -118,6 +121,157 @@ class Deployment:
         if shutil.disk_usage(self.root).free < self.reserve + extra:
             raise RuntimeError("Insufficient free disk; running release unchanged")
 
+    def catalog_revision(self, database: str) -> str:
+        return run(
+            [
+                "docker",
+                "exec",
+                f"{self.project}-queue-1",
+                "psql",
+                "-U",
+                "domofomka",
+                "-d",
+                database,
+                "-Atc",
+                "SELECT value FROM metadata WHERE key='source_catalog_sha256'",
+            ],
+            capture_output=True,
+        ).stdout.strip()
+
+    def catalog_change(self, image: str) -> dict | None:
+        info = json.loads(
+            run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--network",
+                    "none",
+                    "--read-only",
+                    "--tmpfs",
+                    "/tmp:size=16m",
+                    "--ulimit",
+                    "core=0",
+                    "--entrypoint",
+                    "uv",
+                    image,
+                    "run",
+                    "--frozen",
+                    "python",
+                    "-m",
+                    "src.search.catalog_update",
+                    "inspect",
+                ],
+                capture_output=True,
+            ).stdout
+        )
+        if not info.get("enabled"):
+            return None
+        database = urlsplit(self.config.get("CATALOG_DATABASE_URL", "").strip("\"'")).path.lstrip("/")
+        if not re.fullmatch(r"domofomka_catalog_[A-Za-z0-9_]+", database):
+            raise ValueError("Unexpected catalog database")
+        current = self.catalog_revision(database)
+        if current == info["target_revision"]:
+            return None
+        if self.target != "dev" or current != info["source_revision"]:
+            raise ValueError("Catalog changes require the reviewed dev base")
+        if not re.fullmatch(r"[0-9a-f]{64}", info["patch_sha256"]) or not 0 < info["raw_bytes"] <= 67108864:
+            raise ValueError("Invalid catalog release manifest")
+        patch = self.home / "catalog-candidates" / (info["patch_sha256"] + ".json.gz")
+        if patch.is_symlink() or patch.stat().st_size != info["patch_bytes"]:
+            raise ValueError("Missing or unexpected catalog artifact")
+        digest = hashlib.sha256()
+        with patch.open("rb") as stream:
+            for block in iter(lambda: stream.read(1048576), b""):
+                digest.update(block)
+        if digest.hexdigest() != info["patch_sha256"]:
+            raise ValueError("Catalog artifact digest mismatch")
+        self.free_space(info["raw_bytes"] * 2 + 134217728)
+        return {**info, "image": image, "database": database, "patch": str(patch)}
+
+    def set_catalog_revision(self, revision: str) -> None:
+        if not re.fullmatch(r"[0-9a-f]{64}", revision):
+            raise ValueError("Invalid catalog revision")
+        lines = self.env_file.read_text().splitlines()
+        lines = [line for line in lines if line.split("=", 1)[0].strip() != "CATALOG_REVISION"]
+        temp = self.env_file.with_suffix(".catalog-env.tmp")
+        temp.write_text("\n".join([*lines, "CATALOG_REVISION=" + revision]) + "\n")
+        temp.chmod(0o600)
+        temp.replace(self.env_file)
+
+    def run_catalog(self, info: dict, reverse: bool = False) -> None:
+        if self.target != "dev":
+            raise ValueError("Catalog mutation is dev-only")
+        self.free_space()
+        run(
+            ["docker", "stop", "--time", "30", f"{self.project}-vkbot-1", f"{self.project}-api-1"],
+            stdout=subprocess.DEVNULL,
+        )
+        client = self.project + "-catalog-update"
+        existing = subprocess.run(["docker", "inspect", client], text=True, capture_output=True, check=False)
+        if existing.returncode == 0:
+            if json.loads(existing.stdout)[0]["Config"].get("Labels", {}).get("io.domofomka.catalog_update") != "true":
+                raise ValueError("Catalog client name already used by another container")
+            run(["docker", "rm", "-f", client], stdout=subprocess.DEVNULL)
+        environment = dict(item.split("=", 1) for item in self.inspect("queue")["Config"]["Env"] if "=" in item)
+        password = quote(environment["POSTGRES_PASSWORD"], safe="")
+        with tempfile.TemporaryDirectory(dir=self.home, prefix="catalog-admin-") as directory:
+            env_file = Path(directory) / "environment"
+            env_file.write_text(
+                "APP_ENVIRONMENT=development\nEXPECTED_VK_GROUP_ID=223949627\n"
+                f"CATALOG_ADMIN_DSN=postgresql://domofomka:{password}@queue:5432/{info['database']}\n"
+            )
+            env_file.chmod(0o600)
+            try:
+                run(
+                    [
+                        "docker",
+                        "run",
+                        "--rm",
+                        "--name",
+                        client,
+                        "--label",
+                        "io.domofomka.catalog_update=true",
+                        "--network",
+                        self.project + "_default",
+                        "--read-only",
+                        "--tmpfs",
+                        "/tmp:size=16m",
+                        "--ulimit",
+                        "core=0",
+                        "--memory",
+                        "384m",
+                        "--memory-swap",
+                        "512m",
+                        "--pids-limit",
+                        "64",
+                        "--env-file",
+                        str(env_file),
+                        "--mount",
+                        "type=bind,source=" + info["patch"] + ",target=/patch,readonly",
+                        "--entrypoint",
+                        "uv",
+                        info["image"],
+                        "run",
+                        "--frozen",
+                        "python",
+                        "-m",
+                        "src.search.catalog_update",
+                        "reverse" if reverse else "apply",
+                        "--patch",
+                        "/patch",
+                    ],
+                    timeout=300,
+                )
+            finally:
+                subprocess.run(
+                    ["docker", "rm", "-f", client], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+        target = info["source_revision"] if reverse else info["target_revision"]
+        if self.catalog_revision(info["database"]) != target:
+            raise ValueError("Catalog revision was not published")
+        self.set_catalog_revision(target)
+
     def check(self, release: Path) -> None:
         # Выполняется внутри готового API, без зависимости хоста от Python-пакетов.
         # Прямая проверка каталога выявляет ошибку, которую fallback v1 мог бы скрыть.
@@ -219,7 +373,8 @@ with r.store.connect() as db:
             if label != manifest["revision"]:
                 raise ValueError("Image revision differs from release commit")
             self.free_space()
-        # Схема очереди должна оставаться обратно совместимой. Автомиграций/восстановления БД здесь нет.
+        catalog = self.catalog_change(manifest["api"])
+        # Очередь не мигрируем; каталог допускает только проверенный обратимый патч.
         backup = self.home / "queue-before-deploy.dump"
         with backup.with_suffix(".part").open("wb") as output:
             subprocess.run(
@@ -230,17 +385,37 @@ with r.store.connect() as db:
         backup.with_suffix(".part").replace(backup)
         self.free_space()
         journal = self.home / "transaction.json"
-        write_json(journal, {"previous": previous["current"], "candidate": str(release)})
+        write_json(
+            journal,
+            {
+                "previous": previous["current"],
+                "candidate": str(release),
+                "catalog": catalog,
+                "catalog_restore_reverse": True,
+            },
+        )
         try:
+            if catalog:
+                self.run_catalog(catalog)
             self.activate(release)
         except BaseException:
             sys.stdout.write("Deployment failed; restoring previous application images\n")
             sys.stdout.flush()
+            if catalog:
+                self.run_catalog(catalog, True)
             self.activate(Path(previous["current"]))
             journal.unlink()
             raise
         if str(release) != previous["current"]:
-            write_json(self.state_path, {"current": str(release), "previous": previous["current"]})
+            write_json(
+                self.state_path,
+                {
+                    "current": str(release),
+                    "previous": previous["current"],
+                    "catalog_transition": catalog,
+                    "catalog_direction": "forward",
+                },
+            )
         (self.root / ".deployed-revision").write_text(manifest["revision"] + "\n")
         journal.unlink()
         self.cleanup()
@@ -251,15 +426,56 @@ with r.store.connect() as db:
         if not state.get("previous"):
             raise ValueError("No previous release")
         self.verify_environment()
+        catalog = state.get("catalog_transition")
+        reverse = state.get("catalog_direction", "forward") == "forward"
+        journal = self.home / "transaction.json"
+        write_json(
+            journal,
+            {
+                "previous": state["current"],
+                "candidate": state["previous"],
+                "catalog": catalog,
+                "catalog_restore_reverse": not reverse,
+            },
+        )
         try:
+            if catalog:
+                self.run_catalog(catalog, reverse)
             self.activate(Path(state["previous"]))
         except BaseException:
+            if catalog:
+                self.run_catalog(catalog, not reverse)
             self.activate(Path(state["current"]))
+            journal.unlink()
             raise
-        write_json(self.state_path, {"current": state["previous"], "previous": state["current"]})
+        write_json(
+            self.state_path,
+            {
+                "current": state["previous"],
+                "previous": state["current"],
+                "catalog_transition": catalog,
+                "catalog_direction": "reverse" if reverse else "forward",
+            },
+        )
         manifest = json.loads((Path(state["previous"]) / "release.json").read_text())
         (self.root / ".deployed-revision").write_text(manifest["revision"] + "\n")
+        journal.unlink()
         sys.stdout.write(f"Rolled back {self.target} to {manifest['revision']}\n")
+
+    def recover_pending(self) -> None:
+        journal = self.home / "transaction.json"
+        if journal.exists():
+            interrupted_release = json.loads(journal.read_text())
+            committed = json.loads(self.state_path.read_text())["current"] == interrupted_release["candidate"]
+            if not committed and interrupted_release.get("catalog"):
+                self.run_catalog(
+                    interrupted_release["catalog"], interrupted_release.get("catalog_restore_reverse", True)
+                )
+            recovered = Path(interrupted_release["candidate"] if committed else interrupted_release["previous"])
+            self.activate(recovered)
+            revision = json.loads((recovered / "release.json").read_text())["revision"]
+            (self.root / ".deployed-revision").write_text(revision + "\n")
+            journal.unlink()
 
     def cleanup(self) -> None:
         state = json.loads(self.state_path.read_text())
@@ -302,11 +518,7 @@ def main() -> None:
         signal.signal(signum, interrupted)
     with (deployment.home / "deploy.lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        journal = deployment.home / "transaction.json"
-        if journal.exists():
-            interrupted_release = json.loads(journal.read_text())
-            deployment.activate(Path(interrupted_release["previous"]))
-            journal.unlink()
+        deployment.recover_pending()
         if args.action == "rollback":
             deployment.rollback()
         else:

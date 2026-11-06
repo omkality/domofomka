@@ -74,6 +74,7 @@ def test_failed_activation_restores_old_images_and_keeps_release_state(tmp_path,
     deployment, old, new, state = prepare(tmp_path)
     monkeypatch.setattr(deployment, "verify_environment", lambda: None)
     monkeypatch.setattr(deployment, "free_space", lambda *a: None)
+    monkeypatch.setattr(deployment, "catalog_change", lambda _: None)
     monkeypatch.setattr("ops.deploy.run", lambda *a, **k: SimpleNamespace(stdout="a" * 40 + "\n"))
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0))
     calls = []
@@ -135,6 +136,30 @@ def test_failed_manual_rollback_restores_current_release(tmp_path, monkeypatch):
     assert json.loads(deployment.state_path.read_text()) == state
 
 
+def test_catalog_is_restored_before_old_app_when_new_health_fails(tmp_path, monkeypatch):
+    deployment, old, new, state = prepare(tmp_path)
+    monkeypatch.setattr(deployment, "verify_environment", lambda: None)
+    monkeypatch.setattr(deployment, "free_space", lambda *a: None)
+    monkeypatch.setattr("ops.deploy.run", lambda *a, **k: SimpleNamespace(stdout="a" * 40 + "\n"))
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(deployment, "catalog_change", lambda _: {"reviewed": True})
+    calls = []
+    monkeypatch.setattr(
+        deployment, "run_catalog", lambda info, reverse=False: calls.append("reverse" if reverse else "forward")
+    )
+
+    def activate(path):
+        calls.append(path)
+        if path == new:
+            raise RuntimeError("new health failed")
+
+    monkeypatch.setattr(deployment, "activate", activate)
+    with pytest.raises(RuntimeError, match="new health failed"):
+        deployment.deploy(new)
+    assert calls == ["forward", new, "reverse", old]
+    assert json.loads(deployment.state_path.read_text()) == state
+
+
 def test_bootstrap_cache_cleanup_handles_root_and_ignores_shared_or_foreign_steps(monkeypatch):
     function = runpy.run_path(str(Path(__file__).parents[1] / "ops/bootstrap-ci.py"))["retire_build_cache"]
     records = [
@@ -190,3 +215,52 @@ def test_receiver_executes_only_code_from_the_current_published_branch(tmp_path,
             verify_source(tmp_path, "dev")
     else:
         verify_source(tmp_path, "dev")
+
+
+@pytest.mark.parametrize("committed", [False, True])
+def test_recovery_respects_state_commit_before_journal_cleanup(tmp_path, monkeypatch, committed):
+    deployment, old, new, state = prepare(tmp_path)
+    (old / "release.json").write_text(json.dumps(manifest()))
+    if committed:
+        state["current"] = str(new)
+        deployment.state_path.write_text(json.dumps(state))
+    journal = deployment.home / "transaction.json"
+    journal.write_text(
+        json.dumps(
+            {
+                "previous": str(old),
+                "candidate": str(new),
+                "catalog": {"reviewed": True},
+                "catalog_restore_reverse": True,
+            }
+        )
+    )
+    calls = []
+    monkeypatch.setattr(deployment, "run_catalog", lambda info, reverse=False: calls.append(("catalog", reverse)))
+    monkeypatch.setattr(deployment, "activate", lambda release: calls.append(release))
+    deployment.recover_pending()
+    assert calls == ([new] if committed else [("catalog", True), old])
+    assert not journal.exists()
+    assert (tmp_path / ".deployed-revision").read_text().strip() == manifest()["revision"]
+
+
+@pytest.mark.parametrize("direction", ["forward", "reverse"])
+def test_manual_rollback_switches_catalog_and_images_together(tmp_path, monkeypatch, direction):
+    deployment, old, new, _ = prepare(tmp_path)
+    (old / "release.json").write_text(json.dumps(manifest()))
+    state = {
+        "current": str(new),
+        "previous": str(old),
+        "catalog_transition": {"reviewed": True},
+        "catalog_direction": direction,
+    }
+    deployment.state_path.write_text(json.dumps(state))
+    monkeypatch.setattr(deployment, "verify_environment", lambda: None)
+    calls = []
+    monkeypatch.setattr(deployment, "run_catalog", lambda info, reverse=False: calls.append(("catalog", reverse)))
+    monkeypatch.setattr(deployment, "activate", lambda release: calls.append(release))
+    deployment.rollback()
+    assert calls == [("catalog", direction == "forward"), old]
+    restored = json.loads(deployment.state_path.read_text())
+    assert restored["current"] == str(old)
+    assert restored["catalog_direction"] != direction
