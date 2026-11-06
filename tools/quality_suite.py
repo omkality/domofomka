@@ -227,7 +227,8 @@ def review_evaluate(catalog: Path, output: Path):
     report = dict(
         counts,
         reviewed=len(rows),
-        note="Проверены буквальные ограничения 300 запросов. Для 221 запроса город не указан; это не оценка правильности угаданного города. Неясное намерение исключено из оценки.",
+        without_explicit_city=sum(not case.get("expected_city") for case in rows),
+        note="Проверены буквальные ограничения размеченных запросов. Если город не указан, правильность угаданного города не оценивается. Неясное намерение исключено из оценки.",
     )
     (output / "review-summary.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf8")
     (output / "review-conflicts.jsonl").write_text(
