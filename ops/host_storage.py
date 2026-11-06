@@ -129,7 +129,8 @@ def apply() -> None:
     )
     subprocess.run(["sysctl", "-p", "/etc/sysctl.d/99-storage-no-core.conf"], check=True, stdout=subprocess.DEVNULL)
     subprocess.run(["apt-get", "clean"], check=True)
-    subprocess.run(["logrotate", "/etc/logrotate.conf"], check=True, stdout=subprocess.DEVNULL)
+    # Запуск через systemd сериализуется с таймером и не конкурирует за state lock.
+    subprocess.run(["systemctl", "start", "logrotate.service"], check=True, stdout=subprocess.DEVNULL)
     # Три небольших набора прежних конфигураций; никакие данные приложений здесь не удаляются.
     copies = sorted(backup.parent.iterdir())
     for path in copies[:-3]:
