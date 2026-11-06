@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from tools.fetch_dev_backup import receive
+from tools.fetch_dev_backup import prune, receive
 
 
 def payload(data=b"PGDMP-valid-data", **overrides: object):
@@ -22,6 +22,20 @@ def test_verified_backup_is_published_atomically(tmp_path):
     assert result["verified"]
     assert (tmp_path / result["name"]).read_bytes() == b"PGDMP-valid-data"
     assert not list(tmp_path.glob("*.part"))
+
+
+def test_retention_keeps_daily_and_weekly_copies_but_ignores_other_files(tmp_path):
+    from datetime import UTC, datetime, timedelta
+
+    for day in range(60):
+        name = (datetime(2026, 11, 6, tzinfo=UTC) - timedelta(days=day)).strftime("queue-%Y%m%dT070000Z-1.dump")
+        (tmp_path / name).write_bytes(b"PGDMP")
+    (tmp_path / "important.dump").write_bytes(b"preserve")
+    removed = prune(tmp_path)
+    assert removed >= 49
+    assert (tmp_path / "queue-20261106T070000Z-1.dump").exists()
+    assert (tmp_path / "important.dump").read_bytes() == b"preserve"
+    assert len(list(tmp_path.glob("queue-*.dump"))) <= 11
 
 
 @pytest.mark.parametrize(

@@ -100,6 +100,42 @@ def apply() -> None:
         write("/etc/logrotate.d/tinyproxy", log_rule(["/var/log/tinyproxy/tinyproxy.log"], "1M", 4))
     write("/etc/apt/apt.conf.d/99-cache-budget", 'APT::Periodic::MaxAge "7";\nAPT::Periodic::MaxSize "64";\n')
     write("/etc/sysctl.d/99-storage-no-core.conf", "kernel.core_pattern = |/bin/false\nfs.suid_dumpable = 0\n")
+    guard = Path(__file__).with_name("disk_reserve.py")
+    write("/usr/local/libexec/domofomka-disk-reserve.py", guard.read_text())
+    if not Path("/etc/domofomka-storage.env").exists():
+        write(
+            "/etc/domofomka-storage.env",
+            "DISK_RESERVE_BYTES=268435456\nDISK_LOW_BYTES=536870912\n"
+            "DISK_CRITICAL_BYTES=134217728\nDISK_REARM_BYTES=1342177280\n",
+        )
+    write(
+        "/etc/systemd/system/domofomka-disk-reserve.service",
+        """[Unit]
+Description=Release emergency disk reserve and protect host availability
+After=local-fs.target
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/domofomka-storage.env
+ExecStart=/usr/bin/python3 /usr/local/libexec/domofomka-disk-reserve.py
+Nice=19
+IOSchedulingClass=idle
+CPUQuota=10%
+MemoryMax=64M
+TimeoutStartSec=180
+""",
+    )
+    write(
+        "/etc/systemd/system/domofomka-disk-reserve.timer",
+        """[Unit]
+Description=Check emergency disk reserve every minute
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+[Install]
+WantedBy=timers.target
+""",
+    )
     try:
         subprocess.run(
             ["logrotate", "--debug", "/etc/logrotate.conf"],
@@ -120,6 +156,7 @@ def apply() -> None:
     subprocess.run(["systemctl", "restart", "systemd-journald"], check=True)
     subprocess.run(["systemctl", "enable", "--now", "logrotate.timer", "systemd-tmpfiles-clean.timer"], check=True)
     subprocess.run(["systemctl", "restart", "logrotate.timer"], check=True)
+    subprocess.run(["systemctl", "enable", "--now", "domofomka-disk-reserve.timer"], check=True)
     subprocess.run(["journalctl", "--rotate"], check=True)
     subprocess.run(
         ["journalctl", "--vacuum-size=64M", "--vacuum-time=7d"],
@@ -131,6 +168,7 @@ def apply() -> None:
     subprocess.run(["apt-get", "clean"], check=True)
     # Запуск через systemd сериализуется с таймером и не конкурирует за state lock.
     subprocess.run(["systemctl", "start", "logrotate.service"], check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["systemctl", "start", "domofomka-disk-reserve.service"], check=True)
     # Три небольших набора прежних конфигураций; никакие данные приложений здесь не удаляются.
     copies = sorted(backup.parent.iterdir())
     for path in copies[:-3]:

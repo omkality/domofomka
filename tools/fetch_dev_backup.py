@@ -1,7 +1,7 @@
-"""Р—Р°Р±СЂР°С‚СЊ СЃРІРµР¶СѓСЋ РіРѕС‚РѕРІСѓСЋ РєРѕРїРёСЋ dev РїРѕ SSH Р±РµР· С‚РѕРєРµРЅРѕРІ VK Рё СЃС‚РѕСЂРѕРЅРЅРёС… Р±РёР±Р»РёРѕС‚РµРє.
+"""Забрать свежую готовую копию dev по SSH без токенов VK и сторонних библиотек.
 
-РџРѕРґС…РѕРґРёС‚ РґР»СЏ Р·Р°РїСѓСЃРєР° РїР»Р°РЅРёСЂРѕРІС‰РёРєРѕРј РЅР° РјР°С€РёРЅРµ РІРЅРµ VDS. РљР°С‚Р°Р»РѕРі РЅР°Р·РЅР°С‡РµРЅРёСЏ РїСЂРёРІР°С‚РЅС‹Р№.
-РљРѕРїРёСЏ РїСЂРёРЅРёРјР°РµС‚СЃСЏ С‚РѕР»СЊРєРѕ РїРѕСЃР»Рµ РїСЂРѕРІРµСЂРєРё Р·Р°РіРѕР»РѕРІРєР° PostgreSQL, СЂР°Р·РјРµСЂР° Рё SHA-256.
+Подходит для запуска планировщиком на машине вне VDS. Каталог назначения приватный.
+Копия принимается только после проверки заголовка PostgreSQL, размера и SHA-256.
 """
 
 import argparse
@@ -10,6 +10,7 @@ import json
 import re
 import subprocess
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 REMOTE = """
@@ -57,6 +58,29 @@ def receive(stream, output: Path, maximum: int = 67108864):
             temporary.unlink(missing_ok=True)
 
 
+def prune(output: Path, daily: int = 7, weekly: int = 4) -> int:
+    if not 1 <= daily <= 31 or not 1 <= weekly <= 12:
+        raise ValueError("Invalid local retention")
+    files = []
+    for path in output.glob("queue-*.dump"):
+        match = re.fullmatch(r"queue-(\d{8}T\d{6}Z)-\d+\.dump", path.name)
+        if match and not path.is_symlink():
+            files.append((datetime.strptime(match[1], "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC), path))
+    dates, weeks, keep = set(), set(), set()
+    for stamp, path in sorted(files, reverse=True):
+        week = stamp.isocalendar()[:2]
+        if (stamp.date() not in dates and len(dates) < daily) or (week not in weeks and len(weeks) < weekly):
+            keep.add(path)
+        dates.add(stamp.date())
+        weeks.add(week)
+    removed = 0
+    for _, path in files:
+        if path not in keep:
+            path.unlink()
+            removed += 1
+    return removed
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", required=True)
@@ -100,6 +124,7 @@ def main():
         except BaseException:
             process.kill()
             raise
+    result["old_copies_removed"] = prune(args.output)
     print(json.dumps(result))
 
 
