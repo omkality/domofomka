@@ -13,7 +13,7 @@ from vk_api import VkApi
 
 from src.network import network_settings
 from src.vkbot.http import TimeoutSession
-from src.vkbot.keyboard import build_many_buttons, get_location_keyboard
+from src.vkbot.keyboard import INLINE_BUTTON_LIMIT, build_many_buttons, get_location_keyboard, serialize_inline_keyboard
 from src.vkbot.queue import QueueStore
 
 
@@ -43,7 +43,7 @@ class RateSession(TimeoutSession):
 
 
 def inline_keyboard(entrances: list[str]) -> str:
-    return json.dumps({"inline": True, "buttons": build_many_buttons(entrances)}, ensure_ascii=False)
+    return serialize_inline_keyboard(build_many_buttons(entrances))
 
 
 def code_answer(result: dict, entrance: str) -> str:
@@ -68,7 +68,7 @@ def address_choices(result: dict, page: int = 0) -> tuple[str, str]:
     subset = choices[start : start + size]
     labels = [c["address"] + (" (" + c["locality_context"] + ")" if c.get("locality_context") else "") for c in subset]
     message = "Уточните адрес:\n" + "\n".join(f"{start + i + 1}. {label}" for i, label in enumerate(labels))
-    message += "\nМожно добавить город к запросу."
+    message += "\nЕсли нужного варианта нет, пришлите адрес целиком одним сообщением: город, улицу и номер дома."
 
     def button(label: str, payload: dict) -> dict:
         return {
@@ -84,7 +84,8 @@ def address_choices(result: dict, page: int = 0) -> tuple[str, str]:
         navigation.append(button("Далее", {"choice_page": page + 1}))
     if navigation:
         rows.append(navigation)
-    return message, json.dumps({"inline": True, "buttons": rows}, ensure_ascii=False)
+    rows.append([button("Ни один не подходит", {"dismiss_choices": True})])
+    return message, serialize_inline_keyboard(rows)
 
 
 class LookupUnavailable(RuntimeError):
@@ -194,6 +195,28 @@ class Processor:
                         "params": dict(base, message="Пришлите улицу и номер дома одним коротким сообщением."),
                     }
                 )
+            elif result.get("status") == "incomplete_query":
+                effects.append(
+                    {
+                        "method": "send",
+                        "params": dict(
+                            base, message="Пришлите адрес целиком одним сообщением: город, улицу и номер дома."
+                        ),
+                    }
+                )
+            elif result.get("status") == "no_codes_ambiguous":
+                effects.append(
+                    {
+                        "method": "send",
+                        "params": dict(
+                            base,
+                            message=(
+                                "По этому запросу кодов в базе не найдено. Чтобы проверить конкретный дом, "
+                                "пришлите адрес целиком одним сообщением: город, улицу и номер дома."
+                            ),
+                        ),
+                    }
+                )
             elif result.get("status") == "no_codes":
                 effects.append(
                     {
@@ -217,8 +240,8 @@ class Processor:
                 effects.append({"method": "send", "params": dict(base, message=text)})
             else:
                 entrances = list(result["data"])
-                for offset in range(0, len(entrances), 10):
-                    subset = entrances[offset : offset + 10]
+                for offset in range(0, len(entrances), INLINE_BUTTON_LIMIT):
+                    subset = entrances[offset : offset + INLINE_BUTTON_LIMIT]
                     effects.append(
                         {
                             "method": "send",
@@ -234,10 +257,39 @@ class Processor:
         if isinstance(payload, str):
             payload = json.loads(payload)
         peer = job["peer_id"]
-        # Distinct clicks remain ordered, including rapid entrance changes.
-        # Durable ingest coalesces consecutive identical clicks before planning.
+        # Ingest enforces a shared per-user cooldown before any planning.
         cmid = int(obj["conversation_message_id"])
         result = self.store.message_context(peer, cmid)
+        choice_action = any(key in payload for key in ("dismiss_choices", "select_building", "choice_page"))
+        if (choice_action and self.store.choices_closed(peer, cmid) is True) or (
+            result and result.get("status") == "dismissed"
+        ):
+            self.store.plan(job, [])
+            return
+        if payload.get("dismiss_choices") is True:
+            if result and result.get("status") != "ambiguous":
+                self.store.plan(job, [])
+                return
+            self.store.plan(
+                job,
+                [
+                    {
+                        "method": "edit",
+                        "params": {
+                            "peer_id": peer,
+                            "conversation_message_id": cmid,
+                            "message": (
+                                "Ни один вариант не подошёл. Пришлите адрес целиком одним сообщением: "
+                                "город, улицу и номер дома."
+                            ),
+                            "keyboard": serialize_inline_keyboard([]),
+                        },
+                        "context": {"status": "dismissed", "data": {}},
+                        "close_choices": True,
+                    }
+                ],
+            )
+            return
         if "choice_page" in payload:
             if not result or result.get("status") != "ambiguous":
                 raise ValueError("No saved address choices")
@@ -288,7 +340,7 @@ class Processor:
                 raise LookupUnavailable("Building lookup unavailable")
             answer = response.json()
             keyboard = (
-                inline_keyboard(list(answer["data"])[:10])
+                inline_keyboard(list(answer["data"])[:INLINE_BUTTON_LIMIT])
                 if answer.get("data")
                 else json.dumps({"inline": True, "buttons": []})
             )
@@ -307,17 +359,18 @@ class Processor:
                         "keyboard": keyboard,
                     },
                     "context": answer,
+                    "close_choices": True,
                 }
             ]
             entrances = list(answer.get("data", {}))
-            for offset in range(10, len(entrances), 10):
+            for offset in range(INLINE_BUTTON_LIMIT, len(entrances), INLINE_BUTTON_LIMIT):
                 effects.append(
                     {
                         "method": "send",
                         "params": {
                             "peer_id": peer,
                             "message": answer["address"],
-                            "keyboard": inline_keyboard(entrances[offset : offset + 10]),
+                            "keyboard": inline_keyboard(entrances[offset : offset + INLINE_BUTTON_LIMIT]),
                         },
                         "context": answer,
                     }

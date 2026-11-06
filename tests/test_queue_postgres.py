@@ -164,13 +164,16 @@ def test_button_burst_creates_one_job_and_bounded_feedback(store: QueueStore) ->
     assert store.claim("bot_outbox") is None
 
 
-def test_quick_entrance_changes_and_return_to_previous_are_preserved(store: QueueStore) -> None:
-    store.ingest([click(store, "a", "1"), click(store, "b", "2"), click(store, "c", "1")])
-    for entrance in ("1", "2", "1"):
-        job = store.claim("bot_inbox")
-        assert job["payload"]["payload"]["entrance"] == entrance
-        store.plan(job, [])
+def test_rapid_alternating_buttons_share_one_user_cooldown(store: QueueStore) -> None:
+    records = [click(store, f"alternate-{i}", str(i % 3 + 1), cmid=12 + i % 2) for i in range(40)]
+    store.ingest(records)
+    job = store.claim("bot_inbox")
+    assert job["payload"]["event_id"] == "alternate-0"
+    store.plan(job, [])
     assert store.claim("bot_inbox") is None
+    with store.connect() as db:
+        rows = db.execute("SELECT payload FROM bot_inbox WHERE group_id=%s ORDER BY id", (store.group_id,)).fetchall()
+    assert sum(r["payload"]["_queue_receipt"]["throttled"] for r in rows) == 39
 
 
 def test_delayed_same_click_stays_coalesced_after_cooldown_and_restart(store: QueueStore) -> None:
@@ -201,7 +204,8 @@ def test_same_click_is_accepted_after_successful_cooldown(store: QueueStore) -> 
     with patch("src.vkbot.queue.time.time", return_value=100):
         store.ingest([click(store, "a")])
     job = store.claim("bot_inbox")
-    store.plan(job, [])
+    with patch("src.vkbot.queue.time.time", return_value=101):
+        store.plan(job, [])
     with patch("src.vkbot.queue.time.time", return_value=106):
         store.ingest([click(store, "b")])
     assert store.claim("bot_inbox")["payload"]["event_id"] == "b"
@@ -288,3 +292,103 @@ def test_building_selection_is_a_durable_callback(store: QueueStore) -> None:
     assert store.ingest([item]) == 1
     claimed = store.claim("bot_inbox")
     assert claimed["payload"]["payload"] == {"select_building": 0}
+
+
+@pytest.mark.parametrize("payload", [{"dismiss_choices": True}, {"choice_page": 1}, {"select_building": 0}])
+def test_choice_actions_are_durable_and_deduplicate(store, payload):
+    first = click(store, "choice-first")
+    first["payload"]["payload"] = payload
+    second = click(store, "choice-repeat")
+    second["payload"]["payload"] = payload
+    store.ingest([first, second])
+    job = store.claim("bot_inbox")
+    assert job["payload"]["payload"] == payload
+    assert store.claim("bot_inbox") is None
+
+
+def test_closing_choices_is_atomic_with_the_outbox_plan(store):
+    store.ingest([record(store)])
+    job = store.claim("bot_inbox")
+    effect = {
+        "method": "edit",
+        "params": {"conversation_message_id": 42},
+        "context": {"status": "dismissed"},
+        "close_choices": True,
+    }
+    with pytest.raises(TypeError):
+        store.plan(job, [effect, {"method": "send", "params": {"invalid": object()}}])
+    assert store.choices_closed(10, 42) is False
+    assert store.claim("bot_outbox") is None
+    store.plan(job, [effect])
+    recreated = QueueStore(store.dsn, store.group_id)
+    assert recreated.choices_closed(10, 42) is True
+    assert recreated.choices_closed(10, 43) is False
+    assert recreated.claim("bot_outbox")["context"]["status"] == "dismissed"
+
+
+def test_late_page_cannot_restore_a_rejected_menu_before_delivery(store):
+    from unittest.mock import MagicMock
+
+    from src.vkbot.processor import Processor
+
+    # An old page edit may still be in outbox when rejection is planned.
+    store.ingest([record(store)])
+    job = store.claim("bot_inbox")
+    choices = {"status": "ambiguous", "candidates": [{"building_id": "a", "address": "Дом"}]}
+    store.plan(job, [{"method": "edit", "params": {"conversation_message_id": 12}, "context": choices}])
+    old_page = store.claim("bot_outbox")
+    store.finish(old_page, (12, choices))
+    reject = click(store, "reject")
+    reject["payload"]["payload"] = {"dismiss_choices": True}
+    store.ingest([reject])
+    processor = object.__new__(Processor)
+    processor.store = store
+    processor.http = MagicMock()
+    processor.plan(store.claim("bot_inbox"))
+    assert store.choices_closed(10, 12)
+    # Context is still the delivered old menu until the rejection is delivered.
+    assert store.message_context(10, 12)["status"] == "ambiguous"
+    stale_page = click(store, "late-page")
+    stale_page["payload"]["payload"] = {"choice_page": 0}
+    store.ingest([stale_page])
+    assert store.claim("bot_inbox") is None
+    rejection = store.claim("bot_outbox")
+    store.finish(rejection, (12, rejection["context"]))
+    assert store.message_context(10, 12)["status"] == "dismissed"
+    assert store.claim("bot_outbox") is None
+    processor.http.get.assert_not_called()
+
+
+def test_cooldown_starts_after_delivery_not_before_a_slow_request(store):
+    from unittest.mock import patch
+
+    with patch("src.vkbot.queue.time.time", return_value=100):
+        store.ingest([click(store, "slow")])
+    job = store.claim("bot_inbox")
+    store.plan(job, [{"method": "edit", "params": {"peer_id": 10, "conversation_message_id": 12}}])
+    outbox = store.claim("bot_outbox")
+    with patch("src.vkbot.queue.time.time", return_value=120):
+        store.finish(outbox)
+    with patch("src.vkbot.queue.time.time", return_value=121):
+        store.ingest([click(store, "too-soon", "2")])
+    receipt = store.callback_feedback("callback:10:too-soon")
+    assert receipt["throttled"]
+    assert receipt["wait_seconds"] == 4
+    assert store.claim("bot_inbox") is None
+    with patch("src.vkbot.queue.time.time", return_value=126):
+        store.ingest([click(store, "after-pause", "2")])
+    assert store.claim("bot_inbox")["payload"]["event_id"] == "after-pause"
+
+
+def test_pending_callback_blocks_different_buttons_after_restart(store):
+    from unittest.mock import patch
+
+    with patch("src.vkbot.queue.time.time", return_value=100):
+        store.ingest([click(store, "pending")])
+    job = store.claim("bot_inbox")
+    store.plan(job, [{"method": "edit", "params": {"peer_id": 10, "conversation_message_id": 12}}])
+    recreated = QueueStore(store.dsn, store.group_id)
+    with patch("src.vkbot.queue.time.time", return_value=120):
+        recreated.ingest([click(store, "other-button", "2", cmid=99)])
+    assert recreated.claim("bot_inbox") is None
+    assert recreated.callback_feedback("callback:10:other-button")["feedback"] == "pending"

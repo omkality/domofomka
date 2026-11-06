@@ -12,6 +12,12 @@ from tools.build_catalog import SCHEMA
     ("value", "words", "house", "entrance"),
     [
         ("Перерва, 62к1, подъезд 1", "перерва", "62к1", "1"),
+        ("Дежнева17", "дежнева", "17", None),
+        ("Большая Черкизовская1к2", "большая черкизовская", "1к2", None),
+        ("Волоколамское шоссе 1кА", "волоколамское", "1ка", None),
+        ("Зеленоград, к902", "зеленоград", "к902", None),
+        ("Зеленоград, корпус 119", "зеленоград", "к119", None),
+        ("третья Парковая дом третий", "3 парковая", "3", None),
         ("МСК Перерва д. 62 корпус 1", "москва перерва", "62к1", None),
         ("Первая Парковая, дом 3", "1 парковая", "3", None),
         ("Восьмая Советская 2", "8 советская", "2", None),
@@ -55,7 +61,10 @@ def catalog(tmp_path: Path):
         )
         db.execute("INSERT INTO streets VALUES(?,?,?,?)", (id, text(city), text(street), text(city + " " + street)))
         db.execute("INSERT INTO search VALUES(?,?)", (id, text(city + " " + street)))
-    db.executemany("INSERT INTO codes VALUES(?,?,?,?)", [("a", "2", "test", "CODE"), ("g", "1", "test", "OTHER")])
+    db.executemany(
+        "INSERT INTO codes VALUES(?,?,?,?)",
+        [("a", "2", "test", "CODE"), ("c", "1", "test", "PODOLSK"), ("g", "1", "test", "OTHER")],
+    )
     db.commit()
     db.close()
     return Catalog(str(path))
@@ -189,3 +198,87 @@ def test_reused_regional_keys_follow_the_updated_normalizer(catalog):
         index_streets(db)
     assert catalog.resolve("Москва третья парковая 3")["building_id"] == "third"
     assert catalog.resolve("Москва 3-я парковая 3")["building_id"] == "third"
+
+
+@pytest.mark.parametrize(
+    "message", ["третий покровский проезд", "3-й Покровский проезд", "первая парковая", "улица 1905 года", "8 Марта"]
+)
+def test_street_number_is_not_a_missing_house(message, catalog):
+    assert parse_query(message).house is None
+    assert catalog.resolve(message)["status"] == "incomplete_query"
+
+
+def test_one_coded_address_opens_without_listing_empty_houses(catalog):
+    with sqlite3.connect(catalog.path) as db:
+        db.execute("DELETE FROM codes WHERE building_id='c'")
+    answer = catalog.resolve("Перерва 62к1")
+    assert answer["status"] == "found"
+    assert answer["building_id"] == "a"
+    assert "candidates" not in answer
+
+
+def test_only_coded_candidates_are_offered(catalog):
+    with sqlite3.connect(catalog.path) as db:
+        db.execute(
+            "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                "empty-city",
+                "empty-city",
+                "Город, Перерва, дом 62к1",
+                "Город",
+                "Перерва",
+                "62к1",
+                "перерва",
+                "город",
+                "",
+                "",
+            ),
+        )
+        db.execute("INSERT INTO streets VALUES('empty-street','город','перерва','город перерва')")
+        db.execute("INSERT INTO search VALUES('empty-street','город перерва')")
+    result = catalog.resolve("Перерва 62к1")
+    assert result["status"] == "ambiguous"
+    assert {c["building_id"] for c in result["candidates"]} == {"a", "c"}
+
+
+def test_empty_house_choices_are_not_presented_as_a_menu(catalog):
+    with sqlite3.connect(catalog.path) as db:
+        db.execute("DELETE FROM codes WHERE building_id IN ('a','c')")
+    result = catalog.resolve("Перерва 62к1")
+    assert result["status"] == "no_codes_ambiguous"
+    assert "candidates" not in result
+    assert catalog.resolve("Москва Перерва 62к1")["status"] == "no_codes"
+
+
+def test_code_availability_cannot_replace_an_exact_address_with_a_fuzzy_street(catalog):
+    with sqlite3.connect(catalog.path) as db:
+        db.execute(
+            "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                "literal",
+                "literal",
+                "Москва, улица Черемушкинская, дом 2",
+                "Москва",
+                "Черемушкинская",
+                "2",
+                "черемушкинская",
+                "москва",
+                "77",
+                "москва",
+            ),
+        )
+        db.execute("INSERT INTO streets VALUES('literal-street','москва','черемушкинская','москва черемушкинская')")
+        db.execute("INSERT INTO search VALUES('literal-street','москва черемушкинская')")
+    coded_nearby_name = {
+        "id": "a",
+        "guid": "a",
+        "city": "Москва",
+        "street": "Черемушкинскаяа",
+        "house": "2",
+        "display": "Москва, улица Черемушкинскаяа, дом 2",
+        "region": "77",
+        "lineage": "москва",
+    }
+    result = catalog.resolve("Москва Черемушкинская 2", [coded_nearby_name])
+    assert result["status"] == "no_codes"
+    assert result["building_id"] == "literal"

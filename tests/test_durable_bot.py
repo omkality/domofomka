@@ -420,7 +420,8 @@ def test_ambiguous_choice_edits_the_same_message(processor: Processor, entrance_
     response = processor.http.get.return_value.build.return_value.send.return_value
     response.status = 200
     response.json.return_value = {
-        "address": "Known house", "data": {str(i): [["TEST", "test"]] for i in range(1, entrance_count + 1)}
+        "address": "Known house",
+        "data": {str(i): [["TEST", "test"]] for i in range(1, entrance_count + 1)},
     }
     processor.plan(
         {
@@ -470,3 +471,95 @@ def test_address_choices_can_be_paged_without_repeating_lookup(processor: Proces
 
 def test_long_query_does_not_poison_retry_queue(processor: Processor) -> None:
     assert processor.lookup("x" * 501)["status"] == "invalid_query"
+
+
+@pytest.mark.parametrize("count", [1, 5, 6, 12, 100])
+def test_choice_pages_have_rejection_and_fit_button_budget(count):
+    from src.vkbot.processor import address_choices
+
+    result = {
+        "status": "ambiguous",
+        "candidates": [{"address": f"Город {i}, дом", "building_id": str(i)} for i in range(count)],
+    }
+    seen = []
+    for page in range((count + 4) // 5):
+        text, encoded = address_choices(result, page)
+        rows = json.loads(encoded)["buttons"]
+        buttons = [b for row in rows for b in row]
+        assert len(buttons) <= 10
+        assert all(0 < len(row) <= 5 for row in rows)
+        assert sum(json.loads(b["action"]["payload"]).get("dismiss_choices") is True for b in buttons) == 1
+        seen.extend(
+            json.loads(b["action"]["payload"])["select_building"]
+            for b in buttons
+            if "select_building" in json.loads(b["action"]["payload"])
+        )
+        assert "адрес целиком одним сообщением" in text
+        assert "Можно добавить город" not in text
+    assert seen == list(range(count))
+
+
+@pytest.mark.parametrize("context", [None, {"status": "ambiguous", "candidates": [{"building_id": "a"}]}])
+def test_rejecting_addresses_clears_buttons_in_the_same_message(processor, context):
+    processor.store.message_context.return_value = context
+    processor.plan(
+        {
+            "kind": "message_event",
+            "peer_id": 100,
+            "payload": {"conversation_message_id": 42, "payload": {"dismiss_choices": True}},
+        }
+    )
+    effect = processor.store.plan.call_args.args[1][0]
+    assert effect["method"] == "edit"
+    assert effect["params"]["conversation_message_id"] == 42
+    assert json.loads(effect["params"]["keyboard"])["buttons"] == []
+    assert "одним сообщением" in effect["params"]["message"]
+    assert effect["close_choices"] is True
+    assert effect["context"]["status"] == "dismissed"
+
+
+@pytest.mark.parametrize("action", [{"dismiss_choices": True}, {"choice_page": 1}, {"select_building": 0}])
+def test_old_choices_cannot_reopen_a_finalized_menu(processor, action):
+    processor.store.message_context.return_value = {"status": "ambiguous", "candidates": [{"building_id": "a"}]}
+    processor.store.choices_closed.return_value = True
+    processor.plan(
+        {"kind": "message_event", "peer_id": 100, "payload": {"conversation_message_id": 42, "payload": action}}
+    )
+    assert processor.store.plan.call_args.args[1] == []
+
+
+@pytest.mark.parametrize("count", [10, 11, 17, 26, 100])
+def test_every_entrance_is_kept_in_direct_responses(processor, count):
+    processor.lookup = MagicMock(
+        return_value={
+            "status": "found",
+            "address": "Адрес",
+            "data": {str(i): [["CODE", "test"]] for i in range(1, count + 1)},
+        }
+    )
+    processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"id": 1, "text": "адрес"}}})
+    effects = processor.store.plan.call_args.args[1]
+    labels = []
+    for effect in effects:
+        rows = json.loads(effect["params"]["keyboard"])["buttons"]
+        assert sum(map(len, rows)) <= 10
+        assert all(len(row) <= 5 for row in rows)
+        labels.extend(b["action"]["label"] for row in rows for b in row)
+    assert labels == [str(i) for i in range(1, count + 1)]
+
+
+def test_inline_keyboard_rejects_overflow_before_sending_to_vk():
+    from src.vkbot.processor import inline_keyboard
+
+    with pytest.raises(ValueError, match="button budget"):
+        inline_keyboard([str(i) for i in range(11)])
+
+
+@pytest.mark.parametrize("status", ["incomplete_query", "no_codes_ambiguous"])
+def test_incomplete_or_empty_address_search_does_not_emit_buttons(processor, status):
+    processor.lookup = MagicMock(return_value={"status": status, "data": {}})
+    processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"id": 1, "text": "город"}}})
+    effects = processor.store.plan.call_args.args[1]
+    assert len(effects) == 1
+    assert "целиком одним сообщением" in effects[0]["params"]["message"]
+    assert "keyboard" not in effects[0]["params"]

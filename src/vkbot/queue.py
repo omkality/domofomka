@@ -176,6 +176,8 @@ class QueueStore:
             target = "entrance:" + str(action["entrance"])
         elif "select_building" in action:
             target = "building:" + str(int(action["select_building"]))
+        elif action.get("dismiss_choices") is True:
+            target = "dismiss"
         else:
             target = "page:" + str(int(action["choice_page"]))
         signature = f"{int(obj['conversation_message_id'])}:{target}"
@@ -199,14 +201,16 @@ class QueueStore:
             ).fetchone()
         pending = bool(previous and (previous["status"] in ("pending", "processing") or previous["active"]))
         failed = bool(previous and (previous["status"] == "failed" or previous["failed"]))
-        remaining = max(0, math.ceil(state.get("accepted_at", 0) + window - now))
+        remaining = max(0, math.ceil(state.get("completed_at", state.get("accepted_at", 0)) + window - now))
         duplicate = bool(previous and not failed and state.get("signature") == signature and (pending or remaining > 0))
+        throttled = bool(previous and not failed and (pending or remaining > 0))
         delayed = bool(previous and (previous["last_error"] or previous["delayed"]))
         notice = None
-        if duplicate:
+        if throttled:
             notice = "pending" if pending and (delayed or remaining == 0) else "wait"
         else:
             state.update(signature=signature, canonical_id=inbox_id, accepted_at=now)
+            state.pop("completed_at", None)
             # A known pending failure in this peer can delay a newly accepted click.
             blocked = conn.execute(
                 """SELECT EXISTS(SELECT 1 FROM bot_outbox WHERE group_id=%s AND peer_id=%s
@@ -227,13 +231,14 @@ class QueueStore:
             "feedback": feedback,
             "wait_seconds": max(1, remaining),
             "duplicate": duplicate,
+            "throttled": throttled,
             "canonical_id": state["canonical_id"],
             "ack_reserved": False,
         }
         stored = dict(obj, _queue_receipt=receipt)
         conn.execute(
             "UPDATE bot_inbox SET payload=%s,status=%s WHERE id=%s",
-            (Jsonb(stored), "done" if duplicate else record.get("status", "pending"), inbox_id),
+            (Jsonb(stored), "done" if throttled else record.get("status", "pending"), inbox_id),
         )
         self._state(conn, name, state)
 
@@ -300,6 +305,9 @@ class QueueStore:
         with self.connect() as conn:
             self._owned(conn, "bot_inbox", job)
             for index, effect in enumerate(effects):
+                if effect.get("close_choices"):
+                    cmid = int(effect["params"]["conversation_message_id"])
+                    self._state(conn, f"choices_closed:{job['peer_id']}:{cmid}", True)
                 conn.execute(
                     """INSERT INTO bot_outbox(inbox_id,group_id,peer_id,effect_index,method,params,context)
                     VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(inbox_id,effect_index) DO NOTHING""",
@@ -319,6 +327,8 @@ class QueueStore:
                 "UPDATE bot_inbox SET status='done',owner=NULL,lease_until=NULL,last_error=NULL WHERE id=%s",
                 (job["id"],),
             )
+            if not effects:
+                self._callback_completed(conn, job["peer_id"], job["id"])
 
     def _owned(self, conn: psycopg.Connection, table: str, job: dict) -> None:
         row = conn.execute(
@@ -348,6 +358,22 @@ class QueueStore:
                 "UPDATE bot_outbox SET status='done',owner=NULL,lease_until=NULL,last_error=NULL WHERE id=%s",
                 (job["id"],),
             )
+            self._callback_completed(conn, job["peer_id"], job["inbox_id"])
+
+    def _callback_completed(self, conn: psycopg.Connection, peer: int, inbox_id: int) -> None:
+        name = f"callback_gate:{peer}"
+        row = conn.execute(
+            "SELECT value FROM bot_state WHERE group_id=%s AND name=%s FOR UPDATE", (self.group_id, name)
+        ).fetchone()
+        if not row or row["value"].get("canonical_id") != inbox_id:
+            return
+        pending = conn.execute(
+            "SELECT 1 FROM bot_outbox WHERE inbox_id=%s AND status IN ('pending','processing') LIMIT 1", (inbox_id,)
+        ).fetchone()
+        if not pending:
+            state = row["value"]
+            state["completed_at"] = time.time()
+            self._state(conn, name, state)
 
     def fail(self, table: str, job: dict, error: str, delay: float, permanent: bool = False) -> None:
         table = self._table(table)
@@ -373,6 +399,9 @@ class QueueStore:
                 (self.group_id, peer, cmid),
             ).fetchone()
             return row["result"] if row else None
+
+    def choices_closed(self, peer: int, cmid: int) -> bool:
+        return self.get_state(f"choices_closed:{peer}:{cmid}", False) is True
 
     def consume_fault(self, name: str) -> bool:
         with self.connect() as conn:

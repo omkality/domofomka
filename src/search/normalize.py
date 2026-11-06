@@ -44,15 +44,38 @@ TENS = {
 }
 
 
-def ordinals(value: str) -> str:
+def ordinals(value: str, *, protect_street_numbers: bool = False) -> str:
     value = re.sub(r"\bтреть(?:я|е|его|ей|ю|ем|и|их)\b", "третий", value)
     roots = "|".join(sorted(ORDINALS, key=len, reverse=True))
     pattern = rf"\b(?:({'|'.join(TENS)})\s+)?({roots})(?:ый|ий|ой|ая|яя|ое|ее|ого|его|ой|ей|ую|юю|ом|ем|ых|их)\b"
 
-    def number(match: re.Match) -> str:
-        return str(TENS.get(match[1], 0) + ORDINALS[match[2]])
+    def house_role(position: int) -> bool:
+        return bool(
+            re.search(
+                r"\b(?:дом|д|под[ъь]?езд|под|пд|квартира|кв|этаж|эт|корпус|корп|строение|стр)\.?\s*№?\s*$",
+                value[:position],
+            )
+        )
 
-    return re.sub(pattern, number, value)
+    def number(match: re.Match) -> str:
+        result = str(TENS.get(match[1], 0) + ORDINALS[match[2]])
+        if protect_street_numbers and not house_role(match.start()):
+            return f"__ordinal_{result}__"
+        return result
+
+    value = re.sub(pattern, number, value)
+    if protect_street_numbers:
+        value = re.sub(
+            r"\b(\d+)\s*[- ]?\s*(?:ая|я|й|ый|ой)\b",
+            lambda m: m[1] if house_role(m.start()) else f"__ordinal_{m[1]}__",
+            value,
+        )
+        value = re.sub(
+            r"\b(\d+)(\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря|года|лет|летия)\b)",
+            r"__ordinal_\1__\2",
+            value,
+        )
+    return value
 
 
 def text(value: str) -> str:
@@ -176,7 +199,14 @@ class Query:
 
 def parse_query(value: str) -> Query:
     value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")
-    value = ordinals(value)
+    # Separate an attached house number, but preserve 62к1 / 4с2 components.
+    value = re.sub(
+        r"(?<=[а-яa-z])(?=\d)",
+        lambda m: "" if m.start() >= 2 and value[m.start() - 1] in "кс" and value[m.start() - 2].isdigit() else " ",
+        value,
+    )
+    value = re.sub(r"\b(\d+)(?=(?:марта|мая|года|лет)\b)", r"\1 ", value)
+    value = ordinals(value, protect_street_numbers=True)
     kinds = re.findall(
         r"\b(?:улица|ул|проспект|просп|пр-кт|переулок|пер|проезд|пр-д|шоссе|бульвар|набережная|площадь|микрорайон)\b",
         value,
@@ -190,10 +220,18 @@ def parse_query(value: str) -> Query:
     value = re.sub(r"(?<![а-яa-z])стр(?:оение)?\.?\s*(?=\d)", "с", value)
     value = re.sub(r"(?<=\d)[,;]\s*(?=[кс]\s*\d)", " ", value)
     # Last number is the building: numeric street names (1905 года, 1-я) stay in words.
-    candidates = list(re.finditer(r"(?<![\w/])\d+(?:/\d+)?\s*[а-яa-z]?(?:\s*[кс]\s*\d+[а-яa-z]?){0,2}(?!\w)", value))
+    candidates = list(
+        re.finditer(
+            r"(?<![\w/])(?:к\s*)?\d+(?:/\d+)?\s*[а-яa-z]?(?:\s*[кс]\s*(?:\d+[а-яa-z]?|[а-я])){0,2}(?!\w)", value
+        )
+    )
+
+    def unmark(words: str) -> str:
+        return re.sub(r"__ordinal_(\d+)__", r"\1", words)
+
     if not candidates:
-        return Query(value, address_words(value), None, entrance, kind)
+        return Query(unmark(value), address_words(unmark(value)), None, entrance, kind)
     match = candidates[-1]
     house = house_key(match[0])
-    words = address_words(value[: match.start()] + " " + value[match.end() :])
-    return Query(value, words, house, entrance, kind)
+    words = address_words(unmark(value[: match.start()] + " " + value[match.end() :]))
+    return Query(unmark(value), words, house, entrance, kind)

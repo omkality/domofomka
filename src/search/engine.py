@@ -203,8 +203,10 @@ class Catalog:
 
     def resolve(self, message: str, candidates: list[dict] | None = None) -> dict:
         query = parse_query(message)
-        if not query.house or not query.words:
+        if not message.strip():
             return {"status": "not_found", "data": {}, "engine": "v2"}
+        if not query.house or not query.words:
+            return {"status": "incomplete_query", "data": {}, "engine": "v2"}
         variants = [query]
         # Work before stop-word removal: "по" is also an ordinary preposition.
         for match in re.finditer(r"\b(ново|старо|по)\s+([а-я]+)\b", query.raw):
@@ -250,7 +252,9 @@ class Catalog:
         if not scored:
             return {"status": "not_found", "data": {}, "engine": "v2"}
         best = scored[0][0]
-        close = [row for score, row in scored if score >= best - self.ambiguity_margin]
+        # Code availability must not replace an exact address with a fuzzy one.
+        cutoff = 1 if best == 1 else best - self.ambiguity_margin
+        close = [row for score, row in scored if score >= cutoff]
         if len(close) > 1:
             with self.connect() as db:
                 ids = [r["id"] for r in close]
@@ -263,7 +267,10 @@ class Catalog:
                         ids,
                     )
                 }
-            close.sort(key=lambda r: (r["id"] not in coded, r["id"]))
+            if coded:
+                close = [row for row in close if row["id"] in coded]
+            else:
+                return {"status": "no_codes_ambiguous", "data": {}, "engine": "v2"}
         if len(close) > 1:
             return {
                 "status": "ambiguous",
