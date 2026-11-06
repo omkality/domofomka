@@ -521,6 +521,8 @@ def test_rejecting_addresses_clears_buttons_in_the_same_message(processor, conte
 @pytest.mark.parametrize("action", [{"dismiss_choices": True}, {"choice_page": 1}, {"select_building": 0}])
 @pytest.mark.parametrize("context", [{"status": "found", "data": {"3": []}}, {"data": {"3": []}}])
 def test_old_choice_ignores_completed_context_without_close_marker(processor, action, context):
+    processor.http.close()
+    processor.http = MagicMock()
     processor.store.message_context.return_value = context
     processor.store.choices_closed.return_value = False
     processor.plan(
