@@ -14,6 +14,30 @@ import sys
 from pathlib import Path
 
 
+def retire_build_cache() -> None:
+    """Освобождаем только неиспользуемый кэш характерных шагов сборки domofomka."""
+    raw = subprocess.check_output(["docker", "buildx", "du", "--format", "json"], text=True)
+    records = {row["ID"]: row for row in (json.loads(line) for line in raw.splitlines())}
+
+    def depth(key: str) -> int:
+        return 1 + max((depth(p) for p in records[key].get("Parents", []) if p in records), default=0)
+
+    patterns = (
+        "uv sync --frozen --group api",
+        "uv sync --frozen --group vkbot",
+        "COPY codes.db ./codes.db",
+        "COPY src/ ./src/",
+        "COPY start_message.txt ./",
+    )
+    candidates = [
+        key
+        for key, row in records.items()
+        if row["Reclaimable"] and not row["Shared"] and any(value in row["Description"] for value in patterns)
+    ]
+    for key in sorted(candidates, key=depth, reverse=True):
+        subprocess.run(["docker", "buildx", "prune", "--filter", "id=" + key, "--force"], check=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True, type=Path)
@@ -69,6 +93,7 @@ def main() -> None:
                 image = json.loads(line)
                 if image["Repository"] == repository and image["ID"] not in protected and image["Tag"] != "<none>":
                     subprocess.run(["docker", "image", "rm", repository + ":" + image["Tag"]], check=True)
+        retire_build_cache()
     sys.stdout.write("Restricted CI key installed; existing access preserved\n")
 
 
