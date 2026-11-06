@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -15,10 +17,15 @@ class Settings(BaseSettings):
     opensearch_url: str | None = None
     opensearch_index: str = "domofomka-buildings"
     opensearch_timeout_seconds: float = Field(default=2, gt=0)
+    opensearch_fuzziness: Literal["AUTO", "0", "1", "2"] = "AUTO"
+    opensearch_prefix_length: int = Field(default=1, ge=0, le=3)
     search_candidate_limit: int = Field(default=100, ge=5, le=500)
     search_max_query_length: int = Field(default=500, ge=20, le=2000)
     search_min_similarity: float = Field(default=0.86, gt=0, le=1)
     search_ambiguity_margin: float = Field(default=0.06, ge=0, le=1)
+    search_cache_ttl_seconds: float = Field(default=120, ge=0)
+    search_cache_max_entries: int = Field(default=256, ge=1, le=4096)
+    search_cache_max_bytes: int = Field(default=2097152, ge=1024)
 
 
 settings = Settings()

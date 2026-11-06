@@ -1,19 +1,68 @@
 import asyncio
 import logging
 from datetime import timedelta
+from pathlib import Path
 
 from litestar import Router, get
 from pyreqwest.client import ClientBuilder
 
+from src.api.cache import LookupCache
 from src.api.config import settings
 from src.api.routes import get_dadata_client
 from src.search.engine import Catalog, search_body
 from src.services.codes import get_data_from_db
 
 logger = logging.getLogger(__name__)
+result_cache = LookupCache()
+
+
+def cache_key(request: tuple) -> tuple | None:
+    result_cache.configure(
+        settings.search_cache_ttl_seconds, settings.search_cache_max_entries, settings.search_cache_max_bytes
+    )
+    if settings.search_cache_ttl_seconds == 0:
+        return None
+    try:
+        files = []
+        for filename in (settings.search_catalog_path, settings.db_name):
+            path = Path(filename).resolve()
+            stat = path.stat()
+            files.append((str(path), stat.st_ino, stat.st_mtime_ns, stat.st_size))
+    except OSError:
+        return None
+    return (
+        *files,
+        settings.opensearch_url,
+        settings.opensearch_index,
+        settings.opensearch_fuzziness,
+        settings.opensearch_prefix_length,
+        settings.search_min_similarity,
+        settings.search_ambiguity_margin,
+        settings.search_candidate_limit,
+        request,
+    )
+
+
+def remember(key: tuple | None, result: dict) -> None:
+    if (
+        key is not None
+        and result.get("fallback_reason") != "unavailable"
+        and result.get("status") in {"found", "no_codes", "ambiguous", "no_codes_ambiguous", "not_found"}
+    ):
+        result_cache.put(key, result)
 
 
 async def lookup(message: str) -> dict:
+    key = cache_key(("text", message))
+    cached = result_cache.get(key) if key is not None else None
+    if cached is not None:
+        return cached
+    result = await uncached_lookup(message)
+    remember(key, result)
+    return result
+
+
+async def uncached_lookup(message: str) -> dict:
     reason = None
     try:
         catalog = Catalog(
@@ -30,7 +79,14 @@ async def lookup(message: str) -> dict:
                 ):
                     response = (
                         await client.post(settings.opensearch_url + "/" + settings.opensearch_index + "/_search")
-                        .body_json(search_body(message, settings.search_candidate_limit))
+                        .body_json(
+                            search_body(
+                                message,
+                                settings.search_candidate_limit,
+                                fuzziness=settings.opensearch_fuzziness,
+                                prefix_length=settings.opensearch_prefix_length,
+                            )
+                        )
                         .build()
                         .send()
                     )
@@ -80,11 +136,17 @@ async def geo_codes(lat: float, lon: float) -> dict:
 
     from src.services.dadata_client import DadataUnavailable
 
+    key = cache_key(("geo", lat, lon))
+    cached = result_cache.get(key) if key is not None else None
+    if cached is not None:
+        return cached
     try:
         address = await (await get_dadata_client()).get_address_by_geo(lat, lon)
     except DadataUnavailable as exc:
         raise ServiceUnavailableException(detail="Geocoding unavailable; send text") from exc
-    return await lookup(address or "")
+    result = await lookup(address or "")
+    remember(key, result)
+    return result
 
 
 v2_router = Router(path="/api/v2/codes", route_handlers=[message_codes, geo_codes])
