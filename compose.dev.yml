@@ -26,6 +26,10 @@ services:
     - -c
     - temp_file_limit=${QUEUE_TEMP_FILE_LIMIT:-128MB}
     init: true
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
     restart: always
     mem_limit: ${QUEUE_MEM_LIMIT:-192m}
     memswap_limit: ${QUEUE_MEMSWAP_LIMIT:-256m}
@@ -45,10 +49,17 @@ services:
       timeout: ${QUEUE_HEALTH_TIMEOUT:-3s}
       retries: ${QUEUE_HEALTH_RETRIES:-10}
   api:
+    read_only: true
+    tmpfs:
+    - /tmp:size=16m,mode=1777
     build:
       context: .
       dockerfile: Dockerfile.api
     init: true
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
     restart: always
     mem_limit: ${API_MEM_LIMIT:-384m}
     memswap_limit: ${API_MEMSWAP_LIMIT:-512m}
@@ -87,10 +98,17 @@ services:
       retries: ${API_HEALTH_RETRIES:-5}
       start_period: ${API_HEALTH_START_PERIOD:-60s}
   vkbot:
+    read_only: true
+    tmpfs:
+    - /tmp:size=16m,mode=1777
     build:
       context: .
       dockerfile: Dockerfile.vkbot
     init: true
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
     restart: always
     mem_limit: ${BOT_MEM_LIMIT:-128m}
     memswap_limit: ${BOT_MEMSWAP_LIMIT:-192m}

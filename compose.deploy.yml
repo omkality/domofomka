@@ -6,8 +6,15 @@ x-logging: &logging
     max-file: ${DOCKER_LOG_MAX_FILES:-3}
 services:
   api:
+    read_only: true
+    tmpfs:
+    - /tmp:size=16m,mode=1777
     image: ${API_IMAGE:?Set immutable API_IMAGE}
     init: true
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
     restart: always
     mem_limit: ${API_MEM_LIMIT:-384m}
     memswap_limit: ${API_MEMSWAP_LIMIT:-512m}
@@ -32,8 +39,15 @@ services:
       retries: ${API_HEALTH_RETRIES:-5}
       start_period: ${API_HEALTH_START_PERIOD:-60s}
   vkbot:
+    read_only: true
+    tmpfs:
+    - /tmp:size=16m,mode=1777
     image: ${BOT_IMAGE:?Set immutable BOT_IMAGE}
     init: true
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
     restart: always
     mem_limit: ${BOT_MEM_LIMIT:-128m}
     memswap_limit: ${BOT_MEMSWAP_LIMIT:-192m}
