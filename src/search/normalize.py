@@ -55,8 +55,17 @@ TENS = {
 }
 
 
-def ordinals(value: str, *, protect_street_numbers: bool = False) -> str:
-    value = re.sub(r"\bтреть(?:я|е|его|ей|ю|ем|и|их)\b", "третий", value)
+def ordinals(value: str, *, protect_street_numbers: bool = False, lexical_forms: dict | None = None) -> str:
+    third_forms = {}
+    shift = 0
+
+    def third(match: re.Match) -> str:
+        nonlocal shift
+        third_forms[match.start() + shift] = match[0]
+        shift += len("третий") - len(match[0])
+        return "третий"
+
+    value = re.sub(r"\bтреть(?:я|е|его|ей|ю|ем|и|их)\b", third if lexical_forms is not None else "третий", value)
     roots = "|".join(sorted(ORDINALS, key=len, reverse=True))
     pattern = rf"\b(?:({'|'.join(TENS)})\s+)?({roots})(?:ый|ий|ой|ая|яя|ое|ее|ого|его|ой|ей|ую|юю|ом|ем|ых|их)\b"
 
@@ -71,14 +80,32 @@ def ordinals(value: str, *, protect_street_numbers: bool = False) -> str:
     def number(match: re.Match) -> str:
         result = str(TENS.get(match[1], 0) + ORDINALS[match[2]])
         if protect_street_numbers and not house_role(match.start()):
+            if lexical_forms is not None:
+                marker = f"__ordinal_{result}_{len(lexical_forms)}__"
+                original = match[0]
+                third_form = third_forms.get(match.end() - len("третий"))
+                if third_form and original.endswith("третий"):
+                    original = original.removesuffix("третий") + third_form
+                lexical_forms[marker] = original
+                return marker
             return f"__ordinal_{result}__"
         return result
 
     value = re.sub(pattern, number, value)
     if protect_street_numbers:
+
+        def numeric(match: re.Match) -> str:
+            if house_role(match.start()):
+                return match[1]
+            if lexical_forms is not None:
+                marker = f"__ordinal_{match[1]}_{len(lexical_forms)}__"
+                lexical_forms[marker] = match[0]
+                return marker
+            return f"__ordinal_{match[1]}__"
+
         value = re.sub(
             r"\b(\d+)\s*[- ]?\s*(?:ая|я|й|ый|ой)\b",
-            lambda m: m[1] if house_role(m.start()) else f"__ordinal_{m[1]}__",
+            numeric,
             value,
         )
         value = re.sub(
@@ -89,7 +116,7 @@ def ordinals(value: str, *, protect_street_numbers: bool = False) -> str:
     return value
 
 
-def text(value: str) -> str:
+def text(value: str, *, preserve_unicode_letters: bool = False) -> str:
     value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")
     value = ordinals(value)
     value = re.sub(r"\bпр[\s.-]*кт\b", "проспект", value)
@@ -98,7 +125,8 @@ def text(value: str) -> str:
     value = re.sub(r"\bмск\b", "москва", value)
     value = re.sub(r"\b(?:спб|питер|санктпетербург)\b", "санкт петербург", value)
     value = re.sub(r"\b(\d+)\s*[- ]?\s*(?:ая|я|й|ый|ой)\b", r"\1", value)
-    return re.sub(r"\s+", " ", re.sub(r"[^а-яa-z0-9/]+", " ", value)).strip()
+    separators = r"(?:[^\w/]|_)+" if preserve_unicode_letters else r"[^а-яa-z0-9/]+"
+    return re.sub(r"\s+", " ", re.sub(separators, " ", value)).strip()
 
 
 def house_key(value: str) -> str:
@@ -174,8 +202,8 @@ STOP.extend(
 )
 
 
-def address_words(value: str) -> str:
-    return " ".join(w for w in text(value).split() if w not in STOP)
+def address_words(value: str, *, preserve_unicode_letters: bool = False) -> str:
+    return " ".join(w for w in text(value, preserve_unicode_letters=preserve_unicode_letters).split() if w not in STOP)
 
 
 def street_kind(value: str) -> str:
@@ -233,7 +261,7 @@ def building_kind_matches(query: Query, row: dict) -> bool:
 
 
 @measured("search.normalize")
-def parse_query(value: str) -> Query:
+def parse_query(value: str, *, preserve_lexical_ordinals: bool = False) -> Query:
     value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е").translate(DASHES)
     # Country is a structured prefix, while «Российская» can be a street name.
     value = re.sub(r"^\s*российская\s+федерация\b[\s,;]*", "", value)
@@ -241,15 +269,14 @@ def parse_query(value: str) -> Query:
     value = re.sub(
         r"(?<=[а-яa-z])(?=\d)",
         lambda m: (
-            ""
-            if value[m.start() - 1] in "кс" and re.search(r"\d+[а-яa-z]{0,2}\s*$", value[: m.start() - 1])
-            else " "
+            "" if value[m.start() - 1] in "кс" and re.search(r"\d+[а-яa-z]{0,2}\s*$", value[: m.start() - 1]) else " "
         ),
         value,
     )
     value = re.sub(r"(?<=\d)(?=[а-яa-z]{3,}\b)", " ", value)
     value = re.sub(r"\b(\d+)(?=(?:марта|мая|года|лет)\b)", r"\1 ", value)
-    value = ordinals(value, protect_street_numbers=True)
+    lexical_forms = {} if preserve_lexical_ordinals else None
+    value = ordinals(value, protect_street_numbers=True, lexical_forms=lexical_forms)
     markers = list(
         re.finditer(
             r"\b(?:улица|ул|проспект|просп|пр-кт|переулок|пер|проезд|пр-д|шоссе|бульвар|"
@@ -280,8 +307,12 @@ def parse_query(value: str) -> Query:
     # Last number is the building: numeric street names (1905 года, 1-я) stay in words.
     candidates = list(re.finditer(HOUSE_PATTERN, value))
 
-    def unmark(words: str) -> str:
-        return re.sub(r"__ordinal_(\d+)__", r"\1", words)
+    def unmark(words: str, lexical: bool = False) -> str:
+        return re.sub(
+            r"__ordinal_(\d+)(?:_\d+)?__",
+            lambda m: lexical_forms.get(m[0], m[1]) if lexical and lexical_forms is not None else m[1],
+            words,
+        )
 
     if not candidates:
         return Query(
@@ -290,12 +321,13 @@ def parse_query(value: str) -> Query:
             None,
             entrance,
             kind,
-            unmark(value),
+            unmark(value, lexical=True),
         )
     match = candidates[-1]
     house = house_key(match[0])
-    search_text = unmark(value[: match.start()] + " " + value[match.end() :])
-    words = address_words(search_text)
+    lexical = value[: match.start()] + " " + value[match.end() :]
+    search_text = unmark(lexical, lexical=True)
+    words = address_words(unmark(lexical))
     return Query(unmark(value), words, house, entrance, kind, search_text)
 
 
@@ -326,6 +358,5 @@ def legacy_house_matches(message: str, address: str) -> bool:
             return True
     # Preserve legacy spaced-digit input, without accepting the tail of another house/corpus.
     return any(
-        house_key(match[0]) == returned
-        for match in re.finditer(r"(?<![\w/-])\d+(?:[ \t]+\d+)+(?![\w/-])", query.raw)
+        house_key(match[0]) == returned for match in re.finditer(r"(?<![\w/-])\d+(?:[ \t]+\d+)+(?![\w/-])", query.raw)
     )

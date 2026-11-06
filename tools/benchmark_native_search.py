@@ -4,7 +4,6 @@
 """
 
 import argparse
-import ast
 import collections
 import concurrent.futures
 import copy
@@ -27,12 +26,15 @@ from src.search.normalize import (
     legacy_house_matches,
     parse_query,
 )
-from tools import evaluate_search as replay
+from tools import (
+    evaluate_search as replay,
+    search_lexical_profiles,
+)
 from tools.compare_postgres_catalog import select
 from tools.quality_suite import address_fields, literal_words
 
 
-def mapping(*, aliases=False):
+def mapping(*, aliases=False, lexical=False):
     value = copy.deepcopy(MAPPING)
     analysis = value["settings"]["analysis"]
     analysis["filter"].update(
@@ -116,10 +118,14 @@ def mapping(*, aliases=False):
                 "street": copy.deepcopy(value["mappings"]["properties"]["street"]),
             },
         }
+    if lexical:
+        search_lexical_profiles.extend_analysis(value)
     return value
 
 
 def configurations(stage="initial"):
+    if stage == "lexical":
+        return search_lexical_profiles.profiles()
     values = [
         {"name": "catalog", "mode": "catalog"},
         {"name": "hybrid", "mode": "hybrid"},
@@ -194,10 +200,21 @@ def configurations(stage="initial"):
     return values
 
 
-def native_body(message, variant):
-    query = parse_query(message)
+def query_text(message, variant):
+    source = variant.get("text_source")
+    query = parse_query(message, preserve_lexical_ordinals=source in {"lexical", "expanded_words"})
+    lexical_text = query.words if source == "words" else query.search_text
+    if source in {"unicode_words", "expanded_words"}:
+        if source == "expanded_words":
+            lexical_text = search_lexical_profiles.expanded_ordinals(lexical_text)
+        lexical_text = address_words(lexical_text, preserve_unicode_letters=True)
+    return query, lexical_text
+
+
+def native_body(message, variant, *, analyzed_tokens=None):
+    query, lexical_text = query_text(message, variant)
     match = {
-        "query": query.search_text,
+        "query": lexical_text,
         "minimum_should_match": variant["minimum"],
         "fuzziness": variant["fuzziness"],
         "prefix_length": variant["prefix"],
@@ -205,12 +222,14 @@ def native_body(message, variant):
         "fuzzy_transpositions": True,
     }
     exact = {
-        "query": query.search_text,
+        "query": lexical_text,
         "operator": "and",
         "fuzziness": 0,
         "boost": 4,
         "_name": "exact",
     }
+    if variant.get("analyzer"):
+        match["analyzer"] = exact["analyzer"] = variant["analyzer"]
     body = {
         "size": 100,
         "_source": False,
@@ -222,11 +241,13 @@ def native_body(message, variant):
             }
         },
     }
-    if variant["mode"] in {"structured", "aliases"}:
+    if variant["mode"] == "lexical":
+        body["sort"] = [{"_score": "desc"}, {"id": "asc"}]
+    if variant["mode"] in {"structured", "aliases", "lexical"}:
         street_field = variant["field"].replace("words", "street")
         lexical = (
-            query.search_text
-            if variant["mode"] == "aliases"
+            lexical_text
+            if variant["mode"] in {"aliases", "lexical"}
             else " ".join(word for word in query.words.split() if not word.isdigit())
         )
         street_match = dict(match, query=lexical, minimum_should_match=1)
@@ -254,28 +275,42 @@ def native_body(message, variant):
                             "path": "aliases",
                             "score_mode": "max",
                             "query": {"bool": nested},
-                            "inner_hits": {"size": 100, "_source": ["aliases.building_id", "aliases.street"]},
+                            "inner_hits": {
+                                "size": 100,
+                                "_source": ["aliases.building_id", "aliases.street", "aliases.words"],
+                            },
                         }
                     },
                 ],
             }
         }
+    if variant.get("role_policy"):
+        if analyzed_tokens is None:
+            raise ValueError("Street role policy needs analyzer tokens")
+        body = search_lexical_profiles.guard_street_roles(body, analyzed_tokens)
     return body
 
 
-def build_index(catalog, url, index, *, aliases=False):
+def build_index(catalog, url, index, *, aliases=False, lexical=False, source_index=None):
     if not index.startswith("domofomka-native-lab-"):
         raise ValueError("Only isolated experiment indexes are allowed")
     with httpx.Client(base_url=url, trust_env=False, timeout=120) as client:
         if client.head("/" + index).status_code != 404:
             raise FileExistsError("Preserve the previous experiment index")
-        index_mapping = mapping(aliases=aliases)
+        index_mapping = mapping(aliases=aliases, lexical=lexical)
         with catalog.open("rb") as stream:
             revision = hashlib.file_digest(stream, "sha256").hexdigest()
         index_mapping["mappings"]["_meta"] = {"catalog_sha256": revision, "aliases": aliases}
         client.put("/" + index, json=index_mapping).raise_for_status()
         if aliases and not all(probe["passed"] for probe in analysis_probes(client, index)):
             raise ValueError("Analyzer probes failed before bulk indexing")
+        if lexical and not all(probe["passed"] for probe in search_lexical_profiles.probes(client, index)):
+            raise ValueError("Ordinal graph probes failed before bulk indexing")
+        if source_index:
+            total = search_lexical_profiles.clone_documents(
+                client, source_index, index, index_mapping, index_mapping["mappings"]["_meta"]
+            )
+            return {"documents": total, "index": index, "source_index": source_index}
         batch, total = [], 0
         by_street = collections.defaultdict(list)
         if aliases:
@@ -342,7 +377,7 @@ def analysis_probes(client, index):
     return probes
 
 
-def native_result(catalog, message, hits, ratio):
+def native_result(catalog, message, hits, ratio, *, query_numbers=None, exact_tokens=None, require_exact=False):
     query = parse_query(message)
     if not query.house or not query.words:
         return {"status": "incomplete_query", "data": {}}
@@ -359,7 +394,7 @@ def native_result(catalog, message, hits, ratio):
     }
     rows = catalog.load_candidates(list(scores), query.house)
     eligible = []
-    query_numbers = {word for word in query.words.split() if word.isdigit()}
+    query_numbers = {word for word in query.words.split() if word.isdigit()} if query_numbers is None else query_numbers
     for row in rows:
         if row["house"] != query.house:
             continue
@@ -388,7 +423,20 @@ def native_result(catalog, message, hits, ratio):
     if not eligible:
         return {"status": "not_found", "data": {}}
     best = max(scores[sid] for sid, _ in eligible)
-    close = [row for sid, row in eligible if scores[sid] >= best * ratio]
+    precise = []
+    if exact_tokens is not None:
+        for sid, row in eligible:
+            aliases = [
+                inner["_source"]
+                for inner in hit_by_id[sid].get("inner_hits", {}).get("aliases", {}).get("hits", {}).get("hits", [])
+                if inner["_source"]["building_id"] == row["id"]
+            ]
+            alias_texts = [value for alias in aliases for value in [alias["street"], alias.get("words", "")]]
+            if search_lexical_profiles.exact_text_match(exact_tokens, row, alias_texts):
+                precise.append(row)
+    if require_exact and not precise:
+        return {"status": "not_found", "data": {}, "fallback_rejected": "known_street_without_requested_house"}
+    close = precise or [row for sid, row in eligible if scores[sid] >= best * ratio]
     if len(close) > 1:
         with catalog.connect() as db:
             coded = {
@@ -492,52 +540,106 @@ def reviewed_conflict(case, result, catalog):
     return False
 
 
-def search_variant(catalog, message, variant, search):
-    body = search_body(message) if variant["mode"] == "hybrid" else native_body(message, variant)
-    if variant["mode"] in {"structured", "aliases"}:
+def search_variant(catalog, message, variant, search, analyze=None):
+    numbers = None
+    tokens = None
+    if variant["mode"] == "lexical":
+        if analyze is None:
+            raise ValueError("Lexical profiles require actual analyzer tokens for number constraints")
+        tokens = analyze(query_text(message, variant)[1], variant["analyzer"])
+        numbers = {token for token in tokens if token.isdigit()}
+    guarded = bool(variant.get("role_policy"))
+    budget = None
+    if guarded:
+        if not tokens:
+            return {"status": "incomplete_query", "data": {}}
+        if len(tokens) > variant["max_terms"]:
+            return {
+                "status": "invalid_query",
+                "data": {},
+                "query_budget": {"terms": len(tokens), "reason": "too_many_terms"},
+            }
+        variant = dict(
+            variant, expansions=min(variant["expansions"], max(1, variant["clause_budget"] // (4 * len(tokens))))
+        )
+        budget = {
+            "terms": len(tokens),
+            "max_expansions": variant["expansions"],
+            "clause_budget": variant["clause_budget"],
+        }
+    body = (
+        search_body(message) if variant["mode"] == "hybrid" else native_body(message, variant, analyzed_tokens=tokens)
+    )
+    known = False
+    if variant["mode"] in {"structured", "aliases", "lexical"}:
         exact_variant = dict(variant, fuzziness="0", minimum="100%")
-        exact_body = native_body(message, exact_variant)
+        exact_body = native_body(message, exact_variant, analyzed_tokens=tokens)
+        if guarded:
+            probe = search_lexical_profiles.street_probe_body(copy.deepcopy(exact_body))
+            known = search_lexical_profiles.known_street(search(probe), tokens)
         coded_body = copy.deepcopy(exact_body)
         coded_body["query"]["bool"]["filter"].append({"term": {"coded_house": parse_query(message).house or ""}})
-        hits = search(coded_body) or search(exact_body) or search(body)
+        if variant.get("decision") == "exact_tokens":
+            hits = search(exact_body) + search(coded_body)
+            if not hits and not known:
+                coded_fuzzy = copy.deepcopy(body)
+                coded_fuzzy["query"]["bool"]["filter"].append(
+                    {"term": {"coded_house": parse_query(message).house or ""}}
+                )
+                hits = (search(coded_fuzzy) or search(body)) if guarded else search(body) + search(coded_fuzzy)
+            hits = list({hit["_id"]: hit for hit in hits}.values())
+        else:
+            hits = search(coded_body) or search(exact_body) or search(body)
     else:
         hits = search(body)
     if variant["mode"] == "hybrid":
         return catalog.resolve(
             message, catalog.load_candidates([hit["_id"] for hit in hits], parse_query(message).house)
         )
-    return native_result(catalog, message, hits, variant["ratio"])
+    result = native_result(
+        catalog,
+        message,
+        hits,
+        variant["ratio"],
+        query_numbers=numbers,
+        exact_tokens=set(tokens) if variant.get("decision") == "exact_tokens" else None,
+        require_exact=known,
+    )
+    if guarded:
+        result["query_budget"] = budget
+        if known and result["status"] == "not_found":
+            result["fallback_rejected"] = "known_street_without_requested_house"
+    return result
 
 
-def evaluation_ast(source):
-    functions = {"mapping", "configurations", "native_body", "native_result", "sample", "reviewed_conflict"}
-    nodes = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name in functions]
-    if len(nodes) != len(functions):
-        raise ValueError("Missing frozen experiment functions")
-    return ast.dump(ast.Module(body=nodes, type_ignores=[]), include_attributes=False)
-
-
-def resume_rows(path, cases, variants, fingerprint, sources, catalog_revision, index, index_mapping):
+def resume_rows(
+    path,
+    cases,
+    variants,
+    fingerprint,
+    sources,
+    catalog_revision,
+    index,
+    index_mapping,
+    *,
+    index_analysis=None,
+    max_query_length=None,
+):
     previous = json.loads((path / "frozen-input.json").read_text(encoding="utf8"))
     if previous["sha256"] != fingerprint or previous["variants"] != variants:
         raise ValueError("Cannot resume with different inputs or configurations")
     if previous["catalog_sha256"] != catalog_revision:
         raise ValueError("Cannot resume with a different catalog")
     for name, digest in sources.items():
-        if name != "tools/benchmark_native_search.py" and previous["sources"].get(name) != digest:
+        if previous["sources"].get(name) != digest:
             raise ValueError("Cannot resume after changing a search dependency")
     snapshot = (path / "runner_snapshot.py").read_bytes()
     if hashlib.sha256(snapshot).hexdigest() != previous["sources"]["tools/benchmark_native_search.py"]:
         raise ValueError("Previous runner snapshot does not match its source fingerprint")
-    if evaluation_ast(snapshot) != evaluation_ast(Path(__file__).read_bytes()):
-        raise ValueError("Cannot reuse results after changing search or scoring functions")
-    previous_helpers = {n.name: n for n in ast.parse(snapshot).body if isinstance(n, ast.FunctionDef)}
-    if "search_variant" in previous_helpers:
-        current_helpers = {
-            n.name: n for n in ast.parse(Path(__file__).read_bytes()).body if isinstance(n, ast.FunctionDef)
-        }
-        if ast.dump(previous_helpers["search_variant"]) != ast.dump(current_helpers["search_variant"]):
-            raise ValueError("Cannot reuse results after changing the query execution strategy")
+    if index_analysis is not None and previous.get("index_analysis") != index_analysis:
+        raise ValueError("Cannot resume with different analyzers")
+    if max_query_length is not None and previous.get("max_query_length") != max_query_length:
+        raise ValueError("Cannot resume with different query limits")
     index_snapshot = json.loads((path / "index-definition-snapshot.json").read_text(encoding="utf8"))
     if index_snapshot["index"] != index or index_snapshot["_mapping"] != index_mapping:
         raise ValueError("Cannot resume against a different index definition")
@@ -561,16 +663,28 @@ def run(args):
     args.output.mkdir(parents=True)
     sources = replay.source_fingerprints()
     sources["tools/benchmark_native_search.py"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    sources["tools/search_lexical_profiles.py"] = hashlib.sha256(
+        Path(search_lexical_profiles.__file__).read_bytes()
+    ).hexdigest()
     with args.catalog.open("rb") as stream:
         catalog_revision = hashlib.file_digest(stream, "sha256").hexdigest()
     with httpx.Client(base_url=args.url, trust_env=False, timeout=15) as client:
         index_info = client.get("/" + args.index + "/_mapping")
         index_info.raise_for_status()
+        settings_response = client.get("/" + args.index + "/_settings")
+        settings_response.raise_for_status()
+        index_settings = settings_response.json()[args.index]["settings"]["index"].get("analysis", {})
         metadata = index_info.json()[args.index]["mappings"].get("_meta", {})
-        if args.stage == "aliases" and metadata != {"catalog_sha256": catalog_revision, "aliases": True}:
+        if args.stage in {"aliases", "lexical"} and metadata != {"catalog_sha256": catalog_revision, "aliases": True}:
             raise ValueError("Experiment index does not match the frozen catalog / alias schema")
-        probes = analysis_probes(client, args.index) if args.stage == "aliases" else []
-    cases = sample(args.corpus, args.reviewed, args.limit, args.full_corpus)
+        probes = analysis_probes(client, args.index) if args.stage in {"aliases", "lexical"} else []
+        if args.stage == "lexical":
+            probes += search_lexical_profiles.probes(client, args.index)
+    cases = (
+        [json.loads(line) for line in args.case_file.read_text(encoding="utf8").splitlines()]
+        if getattr(args, "case_file", None)
+        else sample(args.corpus, args.reviewed, args.limit, args.full_corpus)
+    )
     variants = configurations(args.stage)
     if args.variants:
         chosen = set(args.variants.split(","))
@@ -579,6 +693,7 @@ def run(args):
             raise ValueError("Unknown experiment variant")
     replay.initialize(str(args.legacy), str(args.catalog))
     catalog = Catalog(str(args.catalog))
+    exact_catalog = search_lexical_profiles.ExactCatalog(str(args.catalog))
     local = threading.local()
     counters = collections.defaultdict(collections.Counter)
     times = collections.defaultdict(list)
@@ -593,12 +708,28 @@ def run(args):
             catalog_revision,
             args.index,
             index_info.json()[args.index],
+            index_analysis=index_settings,
+            max_query_length=getattr(args, "max_query_length", 500),
         )
         if args.resume_from
         else []
     )
     completed = len(prefix) // len(variants)
     (args.output / "runner_snapshot.py").write_bytes(Path(__file__).read_bytes())
+    (args.output / "index-definition-snapshot.json").write_text(
+        json.dumps(
+            {"index": args.index, "_mapping": index_info.json()[args.index], "analysis": index_settings},
+            ensure_ascii=False,
+        ),
+        encoding="utf8",
+    )
+    for filename, digest in sources.items():
+        data = Path(filename).read_bytes()
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise ValueError("Source changed while freezing experiment inputs")
+        destination = args.output / "sources" / filename
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(data)
     (args.output / "frozen-input.json").write_text(
         json.dumps(
             {
@@ -610,7 +741,9 @@ def run(args):
                 "index_metadata": metadata,
                 "index": args.index,
                 "index_mapping": index_info.json()[args.index],
+                "index_analysis": index_settings,
                 "analyzer_probes": probes,
+                "max_query_length": getattr(args, "max_query_length", 500),
                 "resumed_cases": completed,
                 "resumed_prefix_sha256": (
                     hashlib.sha256((args.resume_from / "results.jsonl").read_bytes()).hexdigest()
@@ -634,15 +767,29 @@ def run(args):
             or case.get("expected_address")
             or case.get("historical_suggestion_not_truth")
         )
-        expected = parse_query(reference)
-        expected_ids = replay.expected_ids.get((expected.words, expected.house), set())
+        expected = parse_query(reference) if reference else None
+        expected_ids = replay.expected_ids.get((expected.words, expected.house), set()) if expected else set()
         outcomes = []
+        analysis_cache = {}
+
+        def analyze(text, analyzer):
+            key = (text, analyzer)
+            if key not in analysis_cache:
+                response = local.client.post("/" + args.index + "/_analyze", json={"analyzer": analyzer, "text": text})
+                response.raise_for_status()
+                analysis_cache[key] = [token["token"] for token in response.json()["tokens"]]
+            return analysis_cache[key]
+
         rotated = variants[index % len(variants) :] + variants[: index % len(variants)]
         for variant in rotated:
             started = time.perf_counter()
             backend_error = None
-            if variant["mode"] == "catalog":
+            if len(case["query"]) > getattr(args, "max_query_length", 500):
+                result = {"status": "invalid_query", "data": {}, "engine": "v2"}
+            elif variant["mode"] == "catalog":
                 result = catalog.resolve(case["query"])
+            elif variant["mode"] == "catalog_exact":
+                result = exact_catalog.resolve(case["query"])
             else:
 
                 def search(body):
@@ -651,7 +798,7 @@ def run(args):
                     return response.json()["hits"]["hits"]
 
                 try:
-                    result = search_variant(catalog, case["query"], variant, search)
+                    result = search_variant(catalog, case["query"], variant, search, analyze)
                 except httpx.HTTPError as exc:
                     backend_error = {"type": type(exc).__name__}
                     if isinstance(exc, httpx.HTTPStatusError):
@@ -662,20 +809,50 @@ def run(args):
                             backend_error["response"] = exc.response.text[:2000]
                     result = {"status": "backend_error", "data": {}}
             if result["status"] == "not_found" and old and legacy_house_matches(case["query"], old):
-                result = {"status": "found", "engine": "v1", "address": old, "data": {}}
+                allowed = True
+                if result.get("fallback_rejected") == "known_street_without_requested_house":
+                    try:
+                        fields = address_fields(old)
+                        old_row = dict(fields, display=old)
+                        old_row["guid"] = None
+                        allowed = building_kind_matches(parse_query(case["query"]), old_row)
+                        query_tokens = set(analyze(query_text(case["query"], variant)[1], variant["analyzer"]))
+                        old_parts = [fields["street"], fields["city"] + " " + fields["street"]]
+                        old_token_sets = []
+                        for part in old_parts:
+                            normalized_part = part
+                            if variant["text_source"] == "expanded_words":
+                                normalized_part = address_words(
+                                    search_lexical_profiles.expanded_ordinals(part.casefold()),
+                                    preserve_unicode_letters=True,
+                                )
+                            old_token_sets.append(set(analyze(normalized_part, variant["analyzer"])))
+                        allowed = allowed and query_tokens in old_token_sets
+                    except (ValueError, KeyError):
+                        allowed = False
+                    except httpx.HTTPError as exc:
+                        allowed = False
+                        backend_error = {"type": type(exc).__name__}
+                        result = {"status": "backend_error", "data": {}}
+                if allowed:
+                    result = {"status": "found", "engine": "v1", "address": old, "data": {}}
             elapsed = (time.perf_counter() - started) * 1000
             options = [result] if result["status"] == "found" else result.get("candidates", [])
-            retained = any(
-                option.get("building_id") in expected_ids
-                or (
-                    option.get("address")
-                    and (
-                        parse_query(option["address"]).words,
-                        parse_query(option["address"]).house,
+            retained = (
+                any(
+                    option.get("building_id") in expected_ids
+                    or (
+                        option.get("address")
+                        and (
+                            parse_query(option["address"]).words,
+                            parse_query(option["address"]).house,
+                        )
+                        == (expected.words, expected.house)
                     )
-                    == (expected.words, expected.house)
+                    for option in options
                 )
-                for option in options
+                if expected
+                else None
             )
             conflict = reviewed_conflict(case, result, catalog) if case["cohort"] == "reviewed" else None
             outcomes.append(
@@ -692,6 +869,30 @@ def run(args):
                     "literal_conflict": conflict,
                     "milliseconds": round(elapsed, 3),
                     "backend_error": backend_error,
+                    **(
+                        {
+                            "result": {
+                                key: result[key]
+                                for key in (
+                                    "status",
+                                    "engine",
+                                    "building_id",
+                                    "address",
+                                    "candidates",
+                                    "fallback_reason",
+                                    "fallback_rejected",
+                                    "query_budget",
+                                )
+                                if key in result
+                            },
+                            "analysis": [
+                                {"text": text, "analyzer": analyzer, "tokens": tokens}
+                                for (text, analyzer), tokens in analysis_cache.items()
+                            ],
+                        }
+                        if getattr(args, "details", False)
+                        else {}
+                    ),
                 }
             )
         return outcomes
@@ -702,7 +903,8 @@ def run(args):
             counts = counters[name]
             counts[cohort + ":total"] += 1
             counts[cohort + ":" + row["status"]] += 1
-            counts[cohort + ":reference_retained"] += row["reference_retained"]
+            counts[cohort + ":reference_retained"] += bool(row["reference_retained"])
+            counts[cohort + ":without_reference"] += row["reference_retained"] is None
             counts[cohort + ":automatic_literal_conflict"] += bool(row["literal_conflict"] and row["status"] == "found")
             counts[cohort + ":choice_literal_conflict"] += bool(
                 row["literal_conflict"] and row["status"] == "ambiguous"
@@ -751,8 +953,16 @@ def run(args):
     }
     current_sources = replay.source_fingerprints()
     current_sources["tools/benchmark_native_search.py"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    current_sources["tools/search_lexical_profiles.py"] = hashlib.sha256(
+        Path(search_lexical_profiles.__file__).read_bytes()
+    ).hexdigest()
     if current_sources != sources:
         raise RuntimeError("Source changed during experiment; discard results and rerun on frozen source")
+    with httpx.Client(base_url=args.url, trust_env=False, timeout=15) as client:
+        current_settings = client.get("/" + args.index + "/_settings")
+        current_settings.raise_for_status()
+        if current_settings.json()[args.index]["settings"]["index"].get("analysis", {}) != index_settings:
+            raise RuntimeError("Index analysis changed during experiment")
     (args.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf8")
     print(
         json.dumps({"complete": True, "cases": len(cases), "variants": len(variants)}),
@@ -780,12 +990,28 @@ if __name__ == "__main__":
     p.add_argument("--index", default="domofomka-native-lab-20261106-house-v2")
     p.add_argument("--limit", type=int, default=500)
     p.add_argument("--workers", type=int, default=4)
-    p.add_argument("--stage", choices=["initial", "structured", "aliases"], default="initial")
+    p.add_argument("--stage", choices=["initial", "structured", "aliases", "lexical"], default="initial")
+    p.add_argument("--source-index")
+    p.add_argument("--case-file", type=Path)
+    p.add_argument("--details", action="store_true")
+    p.add_argument("--max-query-length", type=int, default=500)
     p.add_argument("--full-corpus", action="store_true")
     p.add_argument("--variants")
     p.add_argument("--resume-from", type=Path)
     args = p.parse_args()
     if args.command == "index":
-        print(json.dumps(build_index(args.catalog, args.url, args.index, aliases=args.stage == "aliases")), flush=True)
+        print(
+            json.dumps(
+                build_index(
+                    args.catalog,
+                    args.url,
+                    args.index,
+                    aliases=args.stage in {"aliases", "lexical"},
+                    lexical=args.stage == "lexical",
+                    source_index=args.source_index,
+                )
+            ),
+            flush=True,
+        )
     else:
         run(args)

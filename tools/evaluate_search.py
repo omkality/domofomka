@@ -30,14 +30,21 @@ search_config = {}
 
 def source_fingerprints() -> dict[str, str]:
     root = Path(__file__).resolve().parents[1]
+    names = {
+        "tools/evaluate_search.py",
+        "tools/benchmark_native_search.py",
+        "tools/search_lexical_profiles.py",
+        "tools/quality_suite.py",
+        "tools/compare_postgres_catalog.py",
+        "src/services/codes.py",
+        "uv.lock",
+        "compose.search.yml",
+    }
+    names.update(path.relative_to(root).as_posix() for path in (root / "src/search").glob("*.py"))
     return {
         name: hashlib.sha256((root / name).read_bytes()).hexdigest()
-        for name in [
-            "tools/evaluate_search.py",
-            "src/search/normalize.py",
-            "src/search/engine.py",
-            "src/services/codes.py",
-        ]
+        for name in sorted(names)
+        if (root / name).is_file()
     }
 
 

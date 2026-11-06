@@ -86,6 +86,8 @@ def test_search_http_failure_is_recorded_without_becoming_not_found_or_aborting_
     original_client = httpx.Client
 
     def endpoint(request):
+        if request.url.path.endswith("/_settings"):
+            return httpx.Response(200, json={"lab": {"settings": {"index": {"analysis": {}}}}})
         if request.method == "GET":
             return httpx.Response(
                 200, json={"lab": {"mappings": {"_meta": {"catalog_sha256": digest, "aliases": True}}}}
