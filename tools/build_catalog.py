@@ -72,6 +72,7 @@ def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict, locality_facts
                 if (c[1] == city or (city_words and city_words <= set(address_words(c[2]).split())))
                 and street_kind(c[3].split(", ", 1)[1].split(" ", 1)[0]) == kind
             ]
+            locality_alias = False
             if not exact and locality_facts:
                 constraint = urban_city(row["city"] or "")
                 exact = [
@@ -81,10 +82,11 @@ def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict, locality_facts
                     and street_kind(c[3].split(", ", 1)[1].split(" ", 1)[0]) == kind
                 ]
                 if len(exact) == 1:
+                    locality_alias = True
                     stats["municipal_linked_groups"] = stats.get("municipal_linked_groups", 0) + 1
             if len(exact) == 1:
                 building_id = exact[0][0]
-                resolution = "gar_exact"
+                resolution = "gar_locality_alias" if locality_alias else "gar_exact"
                 stats["linked_groups"] += 1
             else:
                 # Never assume Moscow/Podolsk aliases without a unique GAR identity.

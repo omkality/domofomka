@@ -150,6 +150,9 @@ def test_relink_candidate_merges_verified_copies_without_modifying_source(tmp_pa
         assert db.execute(
             "SELECT source_id FROM provenance WHERE building_id='gar:1' ORDER BY source_id"
         ).fetchall() == [(1,), (2,)]
+        assert db.execute("SELECT DISTINCT resolution FROM provenance WHERE building_id='gar:1'").fetchall() == [
+            ("gar_locality_alias",)
+        ]
         assert db.execute("SELECT resolution FROM provenance WHERE source_id=3").fetchone() == ("unresolved",)
         assert db.execute("SELECT count(*) FROM codes WHERE building_id='gar:1'").fetchone()[0] == 1
         assert db.execute("SELECT count(*) FROM provenance").fetchone()[0] == 3
