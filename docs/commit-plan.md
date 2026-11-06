@@ -47,3 +47,13 @@ OpenSearch остаётся локальным инструментом срав
 поиск, сетевые клиенты, очередь и runtime; `tests/test_telemetry.py`, примеры `.env`.
 `0debe70` — пакетная запись измерений после операции и восстановление неполной сводки обслуживанием очереди.
 Следом — [#2](https://github.com/omkality/domofomka/issues/2), административные формулировки и подтверждённые дубли.
+
+- `672d4df` — изолированное сравнение нормализованного PostgreSQL с SQLite без изменения алгоритма v2.
+  Файлы: `tools/postgres_catalog_experiment.py`, `tools/postgres_search_experiment.py`,
+  `tools/compare_postgres_catalog.py`, `tests/test_postgres_catalog_experiment.py`.
+- `db34cb1` — проверка муниципальных вариантов населённых пунктов по официальному ГАР
+  и разбор длинного адреса с сохранением области и округа.
+  Файлы: `src/search/localities.py`, `src/search/normalize.py`, `tools/build_catalog.py`,
+  `tools/build_locality_facts.py`, `tests/test_localities.py`.
+- `ee05e55` — отдельная причина привязки муниципального варианта в происхождении исходных строк.
+  Файлы: `tools/build_catalog.py`, `tests/test_localities.py`.
