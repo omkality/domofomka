@@ -78,6 +78,8 @@ def test_catalog_patch_is_atomic_idempotent_and_reversible_with_foreign_keys(pat
         assert db.execute("SELECT building_id FROM codes").fetchone()[0] == "gar"
     assert migrate(patch_database, payload(), True)["changed"]
     assert snapshot(patch_database) == original
+    with psycopg.connect(patch_database) as db:
+        assert db.execute("SELECT count(*) FROM pg_indexes WHERE indexname LIKE 'catalog_patch_%'").fetchone()[0] == 0
 
 
 def test_bad_preimage_does_not_change_other_rows(patch_database):
@@ -87,6 +89,8 @@ def test_bad_preimage_does_not_change_other_rows(patch_database):
     with pytest.raises(ValueError, match="differs from the reviewed patch"):
         migrate(patch_database, patch)
     assert snapshot(patch_database) == original
+    with psycopg.connect(patch_database) as db:
+        assert db.execute("SELECT count(*) FROM pg_indexes WHERE indexname LIKE 'catalog_patch_%'").fetchone()[0] == 0
 
 
 def test_failed_postcondition_rolls_back_all_changes(patch_database):
@@ -96,3 +100,5 @@ def test_failed_postcondition_rolls_back_all_changes(patch_database):
     with pytest.raises(ValueError, match="row count differs"):
         migrate(patch_database, patch)
     assert snapshot(patch_database) == original
+    with psycopg.connect(patch_database) as db:
+        assert db.execute("SELECT count(*) FROM pg_indexes WHERE indexname LIKE 'catalog_patch_%'").fetchone()[0] == 0

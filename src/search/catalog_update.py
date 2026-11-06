@@ -58,6 +58,15 @@ def migrate(dsn: str, patch: dict, reverse: bool = False) -> dict:
             return {"changed": False, "revision": target}
         if revision != source:
             raise ValueError("Unexpected catalog base revision")
+        # Проверка внешних ключей при объединении домов иначе перечитывает миллион
+        # строк для каждого удаляемого ID. Индексы нужны только этой транзакции;
+        # после операции они удаляются и не занимают диск постоянно.
+        for table in ("provenance", "alias_search"):
+            db.execute(
+                sql.SQL("CREATE INDEX {} ON {} (building_id)").format(
+                    sql.Identifier("catalog_patch_" + table + "_building"), sql.Identifier(table)
+                )
+            )
         # Сравнение наборами на сервере, без сетевого запроса на каждую строку.
         for table, pairs in changes.items():
             columns, keys = TABLES[table]
@@ -163,6 +172,8 @@ def migrate(dsn: str, patch: dict, reverse: bool = False) -> dict:
             actual = db.execute(query).fetchone()[0]
             if actual != count:
                 raise ValueError("Catalog row count differs from review")
+        for table in ("provenance", "alias_search"):
+            db.execute(sql.SQL("DROP INDEX {}").format(sql.Identifier("catalog_patch_" + table + "_building")))
     return {"changed": True, "revision": target}
 
 
