@@ -30,3 +30,21 @@ def test_emergency_stop_never_targets_vpn_or_unknown_containers(monkeypatch):
     )
     assert set(stop_application()) == {"domofomka-dev-queue-1", "domofomka-vkbot-1"}
     assert {row[-1] for row in called} == {"domofomka-dev-queue-1", "domofomka-vkbot-1"}
+
+
+@pytest.mark.skipif(__import__("os").name != "posix", reason="Host guard requires Linux flock")
+def test_pressure_releases_reserve_before_stopping_only_application(tmp_path, monkeypatch):
+    from ops import disk_reserve
+
+    reserve = tmp_path / "emergency.reserve"
+    reserve.write_bytes(b"reserved")
+    monkeypatch.setattr(disk_reserve, "HOME", tmp_path)
+    samples = iter([SimpleNamespace(free=LOW - 1), SimpleNamespace(free=CRITICAL - 1)])
+    monkeypatch.setattr(disk_reserve.shutil, "disk_usage", lambda _: next(samples))
+    calls = []
+    monkeypatch.setattr(disk_reserve, "safe_cleanup", lambda: calls.append("cleanup"))
+    monkeypatch.setattr(disk_reserve, "stop_application", lambda: calls.append("stop_application") or [])
+    monkeypatch.setattr(disk_reserve.os, "umask", lambda _: 0)
+    disk_reserve.main()
+    assert not reserve.exists()
+    assert calls == ["cleanup", "stop_application"]

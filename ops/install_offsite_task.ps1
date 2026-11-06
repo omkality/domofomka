@@ -6,7 +6,12 @@ param(
 $ErrorActionPreference='Stop'
 $projectRoot=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $python=Join-Path $projectRoot '.venv\Scripts\python.exe'
-$script=Join-Path $projectRoot 'tools\fetch_dev_backup.py'
+$runtime=Join-Path $projectRoot '.codex-local\backup-runtime'
+New-Item -ItemType Directory -Path $runtime -Force | Out-Null
+$script=Join-Path $runtime 'fetch_dev_backup.py'
+$published=& git -C $projectRoot show HEAD:tools/fetch_dev_backup.py
+if ($LASTEXITCODE -ne 0) { throw 'Cannot read published backup tool' }
+[IO.File]::WriteAllText($script,($published -join "`n"),[Text.UTF8Encoding]::new($false))
 $key=(Resolve-Path -LiteralPath $KeyPath).Path
 $known=(Resolve-Path -LiteralPath $KnownHostsPath).Path
 if ($HostName -notmatch '^[A-Za-z0-9.-]+$') { throw 'Invalid hostname' }

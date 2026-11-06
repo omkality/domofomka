@@ -46,7 +46,12 @@ def stop_application() -> list[str]:
         for project in ("domofomka", "domofomka-dev")
         for service in ("api", "vkbot", "queue", "redis")
     }
-    stopped = sorted(set(names) & allowed)
+    stopped = [
+        f"{project}-{service}-1"
+        for project in ("domofomka", "domofomka-dev")
+        for service in ("vkbot", "api", "queue", "redis")
+        if f"{project}-{service}-1" in allowed and f"{project}-{service}-1" in names
+    ]
     for name in stopped:
         # Аварийно останавливаем только принадлежащие проекту записи на диск.
         subprocess.run(

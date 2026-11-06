@@ -12,6 +12,8 @@ read_setting() {
 }
 keep_days="${QUEUE_BACKUP_KEEP_DAYS:-$(read_setting QUEUE_BACKUP_KEEP_DAYS 3)}"
 reserve_bytes="${QUEUE_BACKUP_RESERVE_BYTES:-$(read_setting QUEUE_BACKUP_RESERVE_BYTES 268435456)}"
+max_copies="${QUEUE_BACKUP_MAX_COPIES:-$(read_setting QUEUE_BACKUP_MAX_COPIES 3)}"
+[[ "$max_copies" =~ ^[0-9]+$ ]] && (( max_copies >= 3 && max_copies <= 30 )) || exit 2
 [[ "$keep_days" =~ ^[0-9]+$ && "$reserve_bytes" =~ ^[0-9]+$ ]] || exit 2
 (( keep_days >= 1 && reserve_bytes >= 67108864 )) || exit 2
 backup_dir="$PWD/backups/queue"
@@ -19,6 +21,9 @@ mkdir -p "$backup_dir"
 chmod 700 "$backup_dir"
 exec 9>"$backup_dir/.lock"
 flock -n 9 || exit 0
+# Независимо от возраста оставляем место для следующей копии и минимум две старые.
+mapfile -t overflow < <(find "$backup_dir" -maxdepth 1 -name 'queue-*.dump' -type f -printf '%T@ %p\n' | sort -nr | tail -n +"$max_copies" | cut -d' ' -f2-)
+for file in "${overflow[@]}"; do rm -- "$file"; done
 compose=(docker compose -p "$project" --env-file "$env_file" -f docker-compose.yml)
 # Оставляем минимум две копии, даже если стенд долго не запускался.
 mapfile -t old < <(find "$backup_dir" -maxdepth 1 -name 'queue-*.dump' -type f -printf '%T@ %p\n' | sort -nr | tail -n +3 | cut -d' ' -f2-)
