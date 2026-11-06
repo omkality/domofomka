@@ -13,9 +13,32 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from urllib.request import Request, urlopen
 from pathlib import Path
 
 FILES = {"compose.deploy.yml", "ops/deploy.py", "release.json"}
+
+
+def read_url(url: str) -> bytes:
+    with urlopen(Request(url, headers={"User-Agent": "domofomka-deploy"}), timeout=20) as response:
+        data = response.read(1048577)
+    if len(data) > 1048576:
+        raise ValueError("Source file too large")
+    return data
+
+
+def verify_source(release: Path, target: str) -> None:
+    """SSH-ключ сам по себе не разрешает исполнение произвольного загруженного кода."""
+    manifest = json.loads((release / "release.json").read_text())
+    branch = "dev" if target == "dev" else "master"
+    ref = json.loads(read_url("https://api.github.com/repos/omkality/domofomka/git/ref/heads/" + branch))
+    revision = manifest["revision"]
+    if ref["object"]["sha"] != revision:
+        raise ValueError("Superseded branch commit")
+    for name in sorted(FILES - {"release.json"}):
+        expected = read_url(f"https://raw.githubusercontent.com/omkality/domofomka/{revision}/{name}")
+        if expected != (release / name).read_bytes():
+            raise ValueError("Deployment code differs from the published commit")
 
 
 def unpack(payload: bytes, destination: Path) -> None:
@@ -60,6 +83,7 @@ def main() -> None:
         revision = manifest.get("revision", "")
         if manifest.get("environment") != args.environment or not re.fullmatch(r"[0-9a-f]{40}", revision):
             raise ValueError("Invalid target or commit")
+        verify_source(Path(incoming), args.environment)
         # Каждый повтор имеет свой каталог; активные файлы не перезаписываются.
         release = home / "releases" / (revision + "-" + Path(incoming).name)
         Path(incoming).rename(release)

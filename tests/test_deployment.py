@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from ops.deploy import Deployment, validate_manifest
-from ops.receive_release import unpack
+from ops.receive_release import unpack, verify_source
 from tools.ci_image_refs import published_image
 
 
@@ -170,3 +170,23 @@ def test_ci_uses_registry_digest_and_expanded_filesystem_size(monkeypatch):
     assert size == 253618865
     assert calls[0][4] == repository + ":sha-" + "a" * 40
     assert "--network" in calls[1]
+
+
+@pytest.mark.parametrize("forged", [True, False])
+def test_receiver_executes_only_code_from_the_current_published_branch(tmp_path, monkeypatch, forged):
+    (tmp_path / "release.json").write_text(json.dumps(manifest()))
+    (tmp_path / "compose.deploy.yml").write_bytes(b"published-compose")
+    (tmp_path / "ops").mkdir()
+    (tmp_path / "ops/deploy.py").write_bytes(b"arbitrary-root-code" if forged else b"published-deployer")
+
+    def read(url):
+        if "/git/ref/" in url:
+            return json.dumps({"object": {"sha": "a" * 40}}).encode()
+        return b"published-compose" if url.endswith(".yml") else b"published-deployer"
+
+    monkeypatch.setattr("ops.receive_release.read_url", read)
+    if forged:
+        with pytest.raises(ValueError, match="differs from the published commit"):
+            verify_source(tmp_path, "dev")
+    else:
+        verify_source(tmp_path, "dev")
