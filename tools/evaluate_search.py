@@ -81,7 +81,7 @@ def evaluate(record: dict):
             backend = "opensearch"
         except Exception:
             backend = "catalog_after_index_failure"
-    result = catalogs[0].resolve(q, candidates)
+    result = catalogs[0].resolve(q, candidates) if len(q) <= 500 else {"status": "invalid_query", "engine": "v2"}
     if result["status"] == "not_found" and old:
         result = {"status": "found", "address": old, "engine": "v1"}
     expected = parse_query(reference)
