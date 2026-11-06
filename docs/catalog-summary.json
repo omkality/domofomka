@@ -44,7 +44,8 @@
   ],
   "source_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
   "normalization_schema": 6,
-  "catalog_revision": "91c5d5a57b6d07d574c1f2bb57fd7ec44211e80b6743ad91a7dfb0d7675efe55",
+  "catalog_revision": "14ec49170f830f2790c890a765a98ad80565cde5afc784c3d1628280ea07a2fd",
   "runtime_storage": "PostgreSQL",
-  "build_artifact_bytes": 823488512
+  "build_artifact_bytes": 833298432,
+  "search_terms_version": 2
 }

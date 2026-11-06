@@ -132,7 +132,6 @@ STOP = [
     "просп",
     "проспект",
     "р",
-    "российская",
     "россия",
     "ул",
     "улица",
@@ -208,6 +207,8 @@ class Query:
 @measured("search.normalize")
 def parse_query(value: str) -> Query:
     value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")
+    # Country is a structured prefix, while «Российская» can be a street name.
+    value = re.sub(r"^\s*российская\s+федерация\b[\s,;]*", "", value)
     # Separate an attached house number, but preserve 62к1 / 4с2 components.
     value = re.sub(
         r"(?<=[а-яa-z])(?=\d)",
