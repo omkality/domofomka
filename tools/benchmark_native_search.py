@@ -34,8 +34,16 @@ from tools.compare_postgres_catalog import select
 from tools.quality_suite import address_fields, literal_words
 
 
-def mapping(*, aliases=False, lexical=False):
+def mapping(*, aliases=False, lexical=False, similarity=None, bm25_b=0.75):
     value = copy.deepcopy(MAPPING)
+    if similarity not in {None, "BM25", "boolean"}:
+        raise ValueError("Unknown lab similarity")
+    if not 0 <= bm25_b <= 1:
+        raise ValueError("BM25 b must be between zero and one")
+    if similarity:
+        value["settings"]["similarity"] = {
+            "default": {"type": similarity, **({"b": bm25_b, "k1": 1.2} if similarity == "BM25" else {})}
+        }
     analysis = value["settings"]["analysis"]
     analysis["filter"].update(
         address_stop={"type": "stop", "stopwords": STOP},
@@ -291,13 +299,13 @@ def native_body(message, variant, *, analyzed_tokens=None):
     return body
 
 
-def build_index(catalog, url, index, *, aliases=False, lexical=False, source_index=None):
+def build_index(catalog, url, index, *, aliases=False, lexical=False, source_index=None, similarity=None, bm25_b=0.75):
     if not index.startswith("domofomka-native-lab-"):
         raise ValueError("Only isolated experiment indexes are allowed")
     with httpx.Client(base_url=url, trust_env=False, timeout=120) as client:
         if client.head("/" + index).status_code != 404:
             raise FileExistsError("Preserve the previous experiment index")
-        index_mapping = mapping(aliases=aliases, lexical=lexical)
+        index_mapping = mapping(aliases=aliases, lexical=lexical, similarity=similarity, bm25_b=bm25_b)
         with catalog.open("rb") as stream:
             revision = hashlib.file_digest(stream, "sha256").hexdigest()
         index_mapping["mappings"]["_meta"] = {"catalog_sha256": revision, "aliases": aliases}
@@ -574,7 +582,7 @@ def search_variant(catalog, message, variant, search, analyze=None):
     if variant["mode"] in {"structured", "aliases", "lexical"}:
         exact_variant = dict(variant, fuzziness="0", minimum="100%")
         exact_body = native_body(message, exact_variant, analyzed_tokens=tokens)
-        if guarded:
+        if guarded and variant.get("known_street_guard", True):
             probe = search_lexical_profiles.street_probe_body(copy.deepcopy(exact_body))
             known = search_lexical_profiles.known_street(search(probe), tokens)
         coded_body = copy.deepcopy(exact_body)
@@ -623,6 +631,8 @@ def resume_rows(
     index_mapping,
     *,
     index_analysis=None,
+    index_similarity=None,
+    engine_version=None,
     max_query_length=None,
 ):
     previous = json.loads((path / "frozen-input.json").read_text(encoding="utf8"))
@@ -638,6 +648,10 @@ def resume_rows(
         raise ValueError("Previous runner snapshot does not match its source fingerprint")
     if index_analysis is not None and previous.get("index_analysis") != index_analysis:
         raise ValueError("Cannot resume with different analyzers")
+    if index_similarity is not None and previous.get("index_similarity") != index_similarity:
+        raise ValueError("Cannot resume with different similarity")
+    if engine_version is not None and previous.get("engine_version") != engine_version:
+        raise ValueError("Cannot resume with a different search engine version")
     if max_query_length is not None and previous.get("max_query_length") != max_query_length:
         raise ValueError("Cannot resume with different query limits")
     index_snapshot = json.loads((path / "index-definition-snapshot.json").read_text(encoding="utf8"))
@@ -674,6 +688,10 @@ def run(args):
         settings_response = client.get("/" + args.index + "/_settings")
         settings_response.raise_for_status()
         index_settings = settings_response.json()[args.index]["settings"]["index"].get("analysis", {})
+        index_similarity = settings_response.json()[args.index]["settings"]["index"].get("similarity", {})
+        engine_response = client.get("/")
+        engine_response.raise_for_status()
+        engine_version = engine_response.json().get("version", {}).get("number")
         metadata = index_info.json()[args.index]["mappings"].get("_meta", {})
         if args.stage in {"aliases", "lexical"} and metadata != {"catalog_sha256": catalog_revision, "aliases": True}:
             raise ValueError("Experiment index does not match the frozen catalog / alias schema")
@@ -709,6 +727,8 @@ def run(args):
             args.index,
             index_info.json()[args.index],
             index_analysis=index_settings,
+            index_similarity=index_similarity,
+            engine_version=engine_version,
             max_query_length=getattr(args, "max_query_length", 500),
         )
         if args.resume_from
@@ -718,7 +738,13 @@ def run(args):
     (args.output / "runner_snapshot.py").write_bytes(Path(__file__).read_bytes())
     (args.output / "index-definition-snapshot.json").write_text(
         json.dumps(
-            {"index": args.index, "_mapping": index_info.json()[args.index], "analysis": index_settings},
+            {
+                "index": args.index,
+                "_mapping": index_info.json()[args.index],
+                "analysis": index_settings,
+                "similarity": index_similarity,
+                "engine_version": engine_version,
+            },
             ensure_ascii=False,
         ),
         encoding="utf8",
@@ -742,6 +768,8 @@ def run(args):
                 "index": args.index,
                 "index_mapping": index_info.json()[args.index],
                 "index_analysis": index_settings,
+                "index_similarity": index_similarity,
+                "engine_version": engine_version,
                 "analyzer_probes": probes,
                 "max_query_length": getattr(args, "max_query_length", 500),
                 "resumed_cases": completed,
@@ -928,6 +956,8 @@ def run(args):
                 )
     summary = {
         "stage": args.stage,
+        "index_similarity": index_similarity,
+        "engine_version": engine_version,
         "catalog_reader": "SQLite build artifact; PostgreSQL parity is a separate check",
         "cases": len(cases),
         "variants": len(variants),
@@ -963,6 +993,8 @@ def run(args):
         current_settings.raise_for_status()
         if current_settings.json()[args.index]["settings"]["index"].get("analysis", {}) != index_settings:
             raise RuntimeError("Index analysis changed during experiment")
+        if current_settings.json()[args.index]["settings"]["index"].get("similarity", {}) != index_similarity:
+            raise RuntimeError("Index similarity changed during experiment")
     (args.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf8")
     print(
         json.dumps({"complete": True, "cases": len(cases), "variants": len(variants)}),
@@ -992,6 +1024,8 @@ if __name__ == "__main__":
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--stage", choices=["initial", "structured", "aliases", "lexical"], default="initial")
     p.add_argument("--source-index")
+    p.add_argument("--similarity", choices=["BM25", "boolean"])
+    p.add_argument("--bm25-b", type=float, default=0.75)
     p.add_argument("--case-file", type=Path)
     p.add_argument("--details", action="store_true")
     p.add_argument("--max-query-length", type=int, default=500)
@@ -1009,6 +1043,8 @@ if __name__ == "__main__":
                     aliases=args.stage in {"aliases", "lexical"},
                     lexical=args.stage == "lexical",
                     source_index=args.source_index,
+                    similarity=args.similarity,
+                    bm25_b=args.bm25_b,
                 )
             ),
             flush=True,

@@ -27,9 +27,13 @@ def context_score(label, result, identity):
             return False
         if constraints.get("house") and folded(building["house"]) != folded(constraints["house"]):
             return False
+        names = [building["street"], *building.get("aliases", [])]
         if constraints.get("street"):
-            names = [building["street"], *building.get("aliases", [])]
             if literal_words(constraints["street"]) not in [literal_words(re.sub(r"\([^()]*\)", "", n)) for n in names]:
+                return False
+        if constraints.get("street_tokens"):
+            required = literal_words(" ".join(constraints["street_tokens"]))
+            if not any(required <= literal_words(name) for name in names):
                 return False
         if constraints.get("city") and not literal_words(constraints["city"]) <= literal_words(
             building["city"] + " " + building.get("lineage", "")

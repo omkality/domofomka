@@ -155,6 +155,14 @@ def test_resume_rejects_changed_inputs_dependencies_and_incomplete_prefixes(tmp_
     (tmp_path / "results.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf8")
     args = (tmp_path, cases, variants, "input", sources, "catalog", "lab", {})
     assert experiment.resume_rows(*args) == rows
+    frozen["index_similarity"] = {"default": {"type": "BM25", "b": "0.75"}}
+    frozen["engine_version"] = "3.3.2"
+    (tmp_path / "frozen-input.json").write_text(json.dumps(frozen), encoding="utf8")
+    assert experiment.resume_rows(*args, index_similarity=frozen["index_similarity"]) == rows
+    with pytest.raises(ValueError, match="similarity"):
+        experiment.resume_rows(*args, index_similarity={"default": {"type": "boolean"}})
+    with pytest.raises(ValueError, match="search engine version"):
+        experiment.resume_rows(*args, engine_version="changed")
     with pytest.raises(ValueError, match="inputs"):
         experiment.resume_rows(tmp_path, cases, variants, "changed", sources, "catalog", "lab", {})
     with pytest.raises(ValueError, match="dependency"):

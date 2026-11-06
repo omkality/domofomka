@@ -93,6 +93,8 @@ def test_known_street_guard_only_accepts_legacy_with_the_same_complete_name_and_
     original = httpx.Client
 
     def endpoint(request):
+        if request.url.path == "/":
+            return httpx.Response(200, json={"version": {"number": "test"}})
         if request.url.path.endswith("/_mapping"):
             return httpx.Response(
                 200, json={"lab": {"mappings": {"_meta": {"catalog_sha256": digest, "aliases": True}}}}

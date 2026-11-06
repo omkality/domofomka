@@ -34,3 +34,13 @@ def test_explicit_city_is_required_for_every_menu_option_and_no_codes_is_separat
     empty = context_score(label, {"status": "no_codes", "building_id": "a"}, identities.get)
     assert empty["target_offered"]
     assert not empty["target_code_offered"]
+
+
+def test_meaningful_generic_word_inside_a_partial_official_name_cannot_be_discarded():
+    identities = {
+        "full": building("Москва", "Мичуринский проспект Олимпийская деревня", "12"),
+        "other": building("Тюмень", "Олимпийская", "12"),
+    }
+    label = {"literal": {"street_tokens": ["Олимпийская", "деревня"], "house": "12"}}
+    assert not context_score(label, {"status": "found", "building_id": "full"}, identities.get)["literal_conflict"]
+    assert context_score(label, {"status": "found", "building_id": "other"}, identities.get)["literal_conflict"]

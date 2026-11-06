@@ -195,6 +195,12 @@ def profiles() -> list[dict]:
                 "ratio": 1.0,
             }
         )
+    guarded = next(value for value in values if value["name"] == "lexical.analyzer_guarded-AUTO-r1.0")
+    for known_guard, ratio in itertools.product([True, False], [1.0, 0.9, 0.8]):
+        policy = "strict" if known_guard else "roles"
+        values.append(
+            dict(guarded, name=f"scoring.{policy}-AUTO-r{ratio}", ratio=ratio, known_street_guard=known_guard)
+        )
     return values
 
 
