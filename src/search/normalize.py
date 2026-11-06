@@ -224,15 +224,17 @@ def parse_query(value: str) -> Query:
     entrance = entrance_match[1] if entrance_match else None
     value = re.sub(r"(?:под[ъь]?езд|под[.]|пд[.]?)\s*№?\s*\d+", " ", value)
     value = re.sub(r"(?:квартира|кв[.]?|этаж|эт[.]?)\s*№?\s*\d+", " ", value)
-    value = re.sub(r"(?<![а-яa-z])корп(?:ус)?\.?\s*(?=\d)", "к", value)
-    value = re.sub(r"(?<![а-яa-z])стр(?:оение)?\.?\s*(?=\d)", "с", value)
-    value = re.sub(r"(?<=\d)[,;]\s*(?=[кс]\s*\d)", " ", value)
+    value = re.sub(r"(?<![а-яa-z])корп(?:ус)?[.,;\s]*(?=\d|[а-я](?![а-я]))", "к", value)
+    value = re.sub(r"(?<![а-яa-z])стр(?:оение)?[.,;\s]*(?=\d|[а-я](?![а-я]))", "с", value)
+    value = re.sub(r"(?<=\d)\s*[,;]\s*(?=[кс]\s*(?:\d|[а-я]\b))", " ", value)
     # Do not let a separated к/с become a house suffix and the component become a new house.
     value = re.sub(r"(?<=\d)\s*([кс])\s*(?=\d|[а-я](?![а-я]))", r"\1", value)
     # Last number is the building: numeric street names (1905 года, 1-я) stay in words.
     candidates = list(
         re.finditer(
-            r"(?<![\w/])(?:к\s*)?\d+(?:/\d+)?\s*[а-яa-z]?(?:\s*[кс]\s*(?:\d+[а-яa-z]?|[а-я])){0,2}(?!\w)", value
+            r"(?<![\w/])(?:(?:к|вл)\s*)?\d+(?:\s*-\s*\d+)?(?:\s*[а-яa-z](?=\s*/))?"
+            r"(?:\s*/\s*\d+)?\s*[а-яa-z]?(?:\s*[кс]\s*(?:\d+[а-яa-z]?|[а-я])){0,2}(?!\w)",
+            value,
         )
     )
 
@@ -250,4 +252,11 @@ def parse_query(value: str) -> Query:
 def legacy_house_matches(message: str, address: str) -> bool:
     requested = parse_query(message).house
     returned = house_key(address.rsplit(", дом ", 1)[-1])
-    return not requested or requested == returned
+    if not requested or requested == returned:
+        return True
+    # Historical quarter/estate/locality encodings are opaque to the v2 parser.
+    if not re.fullmatch(r"\d+(?:/\d+)?[а-яa-z]?(?:[кс](?:\d+[а-яa-z]?|[а-я])){0,2}", returned):
+        return True
+    presentation = message.casefold().replace("ё", "е").replace("корпус", "к").replace("строение", "с")
+    presentation = re.sub(r"[\s,;-]+", "", presentation)
+    return bool(re.search(r"(?<!\d)" + re.escape(returned) + r"(?![\w/])", presentation))

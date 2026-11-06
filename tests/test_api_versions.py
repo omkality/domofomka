@@ -1,3 +1,4 @@
+import pytest
 from litestar.testing import TestClient
 
 from src.api import v2
@@ -60,3 +61,25 @@ def test_v2_does_not_return_legacy_house_number_reinterpretation(monkeypatch, tm
         result = client.get("/api/v2/codes/msg", params={"message": "Москва Парковая 12"}).json()
         assert result["status"] == "not_found"
         assert result["fallback_rejected"] == "house_conflict"
+
+
+@pytest.mark.parametrize(
+    ("query", "address"),
+    [
+        ("Волжский бульвар квартал 114ак7", "Москва, квартал Волжский Бульвар 114А, дом к7"),
+        ("Парнас заречная 33", "Санкт-Петербург, улица Заречная, дом ПАРНАС33"),
+        ("Ельнинская 1 1", "Москва, улица Ельнинская, дом 11"),
+    ],
+)
+def test_v2_keeps_opaque_legacy_numbering_compatibility(monkeypatch, tmp_path, query, address):
+    monkeypatch.setattr(settings, "search_catalog_path", str(tmp_path / "missing.db"))
+    monkeypatch.setattr(settings, "opensearch_url", None)
+
+    async def legacy(message):
+        return {"address": address, "data": {"1": [["CODE", "test"]]}}
+
+    monkeypatch.setattr(v2, "get_data_from_db", legacy)
+    with TestClient(app) as client:
+        result = client.get("/api/v2/codes/msg", params={"message": query}).json()
+        assert result["status"] == "found"
+        assert result["address"] == address
