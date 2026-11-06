@@ -98,10 +98,7 @@ jobs:
               sleep "$((attempt * 3))"
             done
           done
-          echo "api=$(docker inspect --format '{{index .RepoDigests 0}}' "$api")" >> "$GITHUB_OUTPUT"
-          echo "bot=$(docker inspect --format '{{index .RepoDigests 0}}' "$bot")" >> "$GITHUB_OUTPUT"
-          echo "api_bytes=$(docker image inspect --format '{{.Size}}' "$api")" >> "$GITHUB_OUTPUT"
-          echo "bot_bytes=$(docker image inspect --format '{{.Size}}' "$bot")" >> "$GITHUB_OUTPUT"
+          python tools/ci_image_refs.py
           docker logout ghcr.io
   deploy:
     needs: tests

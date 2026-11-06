@@ -12,6 +12,7 @@ import pytest
 
 from ops.deploy import Deployment, validate_manifest
 from ops.receive_release import unpack
+from tools.ci_image_refs import published_image
 
 
 def manifest():
@@ -153,3 +154,19 @@ def test_bootstrap_cache_cleanup_handles_root_and_ignores_shared_or_foreign_step
     monkeypatch.setattr(subprocess, "run", lambda args, **kwargs: calls.append(args))
     function()
     assert calls == [["docker", "buildx", "prune", "--filter", "id=old", "--force"]]
+
+
+def test_ci_uses_registry_digest_and_expanded_filesystem_size(monkeypatch):
+    calls = []
+
+    def command(args, **kwargs: object):
+        calls.append(args)
+        return json.dumps({"digest": "sha256:" + "b" * 64}) if "imagetools" in args else "253618865\t/\n"
+
+    monkeypatch.setattr(subprocess, "check_output", command)
+    repository = "ghcr.io/omkality/domofomka-api"
+    image, size = published_image(repository, "a" * 40)
+    assert image == repository + "@sha256:" + "b" * 64
+    assert size == 253618865
+    assert calls[0][4] == repository + ":sha-" + "a" * 40
+    assert "--network" in calls[1]
