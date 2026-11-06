@@ -116,3 +116,20 @@ OpenSearch union sample p50 35.580 ms / p95 296.386 ms. These are not VDS or end
 Linux/PostgreSQL integration validation: 137 tests pass; one obsolete legacy event-loop test is intentionally skipped
 because the durable queue tests cover its replacement. [search-validation-summary.json](search-validation-summary.json)
 contains aggregate results. Raw queries, dialogs and individual review cases remain private.
+
+## German development deployment verification
+
+Runtime source revision `d2a7060`, version `2.0.0.dev1`, uses its own compact catalog, with the PC tunnel stopped.
+Real HTTP samples completed in 0.115 s / 0.074 s for code-bearing addresses and 0.021 s for a known no-code house.
+A real DaData geolocation request returned HTTP 200 with address choices in 0.484 s. A v1 request took 22.073 s;
+the unchanged legacy matcher still scans the original code rows and calls a Python SQLite function.
+These few samples are functional checks, not a load test or a latency guarantee.
+
+Synthetic incoming events passed through the real PostgreSQL workers and real VK SDK:
+send, address selection, entrance callback/edit, geolocation, and a subsequent text request all completed.
+The test recipient was the owner's account in the test community. These are not real browser-click tests.
+Local real-client checks also passed for refused OpenSearch connections and a missing catalog with actual v1 fallback.
+
+After checks, container memory was approximately API 110 MiB / bot 73 MiB / queue 36 MiB;
+the VDS had about 914 MiB of free disk. Limits and log rotation remain enabled. Full XML, intermediate catalogs
+and OpenSearch stay off this VDS. Production and master were not changed. Root/password SSH remains enabled.

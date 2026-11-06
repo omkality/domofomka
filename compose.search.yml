@@ -12,7 +12,6 @@ services:
     environment:
       SEARCH_CATALOG_PATH: /backend/catalog/catalog.db
       OPENSEARCH_URL: http://opensearch:9200
-      SEARCH_REMOTE_URL: ''
       API_DEBUG: 'false'
       API_PORT: '8000'
       PYTHONDONTWRITEBYTECODE: '1'
