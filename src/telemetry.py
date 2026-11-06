@@ -24,7 +24,6 @@ class TelemetrySettings(BaseSettings):
     telemetry_max_spans: int = Field(default=128, ge=8, le=512)
     telemetry_max_packet_bytes: int = Field(default=65536, ge=4096, le=262144)
     telemetry_query_max_chars: int = Field(default=2000, ge=100, le=4000)
-    telemetry_retention_days: int = Field(default=90, ge=1, le=365)
     telemetry_max_storage_bytes: int = Field(default=536870912, ge=1048576)
     telemetry_eviction_batch: int = Field(default=500, ge=1, le=5000)
     telemetry_db_timeout_ms: int = Field(default=500, ge=50, le=2000)

@@ -262,7 +262,7 @@ def test_postgres_analytics_error_does_not_rollback_ingest(observed_store, monke
     assert observed_store.claim("bot_inbox") is not None
 
 
-def test_postgres_budget_does_not_block_queue_and_retention_cascades(observed_store, monkeypatch):
+def test_postgres_budget_does_not_block_queue_and_size_eviction_cascades(observed_store, monkeypatch):
     store = observed_store
     monkeypatch.setattr(settings, "telemetry_max_storage_bytes", 1)
     assert store.ingest([incoming(store)]) == 1
@@ -277,6 +277,11 @@ def test_postgres_budget_does_not_block_queue_and_retention_cascades(observed_st
     with store.connect() as conn:
         rid = database.identity(store.group_id, job["id"])
         conn.execute("UPDATE request_log SET updated_at=to_timestamp(1) WHERE id=%s", (rid,))
+    # Old history survives indefinitely while there is room in the budget.
+    assert database.maintain(store, 10)["requests_removed"] == 0
+    with store.connect() as conn:
+        assert conn.execute("SELECT id FROM request_spans WHERE request_id=%s", (rid,)).fetchone()
+    monkeypatch.setattr(settings, "telemetry_max_storage_bytes", 1)
     assert database.maintain(store, 10)["requests_removed"] == 1
     with store.connect() as conn:
         assert not conn.execute("SELECT id FROM request_spans WHERE request_id=%s", (rid,)).fetchone()
@@ -315,6 +320,10 @@ def test_budget_never_evicts_diagnostics_of_unfinished_work(observed_store, monk
     store.ingest([incoming(store)])
     with store.connect() as conn:
         original = conn.execute("SELECT id FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()["id"]
+    monkeypatch.setattr(settings, "telemetry_max_storage_bytes", 1)
+    with store.connect() as conn:
+        conn.execute("UPDATE request_log SET updated_at=to_timestamp(1) WHERE id=%s", (original,))
+    assert database.maintain(store, 10)["requests_removed"] == 0
     monkeypatch.setattr(settings, "telemetry_max_storage_bytes", 4000)
     second = incoming(store)
     second["event_key"] += ":second"

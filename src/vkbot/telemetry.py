@@ -3,7 +3,6 @@
 import hashlib
 import json
 import logging
-import time
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -140,7 +139,7 @@ def budget_used(conn: Any, group: int) -> int:
     ).fetchone()["n"]
 
 
-def make_room(conn: Any, group: int, charge: int, exclude: uuid.UUID) -> bool:
+def make_room(conn: Any, group: int, charge: int, exclude: uuid.UUID | None = None) -> bool:
     """Освободить только необходимую часть старой диагностики завершённых задач."""
     conn.execute("SELECT pg_advisory_xact_lock(20261107,%s)", (group,))
     if charge > settings.telemetry_max_storage_bytes:
@@ -150,7 +149,7 @@ def make_room(conn: Any, group: int, charge: int, exclude: uuid.UUID) -> bool:
         return True
     rows = conn.execute(
         """SELECT r.id,r.recorded_bytes FROM request_log r
-        WHERE r.group_id=%s AND r.id<>%s
+        WHERE r.group_id=%s AND r.id IS DISTINCT FROM %s
         AND NOT EXISTS(SELECT 1 FROM bot_inbox i WHERE i.group_id=r.group_id AND i.id=r.inbox_id
             AND i.status<>'done')
         AND NOT EXISTS(SELECT 1 FROM bot_outbox o WHERE o.group_id=r.group_id AND o.inbox_id=r.inbox_id
@@ -368,6 +367,7 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
 
 def maintain(store: Any, batch: int) -> dict:
     with store.connect() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(20261107,%s)", (store.group_id,))
         size = storage_bytes(conn)
         # Refresh terminal transitions made without a worker (expiry, superseding).
         changed = conn.execute(
@@ -389,16 +389,16 @@ def maintain(store: Any, batch: int) -> dict:
                 "UPDATE request_log SET telemetry_state='partial' WHERE id=%s",
                 (identity(store.group_id, row["inbox_id"]),),
             )
-        deleted = conn.execute(
-            """DELETE FROM request_log WHERE id IN (
-            SELECT r.id FROM request_log r WHERE r.group_id=%s AND r.updated_at<to_timestamp(%s)
-            AND NOT EXISTS(SELECT 1 FROM bot_inbox i WHERE i.group_id=r.group_id AND i.id=r.inbox_id
-                AND i.status IN ('pending','processing','deferred'))
-            AND NOT EXISTS(SELECT 1 FROM bot_outbox o WHERE o.inbox_id=r.inbox_id
-                AND o.status IN ('pending','processing'))
-            ORDER BY r.updated_at LIMIT %s)""",
-            (store.group_id, time.time() - settings.telemetry_retention_days * 86400, batch),
-        ).rowcount
+        # Enforce a changed budget even when no new diagnostics arrive. Age alone
+        # never removes history. Share the write-path eviction policy and lock.
+        before = conn.execute("SELECT count(*) AS n FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()[
+            "n"
+        ]
+        make_room(conn, store.group_id, 0)
+        deleted = (
+            before
+            - conn.execute("SELECT count(*) AS n FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()["n"]
+        )
         return {
             "bytes": size,
             "requests_removed": deleted,
