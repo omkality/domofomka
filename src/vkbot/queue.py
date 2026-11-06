@@ -1,6 +1,7 @@
 """Durable inbox/outbox. All identifiers are scoped to a VK community."""
 
 import json
+import logging
 import math
 import random
 import time
@@ -12,6 +13,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from src.network import network_settings
+from src.telemetry import measured
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bot_inbox (
@@ -89,10 +91,28 @@ def event_record(group_id: int, kind: str, obj: dict, now: float | None = None) 
 
 
 class QueueStore:
-    def __init__(self, dsn: str, group_id: int, lease_seconds: int = 120):
+    def __init__(self, dsn: str, group_id: int, lease_seconds: int = 120, telemetry: bool = False):
         self.dsn = dsn
         self.group_id = group_id
         self.lease_seconds = lease_seconds
+        self.telemetry = telemetry
+        self.environment = "unknown"
+
+    def _observe(self, conn: psycopg.Connection, inbox_id: int) -> None:
+        if self.telemetry:
+            from src.vkbot.telemetry import guarded, refresh, register
+
+            def update() -> None:
+                if register(conn, self.group_id, inbox_id, self.environment):
+                    refresh(conn, self.group_id, inbox_id)
+                    parent = conn.execute(
+                        "SELECT payload->>'_geo_source_id' AS id FROM bot_inbox WHERE id=%s AND group_id=%s",
+                        (inbox_id, self.group_id),
+                    ).fetchone()
+                    if parent and parent["id"]:
+                        refresh(conn, self.group_id, int(parent["id"]))
+
+            guarded(conn, update)
 
     def connect(self) -> psycopg.Connection:
         return psycopg.connect(
@@ -108,6 +128,15 @@ class QueueStore:
     def initialize(self) -> None:
         with self.connect() as conn:
             conn.execute(SCHEMA)
+            if self.telemetry:
+                from src.vkbot.telemetry import SCHEMA as TELEMETRY_SCHEMA
+
+                try:
+                    with conn.transaction():
+                        conn.execute(TELEMETRY_SCHEMA)
+                except Exception as exc:
+                    self.telemetry = False
+                    logging.getLogger(__name__).warning("Telemetry schema unavailable error=%s", type(exc).__name__)
             for table in ("bot_inbox", "bot_outbox"):
                 conn.execute(
                     f"UPDATE {table} SET completed_at=%s WHERE group_id=%s AND status='done' AND completed_at IS NULL",
@@ -186,6 +215,8 @@ class QueueStore:
                     )
                 if row and record.get("status") == "done":
                     conn.execute("UPDATE bot_inbox SET completed_at=%s WHERE id=%s", (time.time(), row["id"]))
+                if row and self.telemetry:
+                    self._observe(conn, row["id"])
             if cursor is not None:
                 self._state(conn, "longpoll_ts", str(cursor))
         return added
@@ -293,7 +324,7 @@ class QueueStore:
                 return None
             receipt["ack_reserved"] = True
             conn.execute("UPDATE bot_inbox SET payload=%s WHERE id=%s", (Jsonb(obj), row["id"]))
-            return receipt
+            return dict(receipt, inbox_id=row["id"])
 
     @staticmethod
     def _table(table: str) -> str:
@@ -350,6 +381,7 @@ class QueueStore:
                 ).fetchone()
             )
 
+    @measured("outbox.persist")
     def plan(self, job: dict, effects: list[dict], callback_at: float | None = None) -> None:
         with self.connect() as conn:
             self._owned(conn, "bot_inbox", job)
@@ -400,6 +432,7 @@ class QueueStore:
             )
             if not effects:
                 self._callback_completed(conn, job["peer_id"], job["id"])
+            self._observe(conn, job["id"])
 
     def _geo_current(self, conn: psycopg.Connection, peer: int, payload: dict) -> bool:
         if time.time() >= payload["_geo_deadline"]:
@@ -436,6 +469,7 @@ class QueueStore:
                     job["id"],
                 ),
             )
+            self._observe(conn, job["id"])
 
     def _geo_superseded(self, conn: psycopg.Connection, peer: int, payload: dict) -> bool:
         return bool(
@@ -459,6 +493,7 @@ class QueueStore:
             self._owned(conn, "bot_outbox", job)
             conn.execute("UPDATE bot_outbox SET result=%s WHERE id=%s", (Jsonb(result), job["id"]))
 
+    @measured("outbox.finish")
     def finish(self, job: dict, context: tuple[int, dict] | None = None) -> None:
         with self.connect() as conn:
             self._owned(conn, "bot_outbox", job)
@@ -477,6 +512,7 @@ class QueueStore:
                 (time.time(), job["id"]),
             )
             self._callback_completed(conn, job["peer_id"], job["inbox_id"])
+            self._observe(conn, job["inbox_id"])
 
     def _callback_completed(self, conn: psycopg.Connection, peer: int, inbox_id: int) -> None:
         name = f"callback_gate:{peer}"
@@ -508,6 +544,7 @@ class QueueStore:
                     job["owner"],
                 ),
             )
+            self._observe(conn, job["id"] if table == "bot_inbox" else job["inbox_id"])
 
     def message_context(self, peer: int, cmid: int) -> dict | None:
         with self.connect() as conn:

@@ -12,6 +12,7 @@ from pyreqwest.exceptions import PyreqwestError
 from vk_api import VkApi
 
 from src.network import network_settings
+from src.telemetry import active, measured, merge, note, search_result, span
 from src.vkbot.http import TimeoutSession
 from src.vkbot.keyboard import INLINE_BUTTON_LIMIT, build_many_buttons, get_location_keyboard, serialize_inline_keyboard
 from src.vkbot.queue import QueueStore
@@ -23,6 +24,7 @@ class RateGate:
         self.lock = threading.Lock()
         self.last = 0.0
 
+    @measured("vk.rate_limit_wait")
     def wait(self) -> None:
         with self.lock:
             remaining = self.interval - (time.monotonic() - self.last)
@@ -113,6 +115,7 @@ class Processor:
         if self.settings.dev_faults_enabled and self.store.consume_fault(name):
             raise TimeoutError("Injected dev failure")
 
+    @measured("api.lookup")
     def lookup(self, message: str | None = None, geo: dict | None = None) -> dict:
         if message and len(message) > getattr(self.settings, "search_max_query_length", 500):
             return {"status": "invalid_query", "data": {}, "engine": "v2"}
@@ -124,10 +127,22 @@ class Processor:
                 pending = self.http.get(url + "/geo").query({"lat": geo["latitude"], "lon": geo["longitude"]})
             else:
                 pending = self.http.get(url + "/msg").query({"message": message or ""})
+            if active():
+                pending = pending.query({"observe": "true"})
             response = pending.build().send()
+            try:
+                result = response.json()
+            except (ValueError, TypeError):
+                raise LookupUnavailable("Lookup API returned invalid JSON") from None
+            if active():
+                packet = result.pop("_diagnostics", None)
+                if packet:
+                    merge(packet)
+                else:
+                    note(api_measurements="missing")
             if response.status != 200:
                 raise LookupUnavailable("Lookup API returned an unsuccessful response")
-            return response.json()
+            return result
         except (PyreqwestError, TimeoutError):
             raise LookupUnavailable("Lookup API is temporarily unavailable") from None
 
@@ -141,6 +156,7 @@ class Processor:
 
     def _message(self, job: dict) -> None:
         if job["kind"] == "geo_retry" and self.store.geo_retry_current(job) is False:
+            note(decision="geo_obsolete_or_expired")
             self.store.defer_geo_retry(job, self.settings.geo_retry_delay_seconds)
             return
         message = job["payload"]["message"]
@@ -150,6 +166,7 @@ class Processor:
             base["reply_to"] = message["id"]
         effects = []
         if message.get("text", "").strip().lower() == "начать":
+            note(decision="start_message")
             effects.append(
                 {
                     "method": "send",
@@ -161,6 +178,7 @@ class Processor:
                 }
             )
         elif not self.vk.groups.isMember(group_id=self.settings.vk_group_id, user_id=peer):
+            note(decision="subscription_required")
             effects.append(
                 {
                     "method": "send",
@@ -171,12 +189,19 @@ class Processor:
             geo = message.get("geo", {}).get("coordinates")
             try:
                 result = self.lookup(message.get("text"), geo)
+                note(result=search_result(result))
+                if active():
+                    from src.vkbot.telemetry import identity
+
+                    result = dict(result, _request_id=identity(self.store.group_id, job["id"]))
             except LookupUnavailable:
                 if not geo:
                     raise
                 if job["kind"] == "geo_retry":
+                    note(decision="geo_deferred_again")
                     self.store.defer_geo_retry(job, self.settings.geo_retry_delay_seconds)
                     return
+                note(decision="geo_deferred_with_notice")
                 self.store.plan(
                     job,
                     [
@@ -270,8 +295,23 @@ class Processor:
         # Ingest enforces a shared per-user cooldown before any planning.
         cmid = int(obj["conversation_message_id"])
         result = self.store.message_context(peer, cmid)
+        if result:
+            note(context_hit=True, result=search_result(result))
+        if result and result.get("_request_id"):
+            note(parent_request_id=result["_request_id"])
+        note(
+            callback_action="dismiss"
+            if payload.get("dismiss_choices")
+            else "select_building"
+            if "select_building" in payload
+            else "page"
+            if "choice_page" in payload
+            else "entrance",
+            selected_entrance=str(payload.get("entrance", ""))[:40],
+        )
         choice_action = any(key in payload for key in ("dismiss_choices", "select_building", "choice_page"))
         if choice_action and result is None:
+            note(decision="choices_expired")
             self.store.plan(
                 job,
                 [
@@ -297,9 +337,11 @@ class Processor:
             or (choice_action and result and result.get("status") != "ambiguous" and not result.get("candidates"))
             or (result and result.get("status") == "dismissed")
         ):
+            note(decision="choices_already_closed")
             self.store.plan(job, [])
             return
         if payload.get("dismiss_choices") is True:
+            note(decision="none_of_choices")
             self.store.plan(
                 job,
                 [
@@ -321,6 +363,7 @@ class Processor:
             )
             return
         if "choice_page" in payload:
+            note(decision="choices_page")
             if not result or result.get("status") != "ambiguous":
                 raise ValueError("No saved address choices")
             message, keyboard = address_choices(result, int(payload["choice_page"]))
@@ -347,9 +390,14 @@ class Processor:
             if not result or not 0 <= index < len(result.get("candidates", [])):
                 raise ValueError("Selection is not part of the saved search result")
             building = result["candidates"][index]["building_id"]
+            note(selected_building_id=building, selected_candidate_index=index)
             base_url = f"http://{self.settings.domofomka_api_host}:{self.settings.domofomka_api_port}"
             url = base_url + "/api/v2/buildings/" + quote(building, safe="")
-            response = self.http.get(url).build().send()
+            with span("api.building_lookup"):
+                pending = self.http.get(url)
+                if active():
+                    pending = pending.query({"observe": "true"})
+                response = pending.build().send()
             if response.status == 404:
                 self.store.plan(
                     job,
@@ -369,6 +417,17 @@ class Processor:
             if response.status != 200:
                 raise LookupUnavailable("Building lookup unavailable")
             answer = response.json()
+            if active():
+                packet = answer.pop("_diagnostics", None)
+                if packet:
+                    merge(packet)
+                else:
+                    note(api_measurements="missing")
+            note(result=search_result(answer))
+            if active():
+                from src.vkbot.telemetry import identity
+
+                answer = dict(answer, _request_id=identity(self.store.group_id, job["id"]))
             keyboard = (
                 inline_keyboard(list(answer["data"])[:INLINE_BUTTON_LIMIT])
                 if answer.get("data")
@@ -408,6 +467,7 @@ class Processor:
             self.store.plan(job, effects)
             return
         if result is None:
+            note(context_source="vk_message_recovery")
             messages = self.vk.messages.getByConversationMessageId(peer_id=peer, conversation_message_ids=cmid)["items"]
             if not messages:
                 raise ValueError("Callback refers to a missing message")
@@ -434,6 +494,7 @@ class Processor:
         if not self.store.renew("bot_outbox", job):
             raise RuntimeError("Queue lease lost before dispatch")
         if job.get("result") is None and self.store.outbox_geo_current(job) is False:
+            note(decision="delivery_obsolete")
             self.store.finish(job)
             return
         if job["method"] == "send":

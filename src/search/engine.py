@@ -16,6 +16,7 @@ from rapidfuzz.fuzz import ratio
 from rapidfuzz.process import extract
 
 from src.search.normalize import Query, address_words, parse_query, street_kind
+from src.telemetry import measured, note
 
 
 class Catalog:
@@ -82,6 +83,7 @@ class Catalog:
                 )
         return rows
 
+    @measured("search.v2.coded_candidates")
     def coded_candidates(self, query: Query, limit: int = 100) -> list[dict]:
         words = query.words.split()
         if not words or not query.house:
@@ -111,6 +113,7 @@ class Catalog:
                 )
             ]
 
+    @measured("search.v2.candidates")
     def candidates(self, query: Query, limit: int = 100) -> list[dict]:
         words = query.words.split()
         if not words or not query.house:
@@ -171,6 +174,7 @@ class Catalog:
                 )
             ]
 
+    @measured("search.v2.alias_candidates")
     def alias_candidates(self, query: Query) -> list[dict]:
         with self.connect() as db:
             if not db.execute("SELECT 1 FROM sqlite_master WHERE name='alias_search'").fetchone():
@@ -210,6 +214,7 @@ class Catalog:
             return 0
         return min((max((ratio(w, t) / 100 for t in tokens), default=0) for w in query.split()), default=0)
 
+    @measured("search.v2.read_codes")
     def answer(self, building: dict, entrance: str | None = None) -> dict:
         with self.connect() as db:
             rows = db.execute(
@@ -234,6 +239,14 @@ class Catalog:
 
     def resolve(self, message: str, candidates: list[dict] | None = None) -> dict:
         query = parse_query(message)
+        note(
+            normalized_query={
+                "words": query.words,
+                "house": query.house,
+                "entrance": query.entrance,
+                "kind": query.kind,
+            }
+        )
         if not message.strip():
             return {"status": "not_found", "data": {}, "engine": "v2"}
         if not query.house or not query.words:
@@ -277,6 +290,7 @@ class Catalog:
             query, variants, list({r["id"]: r for r in [*(candidates or []), *indexed, *cheap]}.values())
         )
 
+    @measured("search.v2.rank")
     def _resolve_candidates(self, query: Query, variants: list[Query], candidates: list[dict]) -> dict:
         # Backend scores never decide house identity or permit dropping a city token.
         scored = []

@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 
+from src.telemetry import settings as telemetry_settings
 from src.vkbot.config import settings
 from src.vkbot.queue import QueueStore
 from src.vkbot.runtime import validate_environment
@@ -11,14 +12,28 @@ from src.vkbot.runtime import validate_environment
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["status", "health", "pause", "resume", "retry-failed", "fault"])
+    parser.add_argument(
+        "command", choices=["status", "health", "telemetry", "pause", "resume", "retry-failed", "fault"]
+    )
     parser.add_argument("name", nargs="?", choices=["api", "vk-send", "vk-send-after", "vk-edit", "vk-edit-after"])
     parser.add_argument("count", nargs="?", type=int, default=1)
     args = parser.parse_args()
     validate_environment(settings)
-    store = QueueStore(settings.queue_database_url, int(settings.vk_group_id), settings.queue_lease_seconds)
+    store = QueueStore(
+        settings.queue_database_url,
+        int(settings.vk_group_id),
+        settings.queue_lease_seconds,
+        telemetry=telemetry_settings.telemetry_enabled,
+    )
+    store.environment = settings.app_environment
     store.initialize()
-    if args.command == "health":
+    if args.command == "telemetry":
+        if not store.telemetry:
+            parser.error("Telemetry is disabled")
+        from src.vkbot.telemetry import report
+
+        sys.stdout.write(json.dumps(report(store), ensure_ascii=False, default=str) + "\n")
+    elif args.command == "health":
         from src.vkbot.maintenance import health
 
         sys.stdout.write(json.dumps(health(store)) + "\n")

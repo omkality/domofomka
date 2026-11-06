@@ -9,8 +9,10 @@ from pyreqwest.client import ClientBuilder
 from src.api.cache import LookupCache
 from src.api.config import settings
 from src.api.routes import get_dadata_client
+from src.api.telemetry import observed
 from src.search.engine import Catalog, search_body
 from src.services.codes import get_data_from_db
+from src.telemetry import note, search_result, span
 
 logger = logging.getLogger(__name__)
 result_cache = LookupCache()
@@ -56,7 +58,9 @@ async def lookup(message: str) -> dict:
     key = cache_key(("text", message))
     cached = result_cache.get(key) if key is not None else None
     if cached is not None:
+        note(cache_hit=True, cached_result_engine=cached.get("engine"), result=search_result(cached))
         return cached
+    note(cache_hit=False)
     result = await uncached_lookup(message)
     remember(key, result)
     return result
@@ -106,7 +110,10 @@ async def uncached_lookup(message: str) -> dict:
                 candidates = candidates or None
             except Exception as exc:
                 logger.warning("OpenSearch unavailable error=%s; using catalog index", type(exc).__name__)
-        result = await asyncio.to_thread(catalog.resolve, message, candidates)
+        with span("search.v2", kind="search", engine="v2", query=message[: settings.search_max_query_length]) as detail:
+            result = await asyncio.to_thread(catalog.resolve, message, candidates)
+            detail["result"] = search_result(result)
+        note(result=search_result(result))
         if result["status"] != "not_found":
             return result
         reason = "not_found"
@@ -114,35 +121,44 @@ async def uncached_lookup(message: str) -> dict:
         logger.warning("V2 unavailable error=%s; using legacy search", type(exc).__name__)
         reason = "unavailable"
     result = await get_data_from_db(message)
+    note(search_fallback_reason=reason)
     if result.get("data"):
         from src.search.normalize import legacy_house_matches
 
         if not legacy_house_matches(message, result.get("address", "")):
-            return {
+            rejected = {
                 "status": "not_found",
                 "engine": "v2",
                 "data": {},
                 "fallback_reason": reason,
                 "fallback_rejected": "house_conflict",
             }
-    return dict(
+            note(result=search_result(rejected))
+            return rejected
+    answer = dict(
         result,
         status="found" if result.get("data") else "not_found",
         engine="v1",
         fallback_reason=reason,
         data=result.get("data", {}),
     )
+    note(result=search_result(answer))
+    return answer
 
 
 @get("/msg")
-async def message_codes(message: str) -> dict:
+async def message_codes(message: str, observe: bool = False) -> dict:
     if len(message) > settings.search_max_query_length:
         return {"status": "invalid_query", "data": {}, "engine": "v2"}
-    return await lookup(message)
+    return await observed(lambda: lookup(message), observe)
 
 
 @get("/geo")
-async def geo_codes(lat: float, lon: float) -> dict:
+async def geo_codes(lat: float, lon: float, observe: bool = False) -> dict:
+    return await observed(lambda: geo_lookup(lat, lon), observe)
+
+
+async def geo_lookup(lat: float, lon: float) -> dict:
     from litestar.exceptions import ServiceUnavailableException
 
     from src.services.dadata_client import DadataUnavailable
@@ -150,9 +166,12 @@ async def geo_codes(lat: float, lon: float) -> dict:
     key = cache_key(("geo", lat, lon))
     cached = result_cache.get(key) if key is not None else None
     if cached is not None:
+        note(geo_cache_hit=True, cached_result_engine=cached.get("engine"), result=search_result(cached))
         return cached
+    note(geo_cache_hit=False)
     try:
-        address = await (await get_dadata_client()).get_address_by_geo(lat, lon)
+        with span("geo.resolve"):
+            address = await (await get_dadata_client()).get_address_by_geo(lat, lon)
     except DadataUnavailable as exc:
         raise ServiceUnavailableException(detail="Geocoding unavailable; send text") from exc
     result = await lookup(address or "")
@@ -164,7 +183,11 @@ v2_router = Router(path="/api/v2/codes", route_handlers=[message_codes, geo_code
 
 
 @get("/api/v2/buildings/{building_id:str}")
-async def building_codes(building_id: str) -> dict:
+async def building_codes(building_id: str, observe: bool = False) -> dict:
+    return await observed(lambda: read_building(building_id), observe)
+
+
+async def read_building(building_id: str) -> dict:
     from litestar.exceptions import NotFoundException
 
     catalog = Catalog(settings.search_catalog_path)

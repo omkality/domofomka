@@ -2,6 +2,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from src.telemetry import measured
+
 ORDINALS = {
     "перв": 1,
     "втор": 2,
@@ -203,6 +205,7 @@ class Query:
     kind: str | None = None
 
 
+@measured("search.normalize")
 def parse_query(value: str) -> Query:
     value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")
     # Separate an attached house number, but preserve 62к1 / 4с2 components.

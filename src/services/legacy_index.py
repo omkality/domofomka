@@ -8,8 +8,11 @@ from contextlib import closing
 from functools import lru_cache
 from pathlib import Path
 
+from src.telemetry import measured, span
+
 
 @lru_cache(maxsize=2)
+@measured("search.v1.index_validation")
 def compatible(source: str, index: str, source_stamp: tuple, index_stamp: tuple) -> bool:
     with closing(sqlite3.connect(f"file:{Path(index).resolve().as_posix()}?mode=ro", uri=True)) as db:
         metadata = json.loads(db.execute("SELECT value FROM metadata WHERE key='source'").fetchone()[0])
@@ -17,6 +20,7 @@ def compatible(source: str, index: str, source_stamp: tuple, index_stamp: tuple)
         return metadata["sha256"] == hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+@measured("search.v1.index")
 def lookup(message: str, source_path: str, index_path: str) -> dict | None:
     from src.services.codes import address_exists, street_types
 
@@ -42,11 +46,12 @@ def lookup(message: str, source_path: str, index_path: str) -> dict | None:
             )
         else:
             groups = db.execute("SELECT id,city,kind,street,house FROM groups ORDER BY id")
-        matching = [
-            r
-            for r in groups
-            if (word in r[1].lower() or word in r[3].lower()) and address_exists(message, r[1], r[3], r[4], r[2])
-        ]
+        with span("search.v1.candidates_match"):
+            matching = [
+                r
+                for r in groups
+                if (word in r[1].lower() or word in r[3].lower()) and address_exists(message, r[1], r[3], r[4], r[2])
+            ]
         if not matching:
             return {}
         city = min((r[1] for r in matching), key=len)
@@ -55,7 +60,10 @@ def lookup(message: str, source_path: str, index_path: str) -> dict | None:
         for gid in ids:
             source_ids.extend(r[0] for r in db.execute("SELECT source_id FROM source_rows WHERE group_id=?", (gid,)))
     result = {}
-    with closing(sqlite3.connect(f"file:{source.resolve().as_posix()}?mode=ro", uri=True)) as db:
+    with (
+        span("search.v1.read_codes"),
+        closing(sqlite3.connect(f"file:{source.resolve().as_posix()}?mode=ro", uri=True)) as db,
+    ):
         rows = []
         for offset in range(0, len(source_ids), 500):
             batch = source_ids[offset : offset + 500]

@@ -43,6 +43,7 @@ class Reconciler:
                     if message.get("from_id") != peer:
                         continue
                     record = event_record(self.store.group_id, "message_new", {"message": message})
+                    record["payload"]["_event_source"] = "history"
                     # Pre-installation messages have no local processing ledger.
                     # Only their trailing unanswered tail is safe to replay.
                     historical_answer = message["date"] < tracking and message["date"] <= last_out

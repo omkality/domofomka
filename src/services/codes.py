@@ -7,6 +7,7 @@ import traceback
 import aiosqlite
 
 from src.api.config import settings
+from src.telemetry import note, search_result, span
 
 logger = logging.getLogger(__name__)
 
@@ -81,16 +82,28 @@ def street_or_city_exists(word: str, city: str, street: str) -> bool:
 
 
 async def get_data_from_db(msg: str) -> dict:
+    with span("search.v1", kind="search", engine="v1", query=(msg or "")[:2000]) as detail:
+        result = await _get_data_from_db(msg)
+        detail["result"] = search_result(
+            dict(result, status="found" if result.get("data") else "not_found", engine="v1")
+        )
+        return result
+
+
+async def _get_data_from_db(msg: str) -> dict:
     if msg:
         from src.services.legacy_index import lookup
 
         try:
             indexed = await asyncio.to_thread(lookup, msg, settings.db_name, settings.legacy_index_path)
             if indexed is not None:
+                note(v1_backend="index")
                 return indexed
         except (OSError, sqlite3.Error, ValueError, TypeError, KeyError):
             logger.warning("Legacy candidate index unavailable; using source scan")
-    return await scan_data_from_db(msg)
+    note(v1_backend="source_scan")
+    with span("search.v1.source_scan"):
+        return await scan_data_from_db(msg)
 
 
 async def scan_data_from_db(msg: str) -> dict:

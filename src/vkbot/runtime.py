@@ -9,6 +9,12 @@ from vk_api import VkApi
 from vk_api.bot_longpoll import VkBotLongPoll
 
 from src.network import network_settings
+from src.telemetry import (
+    Capture,
+    note,
+    settings as telemetry_settings,
+    span,
+)
 from src.vkbot.processor import Processor, RateGate, RateSession
 from src.vkbot.queue import QueueStore, event_record, retry_delay, safe_error
 from src.vkbot.recovery import Reconciler
@@ -31,7 +37,13 @@ class Runtime:
     def __init__(self, settings: Any):
         validate_environment(settings)
         self.settings = settings
-        self.store = QueueStore(settings.queue_database_url, int(settings.vk_group_id), settings.queue_lease_seconds)
+        self.store = QueueStore(
+            settings.queue_database_url,
+            int(settings.vk_group_id),
+            settings.queue_lease_seconds,
+            telemetry=telemetry_settings.telemetry_enabled,
+        )
+        self.store.environment = settings.app_environment
         self.gate = RateGate(settings.vk_min_interval_seconds)
 
     def verify_token(self) -> None:
@@ -84,6 +96,12 @@ class Runtime:
                     self.settings.queue_maintenance_batch,
                 )
                 snapshot = await asyncio.to_thread(health, self.store)
+                if self.store.telemetry:
+                    from src.vkbot.telemetry import maintain
+
+                    snapshot["telemetry"] = await asyncio.to_thread(
+                        maintain, self.store, self.settings.queue_maintenance_batch
+                    )
                 logger.info("Queue maintenance result=%s health=%s", result, snapshot)
                 import shutil
 
@@ -100,6 +118,7 @@ class Runtime:
                     or snapshot["database_bytes"] > self.settings.queue_database_warn_bytes
                     or stale
                     or failed
+                    or snapshot.get("telemetry", {}).get("dropped_batches", 0)
                 ):
                     logger.warning(
                         "Operational warning free_bytes=%s database_bytes=%s stale_jobs=%s failed_jobs=%s",
@@ -149,7 +168,14 @@ class Runtime:
                         text = f"Подождите {receipt['wait_seconds']} сек."
                     params["event_data"] = json.dumps({"type": "show_snackbar", "text": text}, ensure_ascii=False)
                 try:
-                    vk.messages.sendMessageEventAnswer(**params)
+                    if self.store.telemetry is True:
+                        self._observed_job(
+                            lambda job, params=params: vk.messages.sendMessageEventAnswer(**params),
+                            "callback_ack",
+                            {"id": receipt["inbox_id"], "inbox_id": receipt["inbox_id"], "attempts": 1},
+                        )
+                    else:
+                        vk.messages.sendMessageEventAnswer(**params)
                 except Exception as exc:
                     logger.info("Callback acknowledgement unavailable error=%s", safe_error(exc))
                     if getattr(exc, "code", None) in {6, 9, 29}:
@@ -170,7 +196,9 @@ class Runtime:
                     kind = event.type.value if hasattr(event.type, "value") else str(event.type)
                     if kind in {"message_new", "message_event"}:
                         try:
-                            records.append(event_record(self.store.group_id, kind, dict(event.obj)))
+                            record = event_record(self.store.group_id, kind, dict(event.obj))
+                            record["payload"]["_event_source"] = "longpoll"
+                            records.append(record)
                         except (KeyError, ValueError):
                             logger.warning("Unsupported incoming event kind=%s", kind)
                 # Do not fetch the next batch until this batch AND cursor are durable.
@@ -237,7 +265,7 @@ class Runtime:
                     heartbeat = asyncio.create_task(self._heartbeat(table, job))
                     try:
                         operation = processor.plan if table == "bot_inbox" else processor.deliver
-                        await asyncio.to_thread(operation, job)
+                        await asyncio.to_thread(self._observed_job, operation, table, job)
                         logger.info("Queue job complete queue=%s id=%s worker=%s", table, job["id"], index)
                     except Exception as exc:
                         code = getattr(exc, "code", None)
@@ -281,3 +309,32 @@ class Runtime:
                     await asyncio.sleep(network_settings.bot_restart_delay_seconds)
         finally:
             processor.close()
+
+    def _observed_job(self, operation: Any, table: str, job: dict) -> None:
+        if not self.store.telemetry:
+            operation(job)
+            return
+        from src.vkbot.telemetry import persist
+
+        with Capture() as capture:
+            note(
+                worker_started_at=time.time(),
+                scheduled_at=job.get("next_at"),
+                queue=table,
+                worker_attempt=job["attempts"],
+            )
+            try:
+                with span(
+                    {"bot_inbox": "inbox.process", "bot_outbox": "outbox.deliver", "callback_ack": "vk.callback_ack"}[
+                        table
+                    ],
+                    eligible_at=job.get("next_at"),
+                    attempt=job["attempts"],
+                    app_revision=telemetry_settings.app_revision,
+                ):
+                    operation(job)
+            finally:
+                try:
+                    persist(self.store, table, job, capture.packet(), self.settings.app_environment)
+                except Exception as exc:
+                    logger.warning("Telemetry persistence unavailable error=%s", type(exc).__name__)

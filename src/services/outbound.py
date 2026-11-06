@@ -12,15 +12,18 @@ class ProxyHealth:
         self.routes: dict[tuple[str, str], dict[str, float]] = {}
 
     def choose(self, service: str, proxy: str) -> bool:
+        return self.decision(service, proxy)[0]
+
+    def decision(self, service: str, proxy: str) -> tuple[bool, str]:
         with self.lock:
             state = self.routes.get((service, proxy))
             if state is None:
-                return True
+                return True, "preferred"
             now = time.monotonic()
             if now < state["until"] or now < state["probe_until"]:
-                return False
+                return False, "proxy_cooldown_or_probe_busy"
             state["probe_until"] = now + network_settings.proxy_probe_lease_seconds
-            return True
+            return True, "proxy_probe"
 
     def failed(self, service: str, proxy: str) -> None:
         with self.lock:
