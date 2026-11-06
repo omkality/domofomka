@@ -143,6 +143,9 @@ class PostgresCatalog(Catalog):
         with self.connect() as db:
             return [row[0] for row in db.execute('SELECT term FROM vocabulary ORDER BY term COLLATE "C"')]
 
+    def vocabulary_terms(self) -> list[str]:
+        return self.vocabulary
+
     @staticmethod
     def token(word: str) -> str:
         return "'" + word.replace("'", "''") + "'"
@@ -194,7 +197,9 @@ class PostgresCatalog(Catalog):
             return []
         with self.connect() as db:
             rows = db.execute(
-                "SELECT b.*,s.words AS alias_words FROM alias_search s JOIN buildings b ON b.id=s.building_id "
+                "SELECT b.*,s.words AS alias_words,(SELECT a.street_key FROM aliases a WHERE a.building_id=b.id "
+                "AND a.house=s.house AND a.city_key||' '||a.street_key=s.words LIMIT 1) AS alias_street "
+                "FROM alias_search s JOIN buildings b ON b.id=s.building_id "
                 "WHERE to_tsvector('simple',s.words) @@ to_tsquery('simple',%s) "
                 "AND s.house=%s ORDER BY s.seq LIMIT 100",
                 (self.query(query.words.split(), True), query.house),
@@ -203,4 +208,20 @@ class PostgresCatalog(Catalog):
             for row in rows:
                 item = result.setdefault(row["id"], dict(row))
                 item.setdefault("_aliases", []).append(row["alias_words"])
+                if row["alias_street"]:
+                    item.setdefault("_alias_streets", []).append(row["alias_street"])
             return list(result.values())
+
+    def has_exact_location(self, query: Query) -> bool:
+        from src.search.constraints import whole_location_match
+
+        words = query.words.split()
+        if len(words) < 2:
+            return False
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT city_key,street_key FROM streets WHERE to_tsvector('simple',words) "
+                "@@ to_tsquery('simple',%s) ORDER BY id LIMIT 1000",
+                (self.query(words, False),),
+            )
+            return any(whole_location_match(query, row["city_key"], row["street_key"]) for row in rows)

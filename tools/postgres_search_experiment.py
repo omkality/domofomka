@@ -8,6 +8,7 @@ from rapidfuzz.process import extract
 
 from src.search.engine import Catalog
 from src.search.normalize import Query
+from src.search.postgres import PostgresCatalog
 from tools.postgres_catalog_experiment import connect as experiment_connection
 
 
@@ -33,6 +34,8 @@ class SharedReader:
 
 
 class PostgresExperiment(Catalog):
+    has_exact_location = PostgresCatalog.has_exact_location
+
     def __init__(self, minimum_similarity=0.86, ambiguity_margin=0.06):
         super().__init__("postgres-experiment", minimum_similarity, ambiguity_margin)
         self.connection = experiment_connection()
@@ -50,6 +53,9 @@ class PostgresExperiment(Catalog):
     @cached_property
     def vocabulary(self):
         return [row[0] for row in self.connection.execute('SELECT term FROM vocabulary ORDER BY term COLLATE "C"')]
+
+    def vocabulary_terms(self):
+        return self.vocabulary
 
     @staticmethod
     def token(word) -> str:

@@ -9,13 +9,16 @@ import sqlite3
 import zlib
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 
+from rapidfuzz.distance import DamerauLevenshtein
 from rapidfuzz.fuzz import ratio
-from rapidfuzz.process import extract
+from rapidfuzz.process import extract, extractOne
 
-from src.search.normalize import Query, address_words, building_kind_matches, parse_query
+from src.search.constraints import full_name_match, name_constraints_match, whole_location_match
+from src.search.normalize import Query, address_words, building_kind_matches, parse_query, query_name_words
 from src.telemetry import measured, note
 
 
@@ -174,6 +177,43 @@ class Catalog:
                 )
             ]
 
+    def has_exact_location(self, query: Query) -> bool:
+        words = query.words.split()
+        if len(words) < 2:
+            return False
+        match = " AND ".join('"' + word + '"' for word in words)
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT t.city_key,t.street_key FROM search s JOIN streets t ON t.id=s.id "
+                "WHERE search MATCH ? ORDER BY t.id LIMIT 1000",
+                (match,),
+            )
+            return any(whole_location_match(query, row[0], row[1]) for row in rows)
+
+    def vocabulary_terms(self) -> list[str]:
+        return street_vocabulary(self.path, Path(self.path).stat().st_mtime_ns)
+
+    def joined_variants(self, query: Query, candidates: list[dict]) -> list[Query]:
+        """Try at most four adjacent word joins, supported by the actual catalog."""
+        pairs = list(re.finditer(r"(?=(\b[а-яa-z]{2,}\s+[а-яa-z]{2,}\b))", query.search_text))
+        if not pairs:
+            return []
+        vocabulary = [
+            *self.vocabulary_terms(),
+            *(word for row in candidates for word in address_words(row["street"]).split()),
+        ]
+        variants = []
+        for pair in pairs[:4]:
+            joined = "".join(pair[1].split())
+            if len(joined) < 6 or not extractOne(
+                joined, vocabulary, scorer=DamerauLevenshtein.distance, score_cutoff=0 if len(joined) < 8 else 1
+            ):
+                continue
+            alternate = address_words(query.search_text[: pair.start()] + joined + query.search_text[pair.end(1) :])
+            # The original parsed identity is authoritative, including area numbers.
+            variants.append(replace(query, words=alternate))
+        return variants
+
     @measured("search.v2.alias_candidates")
     def alias_candidates(self, query: Query) -> list[dict]:
         with self.connect() as db:
@@ -181,7 +221,9 @@ class Catalog:
                 return []
             match = " AND ".join('"' + w + '"*' for w in query.words.split())
             rows = db.execute(
-                "SELECT b.*,s.words AS alias_words FROM alias_search s JOIN buildings b ON b.id=s.building_id "
+                "SELECT b.*,s.words AS alias_words,(SELECT a.street_key FROM aliases a WHERE a.building_id=b.id "
+                "AND a.house=s.house AND a.city_key||' '||a.street_key=s.words LIMIT 1) AS alias_street "
+                "FROM alias_search s JOIN buildings b ON b.id=s.building_id "
                 "WHERE alias_search MATCH ? AND s.house=? LIMIT 100",
                 (match, query.house),
             )
@@ -189,6 +231,8 @@ class Catalog:
             for row in rows:
                 item = result.setdefault(row["id"], dict(row))
                 item.setdefault("_aliases", []).append(row["alias_words"])
+                if row["alias_street"]:
+                    item.setdefault("_alias_streets", []).append(row["alias_street"])
             return list(result.values())
 
     def building(self, id: str) -> dict | None:
@@ -239,13 +283,17 @@ class Catalog:
             "data": data,
             "requested_entrance": entrance,
             "engine": "v2",
-            "identity": "gar"
-            if building["guid"]
-            else ("gar_address" if building["id"].startswith("address:") else "legacy_unverified"),
+            "identity": (
+                "gar"
+                if building["guid"]
+                else ("gar_address" if building["id"].startswith("address:") else "legacy_unverified")
+            ),
         }
 
     def resolve(self, message: str, candidates: list[dict] | None = None) -> dict:
         query = parse_query(message)
+        if not query.words and query.name_words:
+            query = replace(query, words=query.name_words)
         note(
             normalized_query={
                 "words": query.words,
@@ -259,19 +307,15 @@ class Catalog:
         if not query.house or not query.words:
             # Unsupported house formats and streets named like a type (e.g.
             # "Набережная") still get the unchanged v1 compatibility path.
-            numeric_street = any(word.isdigit() for word in query.words.split())
+            numeric_street = any(any(char.isdigit() for char in word) for word in query.words.split())
             if (query.house and any(c.isalpha() for c in message)) or (
                 not query.house and any(c.isdigit() for c in message) and not numeric_street
             ):
                 return {"status": "not_found", "data": {}, "engine": "v2"}
             return {"status": "incomplete_query", "data": {}, "engine": "v2"}
         variants = [query]
-        # Work before stop-word removal: "по" is also an ordinary preposition.
-        for match in re.finditer(r"\b(ново|старо|по)\s+([а-я]+)\b", query.raw):
-            joined = query.raw[: match.start()] + match[1] + match[2] + query.raw[match.end() :]
-            alternate = parse_query(joined)
-            if alternate.house == query.house:
-                variants.append(Query(query.raw, alternate.words, query.house, query.entrance, query.kind))
+        if query.name_words and query.name_words != query.words:
+            variants.append(replace(query, words=query.name_words))
         cheap = [
             row for variant in variants for row in [*self.coded_candidates(variant), *self.alias_candidates(variant)]
         ]
@@ -292,10 +336,12 @@ class Catalog:
                 for v in variants
             ):
                 return fast
-        indexed = [row for variant in variants for row in self.candidates(variant)]
-        return self._resolve_candidates(
+        variants.extend(self.joined_variants(query, candidates or []))
+        indexed = [row for variant in variants for row in [*self.candidates(variant), *self.alias_candidates(variant)]]
+        result = self._resolve_candidates(
             query, variants, list({r["id"]: r for r in [*(candidates or []), *indexed, *cheap]}.values())
         )
+        return result
 
     @measured("search.v2.rank")
     def _resolve_candidates(self, query: Query, variants: list[Query], candidates: list[dict]) -> dict:
@@ -304,15 +350,17 @@ class Catalog:
         for row in candidates:
             if row["house"] != query.house:
                 continue
+            if not name_constraints_match(query, row):
+                continue
             if not row["guid"] and re.search(
                 r"\b(?:ул|улица|проспект|пр-кт|шоссе|бульвар|набережная|переулок|проезд)\b", row["city"], re.I
             ):
                 # Misaligned source columns are not a verified v2 address. Let
                 # compatibility fallback preserve v1 until the row is reviewed.
                 continue
-            street_words = address_words(row["street"]).split()
+            street_words = (address_words(row["street"]) or query_name_words(row["street"])).split()
             # A missing ordinal must not silently select another named street.
-            if any(part.isdigit() and part not in query.words.split() for part in street_words):
+            if any(any(c.isdigit() for c in part) and part not in query.words.split() for part in street_words):
                 continue
             if not any(
                 (word == part if any(c.isdigit() for c in word) else ratio(word, part) / 100 >= self.minimum_similarity)
@@ -326,11 +374,22 @@ class Catalog:
             score = max(
                 self.similarity(variant.words, document)
                 for variant in variants
-                for document in [address_words(row["city"] + " " + row["street"]), *row.get("_aliases", [])]
+                for document in [
+                    address_words(row["city"] + " " + row["street"]),
+                    query_name_words(row["city"] + " " + row["street"]),
+                    *row.get("_aliases", []),
+                ]
             )
             if score >= self.minimum_similarity:
                 scored.append((score, row))
         scored.sort(key=lambda v: (-v[0], v[1]["id"]))
+        if not any(score == 1 for score, row in scored) and self.has_exact_location(query):
+            return {
+                "status": "not_found",
+                "data": {},
+                "engine": "v2",
+                "fallback_rejected": "known_street_without_requested_house",
+            }
         if not scored:
             return {"status": "not_found", "data": {}, "engine": "v2"}
         best = scored[0][0]
@@ -353,6 +412,9 @@ class Catalog:
                 close = [row for row in close if row["id"] in coded]
             else:
                 return {"status": "no_codes_ambiguous", "data": {}, "engine": "v2"}
+        exact = [row for row in close if any(full_name_match(variant, row) for variant in variants)]
+        if exact:
+            close = exact
         if len(close) > 1:
             return {
                 "status": "ambiguous",
@@ -364,7 +426,11 @@ class Catalog:
                 ],
                 "candidate_count": len(close),
             }
-        return self.answer(close[0], query.entrance)
+        answer = self.answer(close[0], query.entrance)
+        if answer["status"] == "no_codes" and best < 1:
+            # A merely similar empty house must not become a confident address.
+            return {"status": "no_codes_ambiguous", "data": {}, "engine": "v2"}
+        return answer
 
 
 MAPPING = {

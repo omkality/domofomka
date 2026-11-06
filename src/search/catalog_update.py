@@ -61,7 +61,10 @@ def migrate(dsn: str, patch: dict, reverse: bool = False) -> dict:
         # Проверка внешних ключей при объединении домов иначе перечитывает миллион
         # строк для каждого удаляемого ID. Индексы нужны только этой транзакции;
         # после операции они удаляются и не занимают диск постоянно.
-        for table in ("provenance", "alias_search"):
+        indexed_references = (
+            ("provenance", "alias_search") if any(pair[after] is None for pair in changes.get("buildings", [])) else ()
+        )
+        for table in indexed_references:
             db.execute(
                 sql.SQL("CREATE INDEX {} ON {} (building_id)").format(
                     sql.Identifier("catalog_patch_" + table + "_building"), sql.Identifier(table)
@@ -93,6 +96,13 @@ def migrate(dsn: str, patch: dict, reverse: bool = False) -> dict:
                 for pair in pairs:
                     candidate = pair[before] if pair[before] is not None else pair[after]
                     copy.write_row([candidate[i] for i in indexes])
+            db.execute(
+                sql.SQL("CREATE UNIQUE INDEX ON {} ({})").format(
+                    sql.Identifier(keys_name), sql.SQL(",").join(map(sql.Identifier, keys))
+                )
+            )
+            for temporary in (expected_name, keys_name):
+                db.execute(sql.SQL("ANALYZE {}").format(sql.Identifier(temporary)))
             current = sql.SQL("SELECT {} FROM {} a JOIN {} k USING ({})").format(
                 sql.SQL(",").join(sql.SQL("a.{}").format(sql.Identifier(c)) for c in columns),
                 sql.Identifier(table),
@@ -151,10 +161,9 @@ def migrate(dsn: str, patch: dict, reverse: bool = False) -> dict:
                     ) as copy:
                         for row in rows:
                             copy.write_row(row)
-        db.execute(
-            """DELETE FROM entrances e WHERE NOT EXISTS(
-                SELECT 1 FROM codes c WHERE c.building_id=e.building_id AND c.entrance=e.number)"""
-        )
+        if changes.get("codes"):
+            db.execute("""DELETE FROM entrances e WHERE NOT EXISTS(
+                    SELECT 1 FROM codes c WHERE c.building_id=e.building_id AND c.entrance=e.number)""")
         for table in ("buildings", "streets"):
             for pair in changes.get(table, []):
                 if pair[after] is None:
@@ -172,7 +181,7 @@ def migrate(dsn: str, patch: dict, reverse: bool = False) -> dict:
             actual = db.execute(query).fetchone()[0]
             if actual != count:
                 raise ValueError("Catalog row count differs from review")
-        for table in ("provenance", "alias_search"):
+        for table in indexed_references:
             db.execute(sql.SQL("DROP INDEX {}").format(sql.Identifier("catalog_patch_" + table + "_building")))
     return {"changed": True, "revision": target}
 

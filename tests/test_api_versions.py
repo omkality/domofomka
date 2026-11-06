@@ -83,3 +83,36 @@ def test_v2_keeps_opaque_legacy_numbering_compatibility(monkeypatch, tmp_path, q
         result = client.get("/api/v2/codes/msg", params={"message": query}).json()
         assert result["status"] == "found"
         assert result["address"] == address
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["Набережная улица 19", "Набережная 19"])
+async def test_empty_lexical_result_with_house_still_uses_compatible_v1(monkeypatch, query):
+    class EmptyCatalog:
+        def resolve(self, message: str, candidates: list[dict] | None = None):
+            return {"status": "incomplete_query", "data": {}, "engine": "v2"}
+
+    async def legacy(message):
+        return {"address": "Долгопрудный, улица Набережная, дом 19", "data": {"1": [["CODE", "test"]]}}
+
+    monkeypatch.setattr(settings, "opensearch_url", None)
+    monkeypatch.setattr(v2, "get_catalog", EmptyCatalog)
+    monkeypatch.setattr(v2, "get_data_from_db", legacy)
+    result = await v2.uncached_lookup(query)
+    assert result["status"] == "found"
+    assert result["engine"] == "v1"
+
+
+@pytest.mark.asyncio
+async def test_incomplete_address_does_not_reinterpret_an_area_number_as_a_house(monkeypatch):
+    class EmptyCatalog:
+        def resolve(self, message: str, candidates: list[dict] | None = None):
+            return {"status": "incomplete_query", "data": {}, "engine": "v2"}
+
+    async def forbidden(message):
+        raise AssertionError("A house number was not supplied")
+
+    monkeypatch.setattr(settings, "opensearch_url", None)
+    monkeypatch.setattr(v2, "get_catalog", EmptyCatalog)
+    monkeypatch.setattr(v2, "get_data_from_db", forbidden)
+    assert (await v2.uncached_lookup("квартал 114А"))["status"] == "incomplete_query"

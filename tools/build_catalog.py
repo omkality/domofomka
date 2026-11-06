@@ -156,7 +156,6 @@ def normalize_keys(db: sqlite3.Connection) -> None:
     normalize_house_keys(db)
 
 
-
 def index_streets(db: sqlite3.Connection) -> None:
     db.execute("DELETE FROM streets")
     db.execute("DELETE FROM search")
@@ -167,7 +166,7 @@ def index_streets(db: sqlite3.Connection) -> None:
                 hashlib.sha256((city + "\0" + street).encode()).hexdigest()[:32],
                 city,
                 street,
-                address_words(city + " " + street),
+                " ".join((city + " " + street).split()),
             )
             for city, street in rows
         ]

@@ -201,6 +201,94 @@ STOP.extend(
     ]
 )
 
+# These can be either address labels or words in an official name. Preserve
+# them separately from compatibility tokens; a candidate must explain them.
+NAME_LABELS = frozenset(
+    [
+        "набережная",
+        "наб",
+        "деревня",
+        "жилой",
+        "комплекс",
+        "массив",
+        "военный",
+        "городок",
+        "квартал",
+        "микрорайон",
+        "мкр",
+        "мкрн",
+        "территория",
+        "тер",
+        "тракт",
+        "тупик",
+        "туп",
+        "аллея",
+        "ал",
+        "площадь",
+        "пл",
+        "бульвар",
+        "проспект",
+        "проезд",
+        "шоссе",
+    ]
+)
+
+
+def indexed_name_words(city: str, street: str) -> str:
+    """Structured keys already contain names, not free-form query syntax."""
+    return " ".join((city + " " + street).split())
+
+
+def query_name_words(value: str) -> str:
+    # A locality label before an explicit street field is syntax. The same
+    # word after it (or without a street field) can belong to the name.
+    marker = re.search(r"\b(?:улица|ул|проспект|пр-кт|переулок|пер|проезд|пр-д|шоссе|бульвар)\b", value)
+    if marker:
+        prefix = re.sub(
+            r"\b(?:деревня|жилой|комплекс|массив|микрорайон|мкрн?|территория)\b", " ", value[: marker.start()]
+        )
+        value = prefix + value[marker.start() :]
+    noise = set(STOP) - NAME_LABELS
+    return " ".join(w for w in text(value, preserve_unicode_letters=True).split() if w not in noise)
+
+
+def protect_numbered_area(value: str) -> tuple[str, dict[str, str]]:
+    """Keep a numbered quarter/microdistrict out of the house-number matcher."""
+    marker = r"(?:квартал|кв[.-]л|микрорайон|мкрн?\.?)"
+    number = r"\d+[а-яa-z]?"
+    saved = {}
+
+    def replace(match: re.Match) -> str:
+        prefix = match.string[: match.start()]
+        if re.search(r"\b(?:улица|ул|переулок|пер|проезд|пр-д)\b", prefix):
+            # In «улица Северный Квартал, 20» the word is part of the street name.
+            return match[0]
+        if re.search(r"(?:__area_\d+__|\b(?:дом|д)\.?)[\s,]*$", prefix):
+            return match[0]
+        if match[0].startswith(("квартал", "кв", "микрорайон", "мкр")) and re.search(
+            r"\b[а-я]+(?:ый|ий|ой|ая|яя|ое|ее)[\s,]*$", prefix
+        ):
+            # A postfix type belongs to its named area: «Северный квартал, 3».
+            return match[0]
+        raw = match["number"]
+        if not match[0].startswith(("квартал", "кв", "микрорайон", "мкр")):
+            raw = re.sub(r"[йя]$", "", raw)
+        token = f"__area_{len(saved)}__"
+        saved[token] = raw
+        start, end = match.span("number")
+        tail = match[0][end - match.start() :]
+        if not match[0].startswith(("квартал", "кв", "микрорайон", "мкр")):
+            tail = re.sub(r"^-?(?:ая|я|й|ый|ой)\s*", " ", tail)
+        return match[0][: start - match.start()] + " " + token + " " + tail
+
+    value = re.sub(rf"(?<![\w/-])(?P<number>{number})\s*(?:-?(?:ая|я|й|ый|ой)\s*)?(?={marker}\b)", replace, value)
+    value = re.sub(
+        rf"\b{marker}\s*(?P<number>{number})(?=\s|[,;]|$|[кс]\s*\d|корп|строен|стр\.)",
+        replace,
+        value,
+    )
+    return value, saved
+
 
 def address_words(value: str, *, preserve_unicode_letters: bool = False) -> str:
     return " ".join(w for w in text(value, preserve_unicode_letters=preserve_unicode_letters).split() if w not in STOP)
@@ -246,6 +334,8 @@ class Query:
     entrance: str | None
     kind: str | None = None
     search_text: str = ""
+    name_words: str = ""
+    quarter: str | None = None
 
 
 def building_kind_matches(query: Query, row: dict) -> bool:
@@ -254,8 +344,16 @@ def building_kind_matches(query: Query, row: dict) -> bool:
     display_kind = street_kind(row["display"].removeprefix(row["city"] + ", ").split(" ", 1)[0])
     if display_kind == query.kind:
         return True
+    # Generic «улица» is often prepended to an explicitly named highway/avenue.
+    # The candidate must still explain every meaningful name token separately.
+    if (
+        query.kind == "ул"
+        and display_kind in {"ш", "пркт", "проезд", "пер", "б-р", "пл"}
+        and any(street_kind(word) == display_kind for word in re.findall(r"[а-я]+(?:-[а-я]+)?", query.raw))
+    ):
+        return True
     # «Большая Набережная» can be an official street name; a shared type word alone is insufficient.
-    return query.kind in {street_kind(word) for word in row["street"].split()} and (
+    return query.kind in {street_kind(word) for word in text(row["street"]).split()} and (
         " " + text(row["street"]) + " " in " " + text(query.raw) + " "
     )
 
@@ -265,6 +363,7 @@ def parse_query(value: str, *, preserve_lexical_ordinals: bool = False) -> Query
     value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е").translate(DASHES)
     # Country is a structured prefix, while «Российская» can be a street name.
     value = re.sub(r"^\s*российская\s+федерация\b[\s,;]*", "", value)
+    value, area_numbers = protect_numbered_area(value)
     # Separate an attached house number, but preserve 62к1 / 4с2 components.
     value = re.sub(
         r"(?<=[а-яa-z])(?=\d)",
@@ -289,6 +388,13 @@ def parse_query(value: str, *, preserve_lexical_ordinals: bool = False) -> Query
         markers.extend(re.finditer(r"\b(?:квартал|кв-л)\b", value))
         markers.sort(key=lambda marker: marker.start())
     kind = street_kind(markers[-1][0]) if markers else None
+    explicit_street = next((marker for marker in markers if street_kind(marker[0]) == "ул"), None)
+    if explicit_street:
+        kind = "ул"
+    if area_numbers:
+        last_area = max(value.index(marker) for marker in area_numbers)
+        if not markers or markers[-1].start() < last_area:
+            kind = "квартал" if re.search(r"\b(?:квартал|кв[.-]л)\b", value) else "мкр"
     if markers:
         from src.search.localities import clean_structured_prefix
 
@@ -306,13 +412,19 @@ def parse_query(value: str, *, preserve_lexical_ordinals: bool = False) -> Query
     value = re.sub(r"(?<=\d)([кс])\s*-\s*(?=\d)", r"\1", value)
     # Last number is the building: numeric street names (1905 года, 1-я) stay in words.
     candidates = list(re.finditer(HOUSE_PATTERN, value))
+    if area_numbers:
+        candidates.extend(re.finditer(rf"(?<![\w/-])с\s*{HOUSE_RANGE}(?![\w/-])", value))
+        candidates.sort(key=lambda match: match.start())
 
     def unmark(words: str, lexical: bool = False) -> str:
-        return re.sub(
+        words = re.sub(
             r"__ordinal_(\d+)(?:_\d+)?__",
             lambda m: lexical_forms.get(m[0], m[1]) if lexical and lexical_forms is not None else m[1],
             words,
         )
+        for marker, number in area_numbers.items():
+            words = words.replace(marker, number)
+        return words
 
     if not candidates:
         return Query(
@@ -322,19 +434,36 @@ def parse_query(value: str, *, preserve_lexical_ordinals: bool = False) -> Query
             entrance,
             kind,
             unmark(value, lexical=True),
+            query_name_words(unmark(value)),
+            next(iter(area_numbers.values()), None),
         )
     match = candidates[-1]
     house = house_key(match[0])
+    if area_numbers and re.fullmatch(r"[кс]\d+[а-яa-z]?", house) and not explicit_street:
+        kind = "квартал" if re.search(r"\b(?:квартал|кв[.-]л)\b", value) else "мкр"
     lexical = value[: match.start()] + " " + value[match.end() :]
     search_text = unmark(lexical, lexical=True)
     words = address_words(unmark(lexical))
-    return Query(unmark(value), words, house, entrance, kind, search_text)
+    return Query(
+        unmark(value),
+        words,
+        house,
+        entrance,
+        kind,
+        search_text,
+        query_name_words(unmark(lexical)),
+        next(iter(area_numbers.values()), None),
+    )
 
 
 def legacy_house_matches(message: str, address: str) -> bool:
     query = parse_query(message)
     requested = query.house
     returned = house_key(address.rsplit(", дом ", 1)[-1])
+    if query.quarter and not requested:
+        return False
+    if query.quarter and query.quarter not in text(address.rsplit(", дом ", 1)[0]).split():
+        return False
     if not requested or requested == returned:
         return True
     # Neither legacy whitespace folding nor an opaque-number exception may join a range.

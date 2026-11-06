@@ -6,7 +6,7 @@ import time
 from functools import lru_cache
 
 from src.search.engine import Catalog
-from src.search.normalize import ORDINALS, TENS, ordinals
+from src.search.normalize import NAME_LABELS, ORDINALS, STOP, TENS, ordinals
 
 
 def exact_text_match(tokens, row, aliases=()):
@@ -91,9 +91,11 @@ def extend_analysis(definition: dict) -> None:
             *[rule for rule in ordinal_rules() if ordinals(rule.split(" => ")[0]) == rule.split(" => ")[1]],
         ],
     }
+    analysis["filter"]["name_noise"] = {"type": "stop", "stopwords": sorted(set(STOP) - NAME_LABELS)}
     for analyzer, filters in {
         "ordinal_graph": ["lowercase", "address_graph", "address_stop"],
         "ordinal_graph_shared": ["lowercase", "address_graph_shared", "address_stop"],
+        "ordinal_names": ["lowercase", "address_graph", "name_noise"],
         "ordinal_graph_stem": ["lowercase", "address_graph", "address_stop", "russian_stemmer"],
     }.items():
         analysis["analyzer"][analyzer] = {
@@ -201,6 +203,16 @@ def profiles() -> list[dict]:
         values.append(
             dict(guarded, name=f"scoring.{policy}-AUTO-r{ratio}", ratio=ratio, known_street_guard=known_guard)
         )
+    values.append(
+        dict(
+            guarded,
+            name="verified.names-AUTO-r1.0",
+            known_street_guard=False,
+            scoped_street_guard=True,
+            preserve_names=True,
+            catalog_fallback=True,
+        )
+    )
     return values
 
 

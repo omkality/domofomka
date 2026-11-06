@@ -13,17 +13,18 @@ import json
 import re
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
 from rapidfuzz.distance import DamerauLevenshtein
 
+from src.search.constraints import legacy_result_matches, name_constraints_match
 from src.search.engine import MAPPING, Catalog, documents, search_body
 from src.search.normalize import (
     STOP,
     address_words,
     building_kind_matches,
-    legacy_house_matches,
     parse_query,
 )
 from tools import (
@@ -212,6 +213,8 @@ def query_text(message, variant):
     source = variant.get("text_source")
     query = parse_query(message, preserve_lexical_ordinals=source in {"lexical", "expanded_words"})
     lexical_text = query.words if source == "words" else query.search_text
+    if source == "names":
+        lexical_text = query.name_words
     if source in {"unicode_words", "expanded_words"}:
         if source == "expanded_words":
             lexical_text = search_lexical_profiles.expanded_ordinals(lexical_text)
@@ -387,6 +390,8 @@ def analysis_probes(client, index):
 
 def native_result(catalog, message, hits, ratio, *, query_numbers=None, exact_tokens=None, require_exact=False):
     query = parse_query(message)
+    if not query.words and query.name_words:
+        query = replace(query, words=query.name_words)
     if not query.house or not query.words:
         return {"status": "incomplete_query", "data": {}}
     scores = {hit["_id"]: hit["_score"] for hit in hits}
@@ -402,22 +407,30 @@ def native_result(catalog, message, hits, ratio, *, query_numbers=None, exact_to
     }
     rows = catalog.load_candidates(list(scores), query.house)
     eligible = []
-    query_numbers = {word for word in query.words.split() if word.isdigit()} if query_numbers is None else query_numbers
+
+    def numeric(word):
+        return any(char.isdigit() for char in word)
+
+    query_numbers = {word for word in query.words.split() if numeric(word)} if query_numbers is None else query_numbers
     for row in rows:
         if row["house"] != query.house:
             continue
         sid = hashlib.sha256((row["city_key"] + "\0" + row["street_key"]).encode()).hexdigest()[:32]
         hit = hit_by_id.get(sid, {})
         alias_hits = hit.get("inner_hits", {}).get("aliases", {}).get("hits", {})
+        matching = [a["_source"] for a in alias_hits.get("hits", []) if a["_source"]["building_id"] == row["id"]]
+        if not name_constraints_match(query, row, [alias["street"] for alias in matching]):
+            continue
         if alias_hits and "canonical" not in hit.get("matched_queries", []):
-            matching = [a["_source"] for a in alias_hits["hits"] if a["_source"]["building_id"] == row["id"]]
             if not matching:
                 continue
             street = matching[0]["street"]
+            document = matching[0].get("words", row["city"] + " " + street)
         else:
             street = row["street"]
-        street_numbers = {word for word in address_words(street).split() if word.isdigit()}
-        all_numbers = {word for word in address_words(row["city"] + " " + row["street"]).split() if word.isdigit()}
+            document = row["city"] + " " + street
+        street_numbers = {word for word in address_words(street).split() if numeric(word)}
+        all_numbers = {word for word in address_words(document).split() if numeric(word)}
         if not street_numbers <= query_numbers or not query_numbers <= all_numbers:
             continue
         if not building_kind_matches(query, row):
@@ -461,7 +474,10 @@ def native_result(catalog, message, hits, ratio, *, query_numbers=None, exact_to
         else:
             return {"status": "no_codes_ambiguous", "data": {}}
     if len(close) == 1:
-        return catalog.answer(close[0], query.entrance)
+        answer = catalog.answer(close[0], query.entrance)
+        if answer["status"] == "no_codes" and not precise and not any(sid in exact for sid, _ in eligible):
+            return {"status": "no_codes_ambiguous", "data": {}}
+        return answer
     return {
         "status": "ambiguous",
         "data": {},
@@ -549,13 +565,16 @@ def reviewed_conflict(case, result, catalog):
 
 
 def search_variant(catalog, message, variant, search, analyze=None):
+    parsed = parse_query(message)
+    if variant.get("preserve_names") and not parsed.words and parsed.name_words:
+        variant = dict(variant, text_source="names", analyzer="ordinal_names")
     numbers = None
     tokens = None
     if variant["mode"] == "lexical":
         if analyze is None:
             raise ValueError("Lexical profiles require actual analyzer tokens for number constraints")
         tokens = analyze(query_text(message, variant)[1], variant["analyzer"])
-        numbers = {token for token in tokens if token.isdigit()}
+        numbers = {token for token in tokens if any(char.isdigit() for char in token)}
     guarded = bool(variant.get("role_policy"))
     budget = None
     if guarded:
@@ -579,6 +598,7 @@ def search_variant(catalog, message, variant, search, analyze=None):
         search_body(message) if variant["mode"] == "hybrid" else native_body(message, variant, analyzed_tokens=tokens)
     )
     known = False
+    scoped = bool(variant.get("scoped_street_guard") and catalog.has_exact_location(parsed))
     if variant["mode"] in {"structured", "aliases", "lexical"}:
         exact_variant = dict(variant, fuzziness="0", minimum="100%")
         exact_body = native_body(message, exact_variant, analyzed_tokens=tokens)
@@ -611,13 +631,35 @@ def search_variant(catalog, message, variant, search, analyze=None):
         variant["ratio"],
         query_numbers=numbers,
         exact_tokens=set(tokens) if variant.get("decision") == "exact_tokens" else None,
-        require_exact=known,
+        require_exact=known or scoped,
     )
     if guarded:
         result["query_budget"] = budget
-        if known and result["status"] == "not_found":
+        if (known or scoped) and result["status"] == "not_found":
             result["fallback_rejected"] = "known_street_without_requested_house"
+    if (
+        variant.get("catalog_fallback")
+        and result["status"] in {"not_found", "incomplete_query", "no_codes_ambiguous"}
+        and parsed.house
+    ):
+        # Catalog applies the same exact-house, name and scoped-location checks.
+        result = catalog.resolve(message)
     return result
+
+
+def legacy_exact_match(message, address, variant, analyze):
+    fields = address_fields(address)
+    row = dict(fields, display=address, guid=None)
+    if not building_kind_matches(parse_query(message), row):
+        return False
+    tokens = set(analyze(query_text(message, variant)[1], variant["analyzer"]))
+    parts = [fields["street"], fields["city"] + " " + fields["street"]]
+    if variant["text_source"] == "expanded_words":
+        parts = [
+            address_words(search_lexical_profiles.expanded_ordinals(part.casefold()), preserve_unicode_letters=True)
+            for part in parts
+        ]
+    return tokens in [set(analyze(part, variant["analyzer"])) for part in parts]
 
 
 def resume_rows(
@@ -836,32 +878,14 @@ def run(args):
                         except ValueError:
                             backend_error["response"] = exc.response.text[:2000]
                     result = {"status": "backend_error", "data": {}}
-            if result["status"] == "not_found" and old and legacy_house_matches(case["query"], old):
+            recoverable = result["status"] == "incomplete_query" and bool(parse_query(case["query"]).house)
+            if (result["status"] == "not_found" or recoverable) and old and legacy_result_matches(case["query"], old):
                 allowed = True
                 if result.get("fallback_rejected") == "known_street_without_requested_house":
-                    try:
-                        fields = address_fields(old)
-                        old_row = dict(fields, display=old)
-                        old_row["guid"] = None
-                        allowed = building_kind_matches(parse_query(case["query"]), old_row)
-                        query_tokens = set(analyze(query_text(case["query"], variant)[1], variant["analyzer"]))
-                        old_parts = [fields["street"], fields["city"] + " " + fields["street"]]
-                        old_token_sets = []
-                        for part in old_parts:
-                            normalized_part = part
-                            if variant["text_source"] == "expanded_words":
-                                normalized_part = address_words(
-                                    search_lexical_profiles.expanded_ordinals(part.casefold()),
-                                    preserve_unicode_letters=True,
-                                )
-                            old_token_sets.append(set(analyze(normalized_part, variant["analyzer"])))
-                        allowed = allowed and query_tokens in old_token_sets
-                    except (ValueError, KeyError):
-                        allowed = False
-                    except httpx.HTTPError as exc:
-                        allowed = False
-                        backend_error = {"type": type(exc).__name__}
-                        result = {"status": "backend_error", "data": {}}
+                    if variant.get("scoped_street_guard") or variant["mode"] == "catalog":
+                        allowed = legacy_result_matches(case["query"], old, whole_location=True)
+                    else:
+                        allowed = legacy_exact_match(case["query"], old, variant, analyze)
                 if allowed:
                     result = {"status": "found", "engine": "v1", "address": old, "data": {}}
             elapsed = (time.perf_counter() - started) * 1000

@@ -12,7 +12,9 @@ from src.api.config import settings
 from src.api.routes import get_dadata_client
 from src.api.telemetry import observed
 from src.network import tls_context
+from src.search.constraints import legacy_result_matches
 from src.search.engine import Catalog, search_body
+from src.search.normalize import parse_query
 from src.services.codes import get_data_from_db
 from src.telemetry import note, search_result, span
 
@@ -121,6 +123,7 @@ async def lookup(message: str) -> dict:
 
 async def uncached_lookup(message: str) -> dict:
     reason = None
+    whole_location = False
     try:
         catalog = get_catalog()
         candidates = None
@@ -146,8 +149,6 @@ async def uncached_lookup(message: str) -> dict:
                     result = response.json()
                     ids = [r["_id"] for r in result["hits"]["hits"]]
 
-                    from src.search.normalize import parse_query
-
                     candidates = (
                         await asyncio.to_thread(catalog.load_candidates, ids, parse_query(message).house)
                         if ids
@@ -167,18 +168,18 @@ async def uncached_lookup(message: str) -> dict:
             result = await asyncio.to_thread(catalog.resolve, message, candidates)
             detail["result"] = search_result(result)
         note(result=search_result(result))
-        if result["status"] != "not_found":
+        recoverable_incomplete = result["status"] == "incomplete_query" and bool(parse_query(message).house)
+        if result["status"] != "not_found" and not recoverable_incomplete:
             return result
-        reason = "not_found"
+        whole_location = result.get("fallback_rejected") == "known_street_without_requested_house"
+        reason = result["status"]
     except Exception as exc:
         logger.warning("V2 unavailable error=%s; using legacy search", type(exc).__name__)
         reason = "unavailable"
     result = await get_data_from_db(message)
     note(search_fallback_reason=reason)
     if result.get("data"):
-        from src.search.normalize import legacy_house_matches
-
-        if not legacy_house_matches(message, result.get("address", "")):
+        if not legacy_result_matches(message, result.get("address", ""), whole_location=whole_location):
             rejected = {
                 "status": "not_found",
                 "engine": "v2",
