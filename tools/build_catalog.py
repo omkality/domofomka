@@ -87,6 +87,25 @@ def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict) -> None:
     db.commit()
 
 
+def normalize_keys(db: sqlite3.Connection) -> None:
+    # Reapply the current normalizer to unique pairs, not to 35 million rows.
+    # Completed regional imports remain reusable after a normalization fix.
+    pairs = db.execute("SELECT city_key,street_key FROM buildings GROUP BY city_key,street_key").fetchall()
+    for city, street in pairs:
+        normalized = (text(city), text(street))
+        if normalized != (city, street):
+            db.execute(
+                "UPDATE buildings SET city_key=?,street_key=? WHERE city_key=? AND street_key=?",
+                (*normalized, city, street),
+            )
+    aliases = db.execute("SELECT * FROM aliases").fetchall()
+    db.execute("DELETE FROM aliases")
+    db.executemany(
+        "INSERT OR IGNORE INTO aliases VALUES(?,?,?,?)",
+        [(id, text(city), text(street), house) for id, city, street, house in aliases],
+    )
+
+
 def index_streets(db: sqlite3.Connection) -> None:
     db.execute("DELETE FROM streets")
     db.execute("DELETE FROM search")
@@ -126,6 +145,7 @@ def build(legacy: Path, regions: Path, output: Path):
     db.executescript(
         "CREATE INDEX building_lookup ON buildings(street_key,house); CREATE INDEX building_street ON buildings(city_key,street_key,house);"
     )
+    normalize_keys(db)
     link_codes(db, legacy, stats)
     index_streets(db)
     stats["street_documents"] = db.execute("SELECT count(*) FROM streets").fetchone()[0]
@@ -157,6 +177,7 @@ def relink(legacy: Path, output: Path) -> None:
     )
     for k in ["legacy_rows", "linked_groups", "unresolved_groups", "ambiguous_groups"]:
         stats[k] = 0
+    normalize_keys(db)
     link_codes(db, legacy, stats)
     index_streets(db)
     stats["street_documents"] = db.execute("SELECT count(*) FROM streets").fetchone()[0]
@@ -176,8 +197,14 @@ if __name__ == "__main__":
     p.add_argument("--regions", type=Path, default=Path("artifacts/catalog"))
     p.add_argument("--output", type=Path, default=Path("artifacts/search/catalog.db"))
     p.add_argument("--relink-only", action="store_true")
+    p.add_argument("--refresh-keys-only", action="store_true")
     a = p.parse_args()
-    if a.relink_only:
+    if a.refresh_keys_only:
+        with sqlite3.connect(a.output) as db:
+            normalize_keys(db)
+            index_streets(db)
+        print(json.dumps({"keys_refreshed": True}), flush=True)
+    elif a.relink_only:
         relink(a.legacy, a.output)
     else:
         build(a.legacy, a.regions, a.output)

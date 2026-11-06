@@ -15,6 +15,9 @@ from tools.build_catalog import SCHEMA
         ("МСК Перерва д. 62 корпус 1", "москва перерва", "62к1", None),
         ("Первая Парковая, дом 3", "1 парковая", "3", None),
         ("Восьмая Советская 2", "8 советская", "2", None),
+        ("Третья Парковая 3", "3 парковая", "3", None),
+        ("Двадцать третья улица 6", "23", "6", None),
+        ("улица Третьего Интернационала 1", "3 интернационала", "1", None),
         ("Десятая Парковая дом 4", "10 парковая", "4", None),
         ("Двадцать первая улица 6", "21", "6", None),
         ("улица 1905 года 3", "1905 года", "3", None),
@@ -159,3 +162,30 @@ def test_misaligned_legacy_city_and_street_do_not_become_an_automatic_v2_answer(
         "lineage": "",
     }
     assert catalog.resolve("Парнас Заречная 33", [corrupt])["status"] == "not_found"
+
+
+def test_reused_regional_keys_follow_the_updated_normalizer(catalog):
+    from tools.build_catalog import index_streets, normalize_keys
+
+    with sqlite3.connect(catalog.path) as db:
+        db.execute(
+            "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                "third",
+                "third",
+                "Москва, улица Третья Парковая, дом 3",
+                "Москва",
+                "Третья Парковая",
+                "3",
+                "третья парковая",
+                "москва",
+                "77",
+                "москва",
+            ),
+        )
+        db.execute("INSERT INTO codes VALUES('third','1','test','CODE')")
+        db.execute("INSERT INTO aliases VALUES('third','москва','третья парковая','3')")
+        normalize_keys(db)
+        index_streets(db)
+    assert catalog.resolve("Москва третья парковая 3")["building_id"] == "third"
+    assert catalog.resolve("Москва 3-я парковая 3")["building_id"] == "third"

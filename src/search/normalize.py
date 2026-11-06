@@ -45,6 +45,7 @@ TENS = {
 
 
 def ordinals(value: str) -> str:
+    value = re.sub(r"\bтреть(?:я|е|его|ей|ю|ем|и|их)\b", "третий", value)
     roots = "|".join(sorted(ORDINALS, key=len, reverse=True))
     pattern = rf"\b(?:({'|'.join(TENS)})\s+)?({roots})(?:ый|ий|ой|ая|яя|ое|ее|ого|его|ой|ей|ую|юю|ом|ем|ых|их)\b"
 
