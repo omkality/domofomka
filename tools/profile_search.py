@@ -5,18 +5,17 @@ import collections.abc
 import concurrent.futures
 import json
 import time
-from datetime import timedelta
 
-from pyreqwest.client import SyncClientBuilder
+import httpx
 
 
 def measure(url: str, version: str, queries: collections.abc.Iterable[str], workers: int) -> dict:
     def request(query: str) -> tuple:
-        with SyncClientBuilder().no_proxy().timeout(timedelta(seconds=30)).build() as client:
+        with httpx.Client(trust_env=False, timeout=30) as client:
             started = time.perf_counter()
-            response = client.get(f"{url}/api/{version}/codes/msg").query({"message": query}).build().send()
+            response = client.get(f"{url}/api/{version}/codes/msg", params={"message": query})
             data = response.json()
-            return response.status, round((time.perf_counter() - started) * 1000, 3), bool(data.get("data"))
+            return response.status_code, round((time.perf_counter() - started) * 1000, 3), bool(data.get("data"))
 
     values = list(queries)
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:

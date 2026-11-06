@@ -1,14 +1,13 @@
 """Plan durable responses separately from sending them to VK."""
 
+import asyncio
 import json
 import threading
 import time
-from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from pyreqwest.client import SyncClientBuilder
-from pyreqwest.exceptions import PyreqwestError
+import httpx
 from vk_api import VkApi
 
 from src.network import network_settings
@@ -99,17 +98,28 @@ class Processor:
         self.settings = settings
         self.store = store
         self.vk = VkApi(token=settings.vk_group_token, api_version="5.199", session=RateSession(gate)).get_api()
-        self.http = (
-            SyncClientBuilder()
-            .no_proxy()
-            .connect_timeout(timedelta(seconds=network_settings.internal_api_connect_timeout_seconds))
-            .timeout(timedelta(seconds=network_settings.internal_api_timeout_seconds))
-            .build()
-        )
 
     def close(self) -> None:
-        self.http.close()
         self.vk._vk.http.close()
+
+    def _get(self, url: str, params: dict | None = None, *, timeout: float | None = None) -> httpx.Response:
+        total = timeout if timeout is not None else network_settings.internal_api_timeout_seconds
+
+        async def request() -> httpx.Response:
+            async with (
+                asyncio.timeout(total),
+                httpx.AsyncClient(
+                    trust_env=False,
+                    timeout=httpx.Timeout(
+                        total, connect=min(network_settings.internal_api_connect_timeout_seconds, total)
+                    ),
+                ) as client,
+            ):
+                return await client.get(url, params=params)
+
+        # Планирование выполняется в рабочем потоке. Один бюджет включает получение тела,
+        # а клиент закрывается до завершения его цикла событий.
+        return asyncio.run(request())
 
     def fault(self, name: str) -> None:
         if self.settings.dev_faults_enabled and self.store.consume_fault(name):
@@ -123,13 +133,14 @@ class Processor:
         url = f"http://{self.settings.domofomka_api_host}:{self.settings.domofomka_api_port}/api/{version}/codes"
         try:
             self.fault("api")
-            if geo:
-                pending = self.http.get(url + "/geo").query({"lat": geo["latitude"], "lon": geo["longitude"]})
-            else:
-                pending = self.http.get(url + "/msg").query({"message": message or ""})
+            params = {"lat": geo["latitude"], "lon": geo["longitude"]} if geo else {"message": message or ""}
             if active():
-                pending = pending.query({"observe": "true"})
-            response = pending.build().send()
+                params["observe"] = "true"
+            response = self._get(
+                url + ("/geo" if geo else "/msg"),
+                params,
+                timeout=network_settings.internal_api_geo_timeout_seconds if geo else None,
+            )
             try:
                 result = response.json()
             except (ValueError, TypeError):
@@ -140,10 +151,10 @@ class Processor:
                     merge(packet)
                 else:
                     note(api_measurements="missing")
-            if response.status != 200:
+            if response.status_code != 200:
                 raise LookupUnavailable("Lookup API returned an unsuccessful response")
             return result
-        except (PyreqwestError, TimeoutError):
+        except (httpx.HTTPError, TimeoutError):
             raise LookupUnavailable("Lookup API is temporarily unavailable") from None
 
     def plan(self, job: dict) -> None:
@@ -394,11 +405,8 @@ class Processor:
             base_url = f"http://{self.settings.domofomka_api_host}:{self.settings.domofomka_api_port}"
             url = base_url + "/api/v2/buildings/" + quote(building, safe="")
             with span("api.building_lookup"):
-                pending = self.http.get(url)
-                if active():
-                    pending = pending.query({"observe": "true"})
-                response = pending.build().send()
-            if response.status == 404:
+                response = self._get(url, {"observe": "true"} if active() else None)
+            if response.status_code == 404:
                 self.store.plan(
                     job,
                     [
@@ -414,7 +422,7 @@ class Processor:
                     ],
                 )
                 return
-            if response.status != 200:
+            if response.status_code != 200:
                 raise LookupUnavailable("Building lookup unavailable")
             answer = response.json()
             if active():

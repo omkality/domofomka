@@ -491,7 +491,7 @@ def test_late_page_cannot_restore_a_rejected_menu_before_delivery(store):
     store.ingest([reject])
     processor = object.__new__(Processor)
     processor.store = store
-    processor.http = MagicMock()
+    processor._get = MagicMock()
     processor.plan(store.claim("bot_inbox"))
     assert store.choices_closed(10, 12)
     # Context is still the delivered old menu until the rejection is delivered.
@@ -504,7 +504,7 @@ def test_late_page_cannot_restore_a_rejected_menu_before_delivery(store):
     store.finish(rejection, (12, rejection["context"]))
     assert store.message_context(10, 12)["status"] == "dismissed"
     assert store.claim("bot_outbox") is None
-    processor.http.get.assert_not_called()
+    processor._get.assert_not_called()
 
 
 def test_cooldown_starts_after_delivery_not_before_a_slow_request(store):

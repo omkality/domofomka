@@ -385,21 +385,18 @@ def test_text_lookup_failure_keeps_durable_retry_behavior(processor: Processor) 
     processor.store.plan.assert_not_called()
 
 
-def test_lookup_uses_pyreqwest_builder_and_internal_query(processor: Processor) -> None:
-    processor.http.close()
-    processor.http = MagicMock()
-    response = processor.http.get.return_value.query.return_value.build.return_value.send.return_value
-    response.status = 200
+def test_lookup_passes_internal_query_to_http_client(processor: Processor) -> None:
+    processor._get = MagicMock()
+    response = processor._get.return_value
+    response.status_code = 200
     response.json.return_value = {"address": "a", "data": {}}
     assert processor.lookup("address") == {"address": "a", "data": {}}
-    processor.http.get.assert_called_once_with("http://api:8000/api/v1/codes/msg")
-    processor.http.get.return_value.query.assert_called_once_with({"message": "address"})
+    processor._get.assert_called_once_with("http://api:8000/api/v1/codes/msg", {"message": "address"}, timeout=None)
 
 
 def test_lookup_status_failure_is_retryable_without_requests_dependency(processor: Processor) -> None:
-    processor.http.close()
-    processor.http = MagicMock()
-    processor.http.get.return_value.query.return_value.build.return_value.send.return_value.status = 503
+    processor._get = MagicMock()
+    processor._get.return_value.status_code = 503
     with pytest.raises(LookupUnavailable):
         processor.lookup(geo={"latitude": 1, "longitude": 2})
 
@@ -417,10 +414,9 @@ def test_ambiguous_choice_edits_the_same_message(processor: Processor, entrance_
     processor.store.message_context.return_value = {
         "candidates": [{"building_id": "gar:test", "address": "Known house"}]
     }
-    processor.http.close()
-    processor.http = MagicMock()
-    response = processor.http.get.return_value.build.return_value.send.return_value
-    response.status = 200
+    processor._get = MagicMock()
+    response = processor._get.return_value
+    response.status_code = 200
     response.json.return_value = {
         "address": "Known house",
         "data": {str(i): [["TEST", "test"]] for i in range(1, entrance_count + 1)},
@@ -523,15 +519,14 @@ def test_rejecting_addresses_clears_buttons_in_the_same_message(processor, conte
 @pytest.mark.parametrize("action", [{"dismiss_choices": True}, {"choice_page": 1}, {"select_building": 0}])
 @pytest.mark.parametrize("context", [{"status": "found", "data": {"3": []}}, {"data": {"3": []}}])
 def test_old_choice_ignores_completed_context_without_close_marker(processor, action, context):
-    processor.http.close()
-    processor.http = MagicMock()
+    processor._get = MagicMock()
     processor.store.message_context.return_value = context
     processor.store.choices_closed.return_value = False
     processor.plan(
         {"kind": "message_event", "peer_id": 100, "payload": {"conversation_message_id": 42, "payload": action}}
     )
     assert processor.store.plan.call_args.args[1] == []
-    processor.http.get.assert_not_called()
+    processor._get.assert_not_called()
 
 
 @pytest.mark.parametrize("action", [{"dismiss_choices": True}, {"choice_page": 1}, {"select_building": 0}])

@@ -2,14 +2,9 @@ import asyncio
 import logging
 import time
 import typing as tp
-from contextlib import AsyncExitStack
-from datetime import timedelta
 from urllib.parse import urlsplit
 
-from pyreqwest.client import ClientBuilder
-from pyreqwest.exceptions import ConnectError, ConnectTimeoutError
-from pyreqwest.proxy import ProxyBuilder
-from pyreqwest.simple.request import pyreqwest_post
+import httpx
 
 from src.network import network_settings
 from src.services.outbound import proxy_health
@@ -65,7 +60,7 @@ class DadataClient:
                             timeout_ms=self.timeout_seconds * 1000,
                         ):
                             result = await self._request(url, payload, True)
-                    except (ConnectError, ConnectTimeoutError):
+                    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ProxyError):
                         proxy_health.failed("dadata", self.proxy_url)
                     else:
                         proxy_health.succeeded("dadata", self.proxy_url)
@@ -89,26 +84,20 @@ class DadataClient:
             raise DadataUnavailable("Geocoding is temporarily unavailable") from None
 
     async def _request(self, url: str, payload: dict, use_proxy: bool) -> dict:
-        async with AsyncExitStack() as stack:
-            request = pyreqwest_post
-            if self.proxy_url:
-                builder = ClientBuilder()
-                builder = builder.proxy(ProxyBuilder.https(self.proxy_url)) if use_proxy else builder.no_proxy()
-                # Bound failed proxy connection setup, preserving the total deadline.
-                client = await stack.enter_async_context(
-                    builder.connect_timeout(timedelta(seconds=network_settings.dadata_connect_timeout_seconds)).build()
-                )
-                request = client.post
-            pending = (
-                request(url).headers(self.headers).body_json(payload).timeout(timedelta(seconds=self.timeout_seconds))
-            )
-            if self.proxy_url:
-                pending = pending.build()
-            response = await pending.send()
-            amend(http_status=response.status)
-            if response.status != 200:
+        async with httpx.AsyncClient(
+            proxy=self.proxy_url if use_proxy else None,
+            trust_env=False,
+            timeout=httpx.Timeout(
+                self.timeout_seconds,
+                connect=min(network_settings.dadata_connect_timeout_seconds, self.timeout_seconds),
+            ),
+            follow_redirects=True,
+        ) as client:
+            response = await client.post(url, headers=self.headers, json=payload)
+            amend(http_status=response.status_code)
+            if response.status_code != 200:
                 raise DadataUnavailable("Geocoding returned an unsuccessful response")
-            return await response.json()
+            return response.json()
 
     async def get_address_by_geo(self, lat: float, lon: float) -> str | None:
         houses = await self.geolocate(lat=lat, lon=lon)

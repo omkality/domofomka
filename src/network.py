@@ -1,5 +1,7 @@
 """Validated runtime tuning. Override defaults through .env or process environment."""
 
+import logging
+
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -38,5 +40,8 @@ class NetworkSettings(BaseSettings):
             raise ValueError("DaData connect timeout must fit within the total timeout")
         return self
 
+
+for _library in ("httpx", "httpcore"):
+    logging.getLogger(_library).setLevel(logging.WARNING)
 
 network_settings = NetworkSettings()

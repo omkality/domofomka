@@ -1,24 +1,22 @@
 """Build a new index then switch an alias atomically; never clear a live index."""
 
 import argparse
-import collections.abc  # noqa: F401 - initializes collections for pyreqwest 0.10 on Python 3.12.
 import json
 import time
-from datetime import timedelta
 
-from pyreqwest.client import SyncClientBuilder
+import httpx
 
 from src.search.engine import MAPPING, documents
 
 
 def index(path: str, url: str, alias: str):
     name = alias + "-" + str(time.time_ns())
-    with SyncClientBuilder().no_proxy().timeout(timedelta(seconds=120)).build() as client:
+    with httpx.Client(trust_env=False, timeout=120) as client:
 
         def request(method, path, body):
-            r = getattr(client, method)(url + path).body_json(body).build().send()
-            if r.status >= 300:
-                raise RuntimeError(f"OpenSearch {method} status={r.status}")
+            r = getattr(client, method)(url + path, json=body)
+            if r.status_code >= 300:
+                raise RuntimeError(f"OpenSearch {method} status={r.status_code}")
             return r.json()
 
         request("put", "/" + name, MAPPING)
@@ -33,14 +31,10 @@ def index(path: str, url: str, alias: str):
                 + "\n"
                 for d in batch
             )
-            r = (
-                client.post(url + "/_bulk")
-                .headers({"Content-Type": "application/x-ndjson"})
-                .body_bytes(data.encode("utf8"))
-                .build()
-                .send()
+            r = client.post(
+                url + "/_bulk", headers={"Content-Type": "application/x-ndjson"}, content=data.encode("utf8")
             )
-            if r.status != 200 or r.json().get("errors"):
+            if r.status_code != 200 or r.json().get("errors"):
                 raise RuntimeError("OpenSearch bulk failed; alias unchanged")
 
         for doc in documents(path):

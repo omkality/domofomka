@@ -2,11 +2,10 @@ import asyncio
 import hashlib
 import logging
 import threading
-from datetime import timedelta
 from pathlib import Path
 
+import httpx
 from litestar import Router, get
-from pyreqwest.client import ClientBuilder
 
 from src.api.cache import LookupCache
 from src.api.config import settings
@@ -127,27 +126,21 @@ async def uncached_lookup(message: str) -> dict:
         if settings.opensearch_url:
             try:
                 async with (
-                    ClientBuilder()
-                    .no_proxy()
-                    .timeout(timedelta(seconds=settings.opensearch_timeout_seconds))
-                    .build() as client
+                    asyncio.timeout(settings.opensearch_timeout_seconds),
+                    httpx.AsyncClient(trust_env=False, timeout=settings.opensearch_timeout_seconds) as client,
                 ):
-                    response = (
-                        await client.post(settings.opensearch_url + "/" + settings.opensearch_index + "/_search")
-                        .body_json(
-                            search_body(
-                                message,
-                                settings.search_candidate_limit,
-                                fuzziness=settings.opensearch_fuzziness,
-                                prefix_length=settings.opensearch_prefix_length,
-                            )
-                        )
-                        .build()
-                        .send()
+                    response = await client.post(
+                        settings.opensearch_url + "/" + settings.opensearch_index + "/_search",
+                        json=search_body(
+                            message,
+                            settings.search_candidate_limit,
+                            fuzziness=settings.opensearch_fuzziness,
+                            prefix_length=settings.opensearch_prefix_length,
+                        ),
                     )
-                    if response.status != 200:
+                    if response.status_code != 200:
                         raise RuntimeError("Search index unavailable")
-                    result = await response.json()
+                    result = response.json()
                     ids = [r["_id"] for r in result["hits"]["hits"]]
 
                     from src.search.normalize import parse_query

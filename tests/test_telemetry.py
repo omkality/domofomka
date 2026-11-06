@@ -6,8 +6,8 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from httpx import ConnectError
 from litestar.testing import TestClient
-from pyreqwest.exceptions import ConnectError
 from requests import Response, Session
 from requests.exceptions import ProxyError
 
@@ -154,7 +154,7 @@ def test_api_failed_geo_keeps_diagnostic_packet(observed_api, monkeypatch):
 def test_dadata_attempts_record_proxy_failure_then_direct_success(monkeypatch):
     proxy_health.routes.clear()
     monkeypatch.setattr(DadataClient, "_unavailable_until", 0)
-    request = AsyncMock(side_effect=[ConnectError("secret proxy", {}), {"suggestions": []}])
+    request = AsyncMock(side_effect=[ConnectError("secret proxy"), {"suggestions": []}])
     monkeypatch.setattr(DadataClient, "_request", request)
     with Capture() as capture:
         asyncio.run(DadataClient("SECRET", proxy_url="http://user:password@127.0.0.1:9999").geolocate(1, 2))

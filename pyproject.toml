@@ -14,7 +14,7 @@ api = [
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
     "psycopg[binary]>=3.3.6,<4",
-    "pyreqwest>=0.10.1",
+    "httpx>=0.28.1,<0.29",
     "rapidfuzz>=3.14,<4",
     "toml>=0.10.2",
 ]
@@ -30,7 +30,7 @@ vkbot = [
     "psycopg[binary]>=3.2.0,<4",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
-    "pyreqwest>=0.10.1",
+    "httpx>=0.28.1,<0.29",
     "requests>=2.32.5",
     "vk-api>=11.10.0",
 ]

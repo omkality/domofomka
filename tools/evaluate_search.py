@@ -11,10 +11,9 @@ import json
 import re
 import sqlite3
 import time
-from datetime import timedelta
 from pathlib import Path
 
-from pyreqwest.client import SyncClientBuilder
+import httpx
 
 from src.search.engine import Catalog, search_body
 from src.search.normalize import address_words, legacy_house_matches, parse_query
@@ -37,7 +36,7 @@ def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_c
         ).fetchall()
     catalogs[:] = [Catalog(catalog_path)]
     if opensearch_url:
-        search_clients[:] = [(opensearch_url, SyncClientBuilder().no_proxy().timeout(timedelta(seconds=2)).build())]
+        search_clients[:] = [(opensearch_url, httpx.Client(trust_env=False, timeout=2))]
     with catalogs[0].connect() as db:
         for r in db.execute("SELECT building_id,city_key,street_key,house FROM aliases"):
             expected_ids.setdefault((address_words(r["city_key"] + " " + r["street_key"]), r["house"]), set()).add(
@@ -76,13 +75,8 @@ def evaluate(record: dict):
     if search_clients:
         try:
             url, client = search_clients[0]
-            response = (
-                client.post(url + "/domofomka-buildings/_search")
-                .body_json(search_body(q, **search_config))
-                .build()
-                .send()
-            )
-            if response.status != 200:
+            response = client.post(url + "/domofomka-buildings/_search", json=search_body(q, **search_config))
+            if response.status_code != 200:
                 raise RuntimeError("Index unavailable")
             ids = [r["_id"] for r in response.json()["hits"]["hits"]]
             candidates = catalogs[0].load_candidates(ids, parse_query(q).house) or None
