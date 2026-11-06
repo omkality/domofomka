@@ -519,6 +519,18 @@ def test_rejecting_addresses_clears_buttons_in_the_same_message(processor, conte
 
 
 @pytest.mark.parametrize("action", [{"dismiss_choices": True}, {"choice_page": 1}, {"select_building": 0}])
+@pytest.mark.parametrize("context", [{"status": "found", "data": {"3": []}}, {"data": {"3": []}}])
+def test_old_choice_ignores_completed_context_without_close_marker(processor, action, context):
+    processor.store.message_context.return_value = context
+    processor.store.choices_closed.return_value = False
+    processor.plan(
+        {"kind": "message_event", "peer_id": 100, "payload": {"conversation_message_id": 42, "payload": action}}
+    )
+    assert processor.store.plan.call_args.args[1] == []
+    processor.http.get.assert_not_called()
+
+
+@pytest.mark.parametrize("action", [{"dismiss_choices": True}, {"choice_page": 1}, {"select_building": 0}])
 def test_old_choices_cannot_reopen_a_finalized_menu(processor, action):
     processor.store.message_context.return_value = {"status": "ambiguous", "candidates": [{"building_id": "a"}]}
     processor.store.choices_closed.return_value = True

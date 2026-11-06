@@ -261,15 +261,14 @@ class Processor:
         cmid = int(obj["conversation_message_id"])
         result = self.store.message_context(peer, cmid)
         choice_action = any(key in payload for key in ("dismiss_choices", "select_building", "choice_page"))
-        if (choice_action and self.store.choices_closed(peer, cmid) is True) or (
-            result and result.get("status") == "dismissed"
+        if (
+            (choice_action and self.store.choices_closed(peer, cmid) is True)
+            or (choice_action and result and result.get("status") != "ambiguous")
+            or (result and result.get("status") == "dismissed")
         ):
             self.store.plan(job, [])
             return
         if payload.get("dismiss_choices") is True:
-            if result and result.get("status") != "ambiguous":
-                self.store.plan(job, [])
-                return
             self.store.plan(
                 job,
                 [
