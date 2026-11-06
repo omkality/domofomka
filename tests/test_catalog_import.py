@@ -76,3 +76,7 @@ def test_street_types_never_merge_code_rows(tmp_path, long_kind, short_kind):
     from src.search.engine import documents
 
     assert list(documents(str(serving))) == list(documents(str(output)))
+    # Known code-bearing identities do not depend on unpacking the full GAR house list.
+    with sqlite3.connect(serving) as db:
+        db.execute("UPDATE street_houses SET data=x'00'")
+    assert small.resolve("Москва улица Мира 1")["data"] == street["data"]

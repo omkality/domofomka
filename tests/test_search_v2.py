@@ -89,6 +89,31 @@ def test_ambiguous_city_requires_choice(catalog):
     assert catalog.resolve("мск Перерва 62к1")["building_id"] == "a"
 
 
+def test_canonical_coded_candidates_do_not_depend_on_source_city_aliases(catalog):
+    with sqlite3.connect(catalog.path) as db:
+        db.execute(
+            "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                "z",
+                "z",
+                "Москва, улица Перерва, дом 62к1",
+                "Москва",
+                "Перерва",
+                "62к1",
+                "перерва",
+                "москва",
+                "77",
+                "москва внуковское",
+            ),
+        )
+        db.execute("INSERT INTO codes VALUES('z','1','test','OTHER_LOCALITY')")
+        # No source alias or extra street document is needed for the canonical identity.
+        db.commit()
+    result = catalog.resolve("Москва Перерва 62к1")
+    assert result["status"] == "ambiguous"
+    assert {r["building_id"] for r in result["candidates"]} == {"a", "z"}
+
+
 def test_no_wrong_house_or_neighbor_code(catalog):
     assert catalog.resolve("Москва Перерва 62к3")["status"] == "not_found"
     result = catalog.resolve("Москва Коломенская 2")

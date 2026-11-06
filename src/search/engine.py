@@ -36,7 +36,7 @@ class Catalog:
     def _compact(self, db: sqlite3.Connection) -> bool:
         return db.execute("SELECT value FROM metadata WHERE key='format'").fetchone() is not None
 
-    def _expand(self, db: sqlite3.Connection, ids: list[str], house: str) -> list[dict]:
+    def _expand(self, db: sqlite3.Connection, ids: list[str], house: str, include_known: bool = True) -> list[dict]:
         if not ids:
             return []
         rows = [
@@ -47,6 +47,8 @@ class Catalog:
                 [*ids, house],
             )
         ]
+        if not include_known:
+            return rows
         seen = {(r["display"].rsplit(", дом ", 1)[0], r["region"], r["lineage"]) for r in rows}
         for sid in ids:
             packed = db.execute("SELECT data FROM street_houses WHERE id=?", (sid,)).fetchone()
@@ -79,6 +81,35 @@ class Catalog:
                     }
                 )
         return rows
+
+    def coded_candidates(self, query: Query, limit: int = 100) -> list[dict]:
+        words = query.words.split()
+        if not words or not query.house:
+            return []
+        match = " AND ".join('"' + w + '"*' for w in words)
+        clause = "(" + " OR ".join("instr(' '||t.street_key||' ',' '||?||' ')>0" for _ in words) + ")"
+        with self.connect() as db:
+            if self._compact(db):
+                ids = [
+                    r[0]
+                    for r in db.execute(
+                        "SELECT s.id FROM search s JOIN streets t ON t.id=s.id "
+                        "WHERE search MATCH ? AND t.has_codes=1 AND " + clause + " ORDER BY t.id LIMIT ?",
+                        (match, *words, max(limit * 10, 1000)),
+                    )
+                ]
+                return self._expand(db, ids, query.house, include_known=False)
+            return [
+                dict(r)
+                for r in db.execute(
+                    "SELECT DISTINCT b.* FROM search s JOIN streets t ON t.id=s.id "
+                    "JOIN buildings b ON b.street_key=t.street_key AND b.city_key=t.city_key "
+                    "WHERE search MATCH ? AND b.house=? AND "
+                    + clause
+                    + " AND EXISTS(SELECT 1 FROM codes c WHERE c.building_id=b.id) ORDER BY b.id LIMIT ?",
+                    (match, query.house, *words, limit),
+                )
+            ]
 
     def candidates(self, query: Query, limit: int = 100) -> list[dict]:
         words = query.words.split()
@@ -221,8 +252,32 @@ class Catalog:
             alternate = parse_query(joined)
             if alternate.house == query.house:
                 variants.append(Query(query.raw, alternate.words, query.house, query.entrance, query.kind))
-        indexed = [row for variant in variants for row in [*self.candidates(variant), *self.alias_candidates(variant)]]
-        candidates = list({r["id"]: r for r in [*(candidates or []), *indexed]}.values())
+        cheap = [
+            row for variant in variants for row in [*self.coded_candidates(variant), *self.alias_candidates(variant)]
+        ]
+        cheap_by_id = {r["id"]: r for r in cheap}
+        fast = self._resolve_candidates(
+            query, variants, list({r["id"]: r for r in [*(candidates or []), *cheap]}.values())
+        )
+        selected = (
+            [fast["building_id"]]
+            if fast["status"] == "found"
+            else [r["building_id"] for r in fast.get("candidates", [])]
+        )
+        for bid in selected:
+            row = cheap_by_id.get(bid)
+            if row and any(
+                set(v.words.split()) - set(address_words(row["city"]).split())
+                == set(address_words(row["street"]).split())
+                for v in variants
+            ):
+                return fast
+        indexed = [row for variant in variants for row in self.candidates(variant)]
+        return self._resolve_candidates(
+            query, variants, list({r["id"]: r for r in [*(candidates or []), *indexed, *cheap]}.values())
+        )
+
+    def _resolve_candidates(self, query: Query, variants: list[Query], candidates: list[dict]) -> dict:
         # Backend scores never decide house identity or permit dropping a city token.
         scored = []
         for row in candidates:
