@@ -91,6 +91,10 @@ def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict, locality_facts
             else:
                 # Never assume Moscow/Podolsk aliases without a unique GAR identity.
                 building_id = "legacy:" + hashlib.sha256("\0".join(key).encode()).hexdigest()[:24]
+                existing = db.execute("SELECT house FROM buildings WHERE id=?", (building_id,)).fetchone()
+                if existing and existing[0] != house:
+                    # Old catalogs folded numeric ranges. Never reuse their identity for another house.
+                    building_id = "legacy:" + hashlib.sha256(("house-v2\0" + "\0".join(key)).encode()).hexdigest()[:24]
                 resolution = "ambiguous" if len(exact) > 1 else "unresolved"
                 stats["ambiguous_groups" if len(exact) > 1 else "unresolved_groups"] += 1
                 display = f"{row['city']}, {row['street_type']} {row['street']}, дом {row['house']}"
@@ -117,6 +121,21 @@ def link_codes(db: sqlite3.Connection, legacy: Path, stats: dict, locality_facts
     db.commit()
 
 
+def normalize_house_keys(db: sqlite3.Connection) -> list[str]:
+    changed = []
+    rows = db.execute(
+        "SELECT id,house,substr(display,instr(display,', дом ')+6) AS literal FROM buildings "
+        "WHERE instr(display,', дом ')>0 AND substr(display,instr(display,', дом ')+6) "
+        "GLOB '*[-‐‑‒–—−дД]*'"
+    )
+    for identity, previous, literal in rows:
+        current = house_key(literal)
+        if current != previous:
+            changed.append((current, identity))
+    db.executemany("UPDATE buildings SET house=? WHERE id=?", changed)
+    return [identity for _, identity in changed]
+
+
 def normalize_keys(db: sqlite3.Connection) -> None:
     # Reapply the current normalizer to unique pairs, not to 35 million rows.
     # Completed regional imports remain reusable after a normalization fix.
@@ -134,6 +153,8 @@ def normalize_keys(db: sqlite3.Connection) -> None:
         "INSERT OR IGNORE INTO aliases VALUES(?,?,?,?)",
         [(id, text(city), text(street), house) for id, city, street, house in aliases],
     )
+    normalize_house_keys(db)
+
 
 
 def index_streets(db: sqlite3.Connection) -> None:
@@ -169,7 +190,7 @@ def build(legacy: Path, regions: Path, output: Path, locality_facts: Path | None
         "linked_groups": 0,
         "unresolved_groups": 0,
         "ambiguous_groups": 0,
-        "normalization_schema": 4 if locality_facts else 3,
+        "normalization_schema": 7,
     }
     if locality_facts:
         with locality_facts.open("rb") as stream:
@@ -225,7 +246,7 @@ def relink(legacy: Path, output: Path, locality_facts: Path | None = None, sourc
     stats["unique_codes"] = db.execute("SELECT count(*) FROM codes").fetchone()[0]
     stats["buildings_with_codes"] = db.execute("SELECT count(distinct building_id) FROM codes").fetchone()[0]
     stats["identity_schema"] = 2
-    stats["normalization_schema"] = 4 if locality_facts else 3
+    stats["normalization_schema"] = 7
     if locality_facts:
         with locality_facts.open("rb") as stream:
             stats["locality_facts_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()

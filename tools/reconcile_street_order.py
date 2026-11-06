@@ -122,7 +122,7 @@ def apply(
         index_streets(db)
         stats = json.loads(db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()[0])
         stats.update(
-            normalization_schema=schema_version,
+            normalization_schema=max(schema_version, stats.get("normalization_schema", 0)),
             unique_codes=db.execute("SELECT count(*) FROM codes").fetchone()[0],
             buildings_with_codes=db.execute("SELECT count(DISTINCT building_id) FROM codes").fetchone()[0],
         )

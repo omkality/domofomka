@@ -1,14 +1,18 @@
 {
   "enabled": true,
-  "source_revision": "91c5d5a57b6d07d574c1f2bb57fd7ec44211e80b6743ad91a7dfb0d7675efe55",
-  "target_revision": "14ec49170f830f2790c890a765a98ad80565cde5afc784c3d1628280ea07a2fd",
-  "patch_sha256": "3079824414d0aeb5c099f6d5c5c86a9cd85737d29d48255c005895c215c3ff7c",
-  "patch_bytes": 31700,
-  "raw_bytes": 184516,
+  "source_revision": "14ec49170f830f2790c890a765a98ad80565cde5afc784c3d1628280ea07a2fd",
+  "target_revision": "f8f351f58188210ea2d352902ee4416e740835f3c4f6c8931a2bedc4a3c00495",
+  "patch_sha256": "8de95b4614671dc868d5831d724137ca69603311fbc98e957beeb0a9af8a9aed",
+  "patch_bytes": 10278015,
+  "raw_bytes": 29965357,
   "changed_rows": {
-    "streets": 748,
-    "alias_search": 62,
-    "metadata": 1,
-    "vocabulary": 1
+    "buildings": 573,
+    "codes": 203,
+    "aliases": 1131,
+    "streets": 1,
+    "street_houses": 6971,
+    "alias_search": 111512,
+    "metadata": 2,
+    "provenance": 102
   }
 }

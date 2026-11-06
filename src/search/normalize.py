@@ -4,6 +4,15 @@ from dataclasses import dataclass
 
 from src.telemetry import measured
 
+DASHES = str.maketrans(dict.fromkeys("‐‑‒–—−", "-"))
+HOUSE_LETTER = r"[а-яa-z]{1,2}(?:\s*-\s*[а-яa-z]{1,2})?"
+HOUSE_NUMBER = rf"\d+(?:\s*-?\s*{HOUSE_LETTER})?"
+HOUSE_RANGE = rf"{HOUSE_NUMBER}(?:\s*-\s*{HOUSE_NUMBER})*"
+HOUSE_PATTERN = (
+    rf"(?<![\w/-])(?:(?:к|вл)\s*)?{HOUSE_RANGE}(?:\s*/\s*{HOUSE_RANGE})?"
+    rf"(?:\s*[кс]\s*(?:{HOUSE_RANGE}|{HOUSE_LETTER})){{0,2}}(?![\w/-])"
+)
+
 ORDINALS = {
     "перв": 1,
     "втор": 2,
@@ -92,11 +101,13 @@ def text(value: str) -> str:
 
 
 def house_key(value: str) -> str:
-    value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")
+    value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е").translate(DASHES)
     value = re.sub(r"корп(?:ус)?\.?", "к", value)
     value = re.sub(r"стр(?:оение)?\.?", "с", value)
-    value = re.sub(r"\b(?:дом|д)\.?\s*", "", value)
-    return re.sub(r"[^а-яa-z0-9/]+", "", value)
+    value = re.sub(r"^(?:дом|д)\.?\s*", "", value)
+    value = re.sub(r"[^а-яa-z0-9/-]+", "", value)
+    # A separator before a letter is spelling; a numeric range identifies another house.
+    return re.sub(r"(?<=\d)-(?=[а-яa-z])", "", value)
 
 
 STOP = [
@@ -202,17 +213,22 @@ class Query:
     house: str | None
     entrance: str | None
     kind: str | None = None
+    search_text: str = ""
 
 
 @measured("search.normalize")
 def parse_query(value: str) -> Query:
-    value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")
+    value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е").translate(DASHES)
     # Country is a structured prefix, while «Российская» can be a street name.
     value = re.sub(r"^\s*российская\s+федерация\b[\s,;]*", "", value)
     # Separate an attached house number, but preserve 62к1 / 4с2 components.
     value = re.sub(
         r"(?<=[а-яa-z])(?=\d)",
-        lambda m: "" if m.start() >= 2 and value[m.start() - 1] in "кс" and value[m.start() - 2].isdigit() else " ",
+        lambda m: (
+            ""
+            if value[m.start() - 1] in "кс" and re.search(r"\d+[а-яa-z]{0,2}\s*$", value[: m.start() - 1])
+            else " "
+        ),
         value,
     )
     value = re.sub(r"(?<=\d)(?=[а-яa-z]{3,}\b)", " ", value)
@@ -239,34 +255,57 @@ def parse_query(value: str) -> Query:
     value = re.sub(r"(?<=\d)\s*[,;]\s*(?=[кс]\s*(?:\d|[а-я]\b))", " ", value)
     # Do not let a separated к/с become a house suffix and the component become a new house.
     value = re.sub(r"(?<=\d)\s*([кс])\s*(?=\d|[а-я](?![а-я]))", r"\1", value)
+    # A separator after the corpus/structure marker is not a range between houses.
+    value = re.sub(r"(?<=\d)([кс])\s*-\s*(?=\d)", r"\1", value)
     # Last number is the building: numeric street names (1905 года, 1-я) stay in words.
-    candidates = list(
-        re.finditer(
-            r"(?<![\w/])(?:(?:к|вл)\s*)?\d+(?:\s*-\s*\d+)?(?:\s*[а-яa-z](?=\s*/))?"
-            r"(?:\s*/\s*\d+)?\s*[а-яa-z]?(?:\s*[кс]\s*(?:\d+[а-яa-z]?|[а-я])){0,2}(?!\w)",
-            value,
-        )
-    )
+    candidates = list(re.finditer(HOUSE_PATTERN, value))
 
     def unmark(words: str) -> str:
         return re.sub(r"__ordinal_(\d+)__", r"\1", words)
 
     if not candidates:
-        return Query(unmark(value), address_words(unmark(value)), None, entrance, kind)
+        return Query(
+            unmark(value),
+            address_words(unmark(value)),
+            None,
+            entrance,
+            kind,
+            unmark(value),
+        )
     match = candidates[-1]
     house = house_key(match[0])
-    words = address_words(unmark(value[: match.start()] + " " + value[match.end() :]))
-    return Query(unmark(value), words, house, entrance, kind)
+    search_text = unmark(value[: match.start()] + " " + value[match.end() :])
+    words = address_words(search_text)
+    return Query(unmark(value), words, house, entrance, kind, search_text)
 
 
 def legacy_house_matches(message: str, address: str) -> bool:
-    requested = parse_query(message).house
+    query = parse_query(message)
+    requested = query.house
     returned = house_key(address.rsplit(", дом ", 1)[-1])
     if not requested or requested == returned:
         return True
-    # Historical quarter/estate/locality encodings are opaque to the v2 parser.
-    if not re.fullmatch(r"\d+(?:/\d+)?[а-яa-z]?(?:[кс](?:\d+[а-яa-z]?|[а-я])){0,2}", returned):
-        return True
-    presentation = message.casefold().replace("ё", "е").replace("корпус", "к").replace("строение", "с")
-    presentation = re.sub(r"[\s,;-]+", "", presentation)
-    return bool(re.search(r"(?<!\d)" + re.escape(returned) + r"(?![\w/])", presentation))
+    # Neither legacy whitespace folding nor an opaque-number exception may join a range.
+    if "-" in requested or "-" in returned:
+        return False
+    # Historical locality labels may prefix a complete number; its components must still agree.
+    if not re.fullmatch(HOUSE_PATTERN, returned):
+        labeled = re.fullmatch(r"[а-яa-z]+(\d.*)", returned)
+        return bool(labeled and labeled[1] == requested and re.fullmatch(HOUSE_PATTERN, labeled[1]))
+    # A quarter may be part of the legacy street, with a standalone corpus as the house.
+    if returned.startswith("к") and requested.endswith(returned):
+        quarter = requested[: -len(returned)]
+        prefix = address.rsplit(", дом ", 1)[0]
+        if quarter and re.match(r"\d", quarter) and house_key(prefix).endswith(quarter):
+            return True
+    if returned.startswith("к") and re.fullmatch(r"к\d+[а-яa-z]?", returned):
+        prefix = house_key(address.rsplit(", дом ", 1)[0])
+        quarter = re.search(r"\b(?:квартал|микрорайон|мкр)\s+(\d+[а-яa-z]?)\b", query.raw)
+        corpus = re.search(r"(?<![\w/-])к\s*" + re.escape(returned[1:]) + r"(?![\w/-])", query.raw)
+        if quarter and corpus and house_key(quarter[1]) == requested and prefix.endswith(requested):
+            return True
+    # Preserve legacy spaced-digit input, without accepting the tail of another house/corpus.
+    return any(
+        house_key(match[0]) == returned
+        for match in re.finditer(r"(?<![\w/-])\d+(?:[ \t]+\d+)+(?![\w/-])", query.raw)
+    )
