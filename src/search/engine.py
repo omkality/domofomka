@@ -206,6 +206,13 @@ class Catalog:
         if not message.strip():
             return {"status": "not_found", "data": {}, "engine": "v2"}
         if not query.house or not query.words:
+            # Unsupported house formats and streets named like a type (e.g.
+            # "Набережная") still get the unchanged v1 compatibility path.
+            numeric_street = any(word.isdigit() for word in query.words.split())
+            if (query.house and any(c.isalpha() for c in message)) or (
+                not query.house and any(c.isdigit() for c in message) and not numeric_street
+            ):
+                return {"status": "not_found", "data": {}, "engine": "v2"}
             return {"status": "incomplete_query", "data": {}, "engine": "v2"}
         variants = [query]
         # Work before stop-word removal: "по" is also an ordinary preposition.
@@ -308,7 +315,7 @@ MAPPING = {
 }
 
 
-def search_body(message: str, limit: int = 100) -> dict:
+def search_body(message: str, limit: int = 100, *, fuzziness: str = "AUTO", prefix_length: int = 1) -> dict:
     query = parse_query(message)
     return {
         "size": limit,
@@ -318,7 +325,12 @@ def search_body(message: str, limit: int = 100) -> dict:
                 "must": [
                     {
                         "match": {
-                            "words": {"query": query.words, "operator": "and", "fuzziness": "AUTO", "prefix_length": 1}
+                            "words": {
+                                "query": query.words,
+                                "operator": "and",
+                                "fuzziness": fuzziness,
+                                "prefix_length": prefix_length,
+                            }
                         }
                     }
                 ],

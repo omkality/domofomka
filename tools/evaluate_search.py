@@ -25,9 +25,12 @@ legacy_cache = {}
 expected_ids = {}
 catalogs = []
 search_clients = []
+search_config = {}
 
 
-def initialize(legacy: str, catalog_path: str, opensearch_url: str = ""):
+def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_config: dict | None = None):
+    search_config.clear()
+    search_config.update(query_config or {})
     with sqlite3.connect(legacy) as db:
         legacy_groups[:] = db.execute(
             "SELECT min(id),city,street_type,street,house FROM codes GROUP BY city,street_type,street,house ORDER BY min(id)"
@@ -73,7 +76,12 @@ def evaluate(record: dict):
     if search_clients:
         try:
             url, client = search_clients[0]
-            response = client.post(url + "/domofomka-buildings/_search").body_json(search_body(q)).build().send()
+            response = (
+                client.post(url + "/domofomka-buildings/_search")
+                .body_json(search_body(q, **search_config))
+                .build()
+                .send()
+            )
             if response.status != 200:
                 raise RuntimeError("Index unavailable")
             ids = [r["_id"] for r in response.json()["hits"]["hits"]]
@@ -121,6 +129,9 @@ if __name__ == "__main__":
     p.add_argument("--limit", type=int, default=4000)
     p.add_argument("--workers", type=int, default=6)
     p.add_argument("--opensearch-url", default="")
+    p.add_argument("--fuzziness", choices=["AUTO", "0", "1", "2"], default="AUTO")
+    p.add_argument("--prefix-length", type=int, choices=range(4), default=1)
+    p.add_argument("--candidate-limit", type=int, default=100)
     p.add_argument("--output", type=Path, default=Path("artifacts/private/evaluation"))
     a = p.parse_args()
     a.output.mkdir(parents=True, exist_ok=True)
@@ -141,7 +152,14 @@ if __name__ == "__main__":
     times = []
     with (
         concurrent.futures.ProcessPoolExecutor(
-            max_workers=a.workers, initializer=initialize, initargs=(a.legacy, a.catalog, a.opensearch_url)
+            max_workers=a.workers,
+            initializer=initialize,
+            initargs=(
+                a.legacy,
+                a.catalog,
+                a.opensearch_url,
+                {"fuzziness": a.fuzziness, "prefix_length": a.prefix_length, "limit": a.candidate_limit},
+            ),
         ) as pool,
         (a.output / "results.jsonl").open("w", encoding="utf8") as file,
     ):
@@ -159,6 +177,9 @@ if __name__ == "__main__":
     times.sort()
     summary = {
         "queries": len(records),
+        "query_configuration": {"fuzziness": a.fuzziness, "prefix_length": a.prefix_length, "limit": a.candidate_limit}
+        if a.opensearch_url
+        else None,
         "counts": dict(counters),
         "p50_ms": times[len(times) // 2] if times else 0,
         "p95_ms": times[int(len(times) * 0.95)] if times else 0,

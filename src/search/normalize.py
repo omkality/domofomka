@@ -205,6 +205,7 @@ def parse_query(value: str) -> Query:
         lambda m: "" if m.start() >= 2 and value[m.start() - 1] in "кс" and value[m.start() - 2].isdigit() else " ",
         value,
     )
+    value = re.sub(r"(?<=\d)(?=[а-яa-z]{3,}\b)", " ", value)
     value = re.sub(r"\b(\d+)(?=(?:марта|мая|года|лет)\b)", r"\1 ", value)
     value = ordinals(value, protect_street_numbers=True)
     kinds = re.findall(
