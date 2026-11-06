@@ -42,13 +42,19 @@ def lookup(query, version):
             "candidates": [c["address"] for c in body.get("candidates", [])],
         }
         if version == "v2"
-        else {"addresses": list(body)}
+        else {"addresses": [body["address"]] if body.get("address") else []}
     ), round((time.monotonic() - start) * 1000, 3)
 
 
 def probe(service, variable, route, code):
     # Переменная меняется только у отдельного процесса docker exec, не у runtime.
     start = time.monotonic()
+    wrapped = (
+        "try:\n exec("
+        + repr(code)
+        + ")\nexcept Exception as error:\n print(type(error).__name__)\n raise SystemExit(1)"
+    )
+    error_type = None
     try:
         subprocess.run(
             [
@@ -62,17 +68,22 @@ def probe(service, variable, route, code):
                 "--frozen",
                 "python",
                 "-c",
-                code,
+                wrapped,
             ],
             check=True,
             timeout=75,
-            stdout=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            text=True,
         )
         outcome = "success"
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    except subprocess.CalledProcessError as error:
+        outcome = "failed"
+        error_type = error.stdout.strip() if error.stdout and error.stdout.strip().isidentifier() else "UnknownError"
+    except subprocess.TimeoutExpired:
         outcome = "failed_or_timed_out"
-    return {"outcome": outcome, "milliseconds": round((time.monotonic() - start) * 1000, 3)}
+        error_type = "TimeoutExpired"
+    return {"outcome": outcome, "error_type": error_type, "milliseconds": round((time.monotonic() - start) * 1000, 3)}
 
 
 def main():
