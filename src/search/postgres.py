@@ -146,6 +146,13 @@ class PostgresCatalog(Catalog):
     def vocabulary_terms(self) -> list[str]:
         return self.vocabulary
 
+    def has_exact_locality_word(self, word: str) -> bool:
+        with self.connect() as db:
+            return db.execute(
+                "SELECT 1 FROM streets WHERE to_tsvector('simple',words) @@ to_tsquery('simple',%s) "
+                "AND strpos(' '||city_key||' ',' '||%s||' ')>0 LIMIT 1", (self.token(word), word)
+            ).fetchone() is not None
+
     @staticmethod
     def token(word: str) -> str:
         return "'" + word.replace("'", "''") + "'"

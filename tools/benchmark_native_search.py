@@ -951,6 +951,7 @@ def run(args):
                                     "fallback_reason",
                                     "fallback_rejected",
                                     "fallback_code_scope",
+                                    "clarification_reason",
                                     "query_budget",
                                 )
                                 if key in result

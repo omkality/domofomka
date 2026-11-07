@@ -22,6 +22,7 @@ from src.search.constraints import (
     full_name_match,
     has_misaligned_source_fields,
     literal_name_tokens,
+    locality_prefix_match,
     name_constraints_match,
     street_name_keys,
     whole_location_match,
@@ -62,12 +63,19 @@ class Catalog:
         if not include_known:
             return rows
         seen = {(r["display"].rsplit(", дом ", 1)[0], r["region"], r["lineage"]) for r in rows}
+        packed_streets = {
+            r[0]: r
+            for r in db.execute(
+                "SELECT t.id,h.data,t.city_key,t.street_key FROM streets t "
+                "JOIN street_houses h ON h.id=t.id WHERE t.id IN (" + ",".join("?" for _ in ids) + ")",
+                ids,
+            )
+        }
         for sid in ids:
-            packed = db.execute("SELECT data FROM street_houses WHERE id=?", (sid,)).fetchone()
+            packed = packed_streets.get(sid)
             if not packed:
                 continue
-            bundles = json.loads(zlib.decompress(packed[0]))
-            street = db.execute("SELECT city_key,street_key FROM streets WHERE id=?", (sid,)).fetchone()
+            bundles = json.loads(zlib.decompress(packed[1]))
             for b in bundles:
                 if house not in b["houses"]:
                     continue
@@ -86,8 +94,8 @@ class Catalog:
                         "city": b["city"],
                         "street": b["street"],
                         "house": house,
-                        "city_key": street[0],
-                        "street_key": street[1],
+                        "city_key": packed[2],
+                        "street_key": packed[3],
                         "region": b["region"],
                         "lineage": b["lineage"],
                     }
@@ -200,6 +208,50 @@ class Catalog:
 
     def vocabulary_terms(self) -> list[str]:
         return street_vocabulary(self.path, Path(self.path).stat().st_mtime_ns)
+
+    def has_exact_locality_word(self, word: str) -> bool:
+        with self.connect() as db:
+            return db.execute(
+                "SELECT 1 FROM search s JOIN streets t ON t.id=s.id WHERE search MATCH ? "
+                "AND instr(' '||t.city_key||' ',' '||?||' ')>0 LIMIT 1",
+                ('"' + word.replace('"', '""') + '"', word),
+            ).fetchone() is not None
+
+    def locality_prefix_choices(self, query: Query, candidates: list[dict]) -> dict | None:
+        options = []
+        known = {}
+        for row in candidates:
+            if (
+                row["house"] != query.house
+                or has_misaligned_source_fields(row)
+                or not building_kind_matches(query, row)
+            ):
+                continue
+            prefixes = locality_prefix_match(query, row)
+            for word in prefixes:
+                if word not in known:
+                    known[word] = self.has_exact_locality_word(word)
+            if prefixes and not any(known[word] for word in prefixes):
+                options.append(row)
+        if not options:
+            return None
+        with self.connect() as db:
+            coded = {
+                row[0] for row in db.execute(
+                    "SELECT DISTINCT building_id FROM codes WHERE building_id IN ("
+                    + ",".join("?" for _ in options) + ")", [row["id"] for row in options]
+                )
+            }
+        options = sorted((row for row in options if row["id"] in coded), key=lambda row: row["id"])
+        if not options:
+            return None
+        return {
+            "status": "ambiguous", "engine": "v2", "data": {},
+            "clarification_reason": "locality_prefix",
+            "candidates": [{"building_id": row["id"], "address": row["display"], "locality_context": row["lineage"]}
+                           for row in options[:100]],
+            "candidate_count": len(options),
+        }
 
     def joined_variants(self, query: Query, candidates: list[dict]) -> list[Query]:
         """Try at most four adjacent word joins, supported by the actual catalog."""
@@ -349,9 +401,10 @@ class Catalog:
             return fast
         variants.extend(self.joined_variants(query, candidates or []))
         indexed = [row for variant in variants for row in [*self.candidates(variant), *self.alias_candidates(variant)]]
-        result = self._resolve_candidates(
-            query, variants, list({r["id"]: r for r in [*(candidates or []), *indexed, *cheap]}.values())
-        )
+        all_candidates = list({r["id"]: r for r in [*(candidates or []), *indexed, *cheap]}.values())
+        result = self._resolve_candidates(query, variants, all_candidates)
+        if result["status"] == "not_found" and not result.get("fallback_rejected"):
+            return self.locality_prefix_choices(query, all_candidates) or result
         return result
 
     @measured("search.v2.rank")

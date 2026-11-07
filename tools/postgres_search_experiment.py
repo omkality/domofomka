@@ -35,6 +35,7 @@ class SharedReader:
 
 class PostgresExperiment(Catalog):
     has_exact_location = PostgresCatalog.has_exact_location
+    has_exact_locality_word = PostgresCatalog.has_exact_locality_word
 
     def __init__(self, minimum_similarity=0.86, ambiguity_margin=0.06):
         super().__init__("postgres-experiment", minimum_similarity, ambiguity_margin)

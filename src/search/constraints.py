@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Iterable
+from dataclasses import replace
 
 from src.search.normalize import (
     NAME_LABELS,
@@ -119,6 +120,24 @@ def whole_location_match(query: Query, city: str, street: str) -> bool:
         any(word.isalpha() and len(word) >= 3 for word in city_words - street_words)
         and set(query.words.split()) == city_words | street_words
     )
+
+
+def locality_prefix_match(query: Query, row: dict) -> frozenset[str]:
+    """Полная улица и сокращённый город позволяют уточнение, но не автоматический выбор."""
+    tokens = literal_name_tokens(query.name_words or query.words)
+    city = literal_name_tokens(row["city"])
+    for street in street_name_keys(row):
+        remaining = tokens - city - street
+        if not remaining or not all(
+            word.isalpha() and len(word) >= 4 and any(full.startswith(word) and full != word for full in city)
+            for word in remaining
+        ):
+            continue
+        expanded = tokens - remaining | {full for full in city if any(full.startswith(word) for word in remaining)}
+        alternate = replace(query, words=" ".join(expanded), name_words=" ".join(expanded))
+        if complete_name_match(alternate, row):
+            return frozenset(remaining)
+    return frozenset()
 
 
 def legacy_result_matches(message: str, address: str, *, whole_location: bool = False) -> bool:

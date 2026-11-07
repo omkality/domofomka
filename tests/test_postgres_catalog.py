@@ -50,6 +50,7 @@ def local_experiment(tmp_path, monkeypatch):
                     ("j", "Щербинка", "Самотечная", "11"),
                     ("k", "Москва, Центральный район", "Самотечная", "11"),
                     ("m", "деревня Улица", "Зеленая", "9"),
+                    ("n", "Нахабино", "Тестовая", "7"),
                 ]:
                     db.execute(
                         "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -80,6 +81,7 @@ def local_experiment(tmp_path, monkeypatch):
                         ("i", "1", "source", "MAIN-LOCALITY"),
                         ("j", "2", "source", "PARENT-LOCALITY-ALIAS"),
                         ("k", "3", "source", "SOURCE-ADMINISTRATIVE-VARIANT"),
+                        ("n", "1", "source", "PREFIX-CITY"),
                     ],
                 )
                 # Compact aliases must only refer to actual code-bearing rows.
@@ -161,6 +163,45 @@ def test_bounded_reader_preserves_results_and_compact_building_ids(local_experim
             assert actual == sqlite.resolve(query)
             for item in actual.get("candidates", []) or ([actual] if actual.get("building_id") else []):
                 assert reader.building(item["building_id"]) == sqlite.building(item["building_id"])
+    finally:
+        reader.close()
+
+
+def test_compact_expansion_batches_street_reads_and_preserves_empty_houses(local_experiment, monkeypatch):
+    from src.search.postgres import SharedReader
+
+    reader = production_reader()
+    statements = []
+    original = SharedReader.execute
+
+    def tracked(self, statement, parameters=()):
+        statements.append(statement)
+        return original(self, statement, parameters)
+
+    monkeypatch.setattr(SharedReader, "execute", tracked)
+    try:
+        with reader.connect() as db:
+            ids = [row[0] for row in db.execute("SELECT id FROM streets ORDER BY id")]
+            statements.clear()
+            rows = reader._expand(db, ids, "2")
+        assert len(statements) == 2
+        assert any(row["id"].startswith("address:") for row in rows)
+        with Catalog(str(local_experiment)).connect() as db:
+            assert rows == Catalog(str(local_experiment))._expand(db, ids, "2")
+    finally:
+        reader.close()
+
+
+def test_postgres_prefix_clarification_matches_sqlite_and_requires_confirmation(local_experiment):
+    reader = production_reader()
+    try:
+        assert not reader.has_exact_locality_word("наха")
+        assert reader.has_exact_locality_word("нахабино")
+        result = reader.resolve("наха тестовая 7")
+        assert result == Catalog(str(local_experiment)).resolve("наха тестовая 7")
+        assert result["status"] == "ambiguous"
+        assert [row["building_id"] for row in result["candidates"]] == ["n"]
+        assert reader.resolve("Нахабино Тестовая 7")["status"] == "found"
     finally:
         reader.close()
 
