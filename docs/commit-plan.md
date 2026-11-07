@@ -114,3 +114,34 @@ OpenSearch остаётся локальным инструментом срав
 
 `389700f` — `fix(search): preserve joined source names during fallback validation`.
 Файлы: `src/search/constraints.py`, `tests/test_legacy_index.py`.
+
+Завершённые группы следующего цикла (пути указаны на момент коммита; документация в группы не включена):
+
+- `135522b` — `fix(search): clarify locality prefixes and batch catalog reads`.
+  Подтверждение сокращённого города и пакетное чтение упакованных домов.
+  Файлы: `src/search/constraints.py`, `src/search/engine.py`, `src/search/postgres.py`,
+  `tests/test_locality_prefix.py`, `tests/test_postgres_catalog.py`,
+  `tools/benchmark_native_search.py`, `tools/postgres_search_experiment.py`.
+- `e607a7b` — `fix(geo): stop retries when DaData access is unavailable`.
+  Отдельная обработка отказа доступа, сохранение признака ошибки в диагностике и безопасные поля геоадреса.
+  Файлы: `.env.example`, `.env.dev.example`, `src/network.py`, `src/services/dadata_client.py`,
+  `src/api/routes.py`, `src/api/v2.py`, `src/api/telemetry.py`, `src/vkbot/processor.py`,
+  `tests/test_api_versions.py`, `tests/test_durable_bot.py`, `tests/test_geolocation_hotfix.py`,
+  `tests/test_http_clients.py`.
+- `589e769` — `refactor(api): separate versioned routes from search use cases`.
+  Роуты отдельно от сценариев, HTTP-проверка готовности, удаление неиспользуемого storages и обработчика.
+  Файлы: `src/api/app.py`, `src/api/responses.py`, `src/api/telemetry.py`, `src/api/v1/`, `src/api/v2/`,
+  `src/application/`, `src/config.py`, `src/services/catalog.py`, `src/services/codes.py`,
+  `src/services/geocoding.py`, `src/services/search_index.py`, `ops/deploy.py`.
+  Удалены прежние `src/api/routes.py`, `src/api/v2.py`, `src/storages/`, `src/vkbot/handlers.py`;
+  конфигурация и кеш перенесены из `src/api/`.
+  Проверки и инструменты: `tests/test_api_versions.py`, `tests/test_architecture.py`,
+  `tests/test_deployment.py`, `tests/test_geolocation_hotfix.py`, `tests/test_house_identity.py`,
+  `tests/test_legacy_index.py`, `tests/test_legacy_snapshot.py`, `tests/test_postgres_catalog.py`,
+  `tests/test_search_cache.py`, `tests/test_telemetry.py`, `tools/compare_postgres_catalog.py`,
+  `tools/dev_acceptance.py`, `tools/evaluate_search.py`, `tools/quality_suite.py`.
+- `77edcb1` — `refactor(search): isolate source matching from database adapters`.
+  Неизменённое сопоставление v1 вынесено из адаптера SQLite; циклическая зависимость убрана.
+  Файлы: `src/search/source_matching.py`, `src/services/codes.py`,
+  `src/services/legacy_index.py` → `src/services/source_index.py`, `tests/test_legacy_index.py`,
+  `tools/audit_search_code_coverage.py`, `tools/evaluate_legacy_index.py`, `tools/evaluate_search.py`.
