@@ -38,7 +38,7 @@
 Переписки, закрытые отчёты, доступы, исходные базы и файлы ГАР остаются вне Git.
 
 Компактный каталог уже работает на немецком тестовом сервере без зависимости от ПК.
-OpenSearch остаётся локальным инструментом сравнения; постоянный запуск на маленьких VDS не планируется.
+OpenSearch остаётся локальным инструментом сравнения; размещение на маленьких VDS пока не подтверждено измерениями.
 На момент этого описания ближайшие дома по расстоянию не предлагаются: достоверные координаты ещё не добавлены.
 
 `334e4d2` — группа исходных изменений, [#1](https://github.com/omkality/domofomka/issues/1), `priority:P1`:
@@ -87,3 +87,10 @@ OpenSearch остаётся локальным инструментом срав
 `c9813fc` — ограничение накопленного хвоста и постоянный интервал ответов пользователю, [#11](https://github.com/omkality/domofomka/issues/11).
 Файлы: `src/vkbot/config.py`, `queue.py`, `runtime.py`, `telemetry.py`,
 `tests/test_queue_limits_postgres.py`, `.env.example`, `.env.dev.example`.
+
+`82ad21e` — полное название улицы защищает пустой адрес от чужих кодов; буквальные варианты с кодами сохраняются.
+Файлы: `src/search/constraints.py`, `engine.py`, `tools/benchmark_native_search.py`,
+`tools/search_lexical_profiles.py`, `tests/test_exact_search_experiment.py`, `tests/test_postgres_catalog.py`.
+
+`59ff7db` — `test(search): audit code coverage alongside address compatibility`: проверка доступности самих кодов относительно v1.
+Файлы: `tools/audit_search_code_coverage.py`, `tests/test_search_code_coverage.py`.
