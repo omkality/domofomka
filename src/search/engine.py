@@ -20,6 +20,7 @@ from rapidfuzz.process import extract, extractOne
 from src.search.constraints import (
     complete_name_match,
     full_name_match,
+    has_misaligned_source_fields,
     literal_name_tokens,
     name_constraints_match,
     street_name_keys,
@@ -240,6 +241,9 @@ class Catalog:
                 item.setdefault("_aliases", []).append(row["alias_words"])
                 if row["alias_street"]:
                     item.setdefault("_alias_streets", []).append(row["alias_street"])
+                    item.setdefault("_alias_names", []).append(
+                        {"words": row["alias_words"], "street": row["alias_street"]}
+                    )
             return list(result.values())
 
     def building(self, id: str) -> dict | None:
@@ -340,6 +344,8 @@ class Catalog:
             and complete_name_match(query, row)
             for bid in selected
         ):
+            # Only a complete canonical name permits this shortcut. A source
+            # alias may explain split words; joined candidates must be read too.
             return fast
         variants.extend(self.joined_variants(query, candidates or []))
         indexed = [row for variant in variants for row in [*self.candidates(variant), *self.alias_candidates(variant)]]
@@ -357,9 +363,7 @@ class Catalog:
                 continue
             if not name_constraints_match(query, row):
                 continue
-            if not row["guid"] and re.search(
-                r"\b(?:ул|улица|проспект|пр-кт|шоссе|бульвар|набережная|переулок|проезд)\b", row["city"], re.I
-            ):
+            if has_misaligned_source_fields(row):
                 # Misaligned source columns are not a verified v2 address. Let
                 # compatibility fallback preserve v1 until the row is reviewed.
                 continue
@@ -444,7 +448,15 @@ class Catalog:
             else:
                 return {"status": "no_codes_ambiguous", "data": {}, "engine": "v2"}
         exact = (
-            [row for row in close if any(full_name_match(variant, row) for variant in variants)]
+            [
+                row
+                for row in close
+                if any(
+                    full_name_match(variant, row)
+                    or complete_name_match(variant, row, row.get("_alias_names", []))
+                    for variant in variants
+                )
+            ]
             if query.name_words == query.words
             else []
         )

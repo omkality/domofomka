@@ -8,6 +8,8 @@ from src.search.engine import Catalog
 from src.search.normalize import parse_query
 from tools.benchmark_native_search import configurations, native_result, search_variant
 from tools.build_catalog import SCHEMA, index_streets
+from tools.compact_catalog import compact
+from tools.refresh_aliases import refresh
 from tools.search_lexical_profiles import ExactCatalog
 
 
@@ -184,7 +186,10 @@ def test_coverage_preserves_full_street_with_administrative_locality_variant_wit
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT count(*) FROM buildings").fetchone()[0] == 4
     catalog_result = Catalog(str(path)).resolve("Москва Самотечная 11")
-    if not canonical_coded:
+    if canonical_coded:
+        assert catalog_result["status"] == "ambiguous"
+        assert {v["building_id"] for v in catalog_result["candidates"]} == {"exact", "source"}
+    else:
         assert catalog_result["building_id"] == "source"
 
 
@@ -238,3 +243,133 @@ def test_scoped_name_keeps_coded_source_with_the_type_stored_inside_the_street_n
     result = Catalog(str(path)).resolve("Москва жилой массив Тестовый 11")
     assert result["status"] == "ambiguous"
     assert {v["building_id"] for v in result["candidates"]} == {"exact", "longer"}
+
+
+def test_catalog_keeps_codes_from_a_verified_parent_locality_alias_as_a_separate_choice(names):
+    path, _ = names
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                "satellite",
+                "guid-satellite",
+                "Щербинка, улица Самотечная, дом 11",
+                "Щербинка",
+                "Самотечная",
+                "11",
+                "самотечная",
+                "щербинка",
+                "77",
+                "москва щербинка",
+            ),
+        )
+        db.execute("INSERT INTO aliases VALUES('satellite','москва щербинка','самотечная','11')")
+        db.execute("INSERT INTO codes VALUES('satellite','2','test','ONLY-satellite')")
+        index_streets(db)
+        refresh(db)
+    catalog = Catalog(str(path))
+    result = catalog.resolve("Москва Самотечная 11")
+    assert result["status"] == "ambiguous"
+    assert {v["building_id"] for v in result["candidates"]} == {"exact", "satellite"}
+    assert catalog.answer(catalog.building("satellite"))["data"] == {"2": [["ONLY-satellite", "test"]]}
+    assert catalog.resolve("Щербинка Самотечная 11")["building_id"] == "satellite"
+    assert catalog.resolve("Тула Самотечная 11")["building_id"] == "other-city"
+
+
+@pytest.mark.parametrize(
+    ("query", "matches"),
+    [
+        ("Москва Самотечная 11", True),
+        ("Москва Щербинка Самотечная 11", True),
+        ("Москва Большая Самотечная 11", False),
+        ("Тула Самотечная 11", False),
+        ("Москва Самотечная Н.А. 11", False),
+    ],
+)
+def test_complete_name_uses_paired_source_locality_and_street_without_weakening_the_name(query, matches):
+    row = {
+        "city": "Щербинка",
+        "street": "Самотечная",
+        "display": "Щербинка, улица Самотечная, дом 11",
+        "_alias_names": [{"words": "москва щербинка самотечная", "street": "самотечная"}],
+    }
+    assert complete_name_match(parse_query(query), row, row["_alias_names"]) is matches
+
+
+@pytest.mark.parametrize("label", ["ул.", "бульвар", "набережная", "пр-кт"])
+def test_native_and_catalog_leave_misaligned_source_columns_to_the_legacy_fallback(names, label):
+    path, _ = names
+    city = f"Москва, Самотечная {label}"
+    city_key = "москва самотечная " + label
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "UPDATE buildings SET guid=NULL,city=?,city_key=?,street='Парнас',street_key='парнас',display=? "
+            "WHERE id='longer'",
+            (city, city_key, f"{city}, улица Парнас, дом 11"),
+        )
+        index_streets(db)
+    hit = {"_id": hashlib.sha256((city_key + "\0парнас").encode()).hexdigest()[:32], "_score": 100}
+    catalog = Catalog(str(path))
+    query = "Москва Самотечная Парнас 11"
+    result = native_result(catalog, query, [hit], 1, exact_tokens={"москва", "самотечная", "парнас"})
+    assert result["status"] == "not_found"
+    assert catalog.resolve(query)["status"] == "not_found"
+
+
+def test_known_empty_packed_gar_address_is_not_mistaken_for_misaligned_legacy_fields(names, tmp_path):
+    path, _ = names
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                "known-empty",
+                "guid-known-empty",
+                "деревня Улица, улица Зеленая, дом 9",
+                "деревня Улица",
+                "Зеленая",
+                "9",
+                "зеленая",
+                "деревня улица",
+                "77",
+                "деревня улица",
+            ),
+        )
+        index_streets(db)
+    serving = tmp_path / "packed.db"
+    compact(path, serving)
+    catalog = Catalog(str(serving))
+    result = catalog.resolve("деревня Улица улица Зеленая 9")
+    assert result["status"] == "no_codes"
+    assert result["building_id"].startswith("address:")
+    assert catalog.building(result["building_id"])["city"] == "деревня Улица"
+
+
+def test_a_split_source_alias_does_not_skip_joined_word_candidates_in_another_matching_locality(names):
+    path, _ = names
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "UPDATE buildings SET street='Малая Мичурина',street_key='малая мичурина',"
+            "display='Москва, улица Малая Мичурина, дом 11' WHERE id='exact'"
+        )
+        db.execute(
+            "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                "satellite",
+                "guid-satellite",
+                "Щербинка, улица Малая Мичурина, дом 11",
+                "Щербинка",
+                "Малая Мичурина",
+                "11",
+                "малая мичурина",
+                "щербинка",
+                "77",
+                "москва щербинка",
+            ),
+        )
+        db.execute("INSERT INTO aliases VALUES('satellite','москва щербинка','малая мичу рина','11')")
+        db.execute("INSERT INTO codes VALUES('satellite','2','test','ONLY-satellite')")
+        index_streets(db)
+        refresh(db)
+    result = Catalog(str(path)).resolve("Москва Малая Мичу рина 11")
+    assert result["status"] == "ambiguous"
+    assert {item["building_id"] for item in result["candidates"]} == {"exact", "satellite"}

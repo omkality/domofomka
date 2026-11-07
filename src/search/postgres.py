@@ -210,6 +210,9 @@ class PostgresCatalog(Catalog):
                 item.setdefault("_aliases", []).append(row["alias_words"])
                 if row["alias_street"]:
                     item.setdefault("_alias_streets", []).append(row["alias_street"])
+                    item.setdefault("_alias_names", []).append(
+                        {"words": row["alias_words"], "street": row["alias_street"]}
+                    )
             return list(result.values())
 
     def has_exact_location(self, query: Query) -> bool:

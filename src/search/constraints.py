@@ -19,6 +19,19 @@ LITERAL_NAME_NOISE = frozenset(word for word in set(STOP) - NAME_LABELS if len(w
 NAME_KINDS = frozenset(street_kind(word) for word in NAME_LABELS)
 
 
+def has_misaligned_source_fields(row: dict) -> bool:
+    """Не выдавать непроверенную улицу из поля города за адрес v2."""
+    return (
+        not row["guid"]
+        and not row.get("id", "").startswith("address:")
+        and bool(
+            re.search(
+                r"\b(?:ул|улица|проспект|пр-кт|шоссе|бульвар|набережная|переулок|проезд)\b", row["city"], re.I
+            )
+        )
+    )
+
+
 def literal_name_tokens(value: str) -> frozenset[str]:
     return frozenset(
         street_kind(word) if word in NAME_LABELS else word

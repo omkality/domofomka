@@ -46,12 +46,16 @@ def local_experiment(tmp_path, monkeypatch):
                     ("f", "Москва", "Коломенская", "2"),
                     ("g", "Москва", "Коломенская", "2а"),
                     ("h", "Москва", "Большая Коломенская", "2"),
+                    ("i", "Москва", "Самотечная", "11"),
+                    ("j", "Щербинка", "Самотечная", "11"),
+                    ("k", "Москва, Центральный район", "Самотечная", "11"),
+                    ("m", "деревня Улица", "Зеленая", "9"),
                 ]:
                     db.execute(
                         "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
                         (
                             bid,
-                            bid,
+                            None if bid == "k" else bid,
                             f"{city}, улица {street}, дом {house}",
                             city,
                             street,
@@ -73,10 +77,14 @@ def local_experiment(tmp_path, monkeypatch):
                         ("e", "1", "source", "SECOND"),
                         ("g", "1", "source", "NEIGHBOUR"),
                         ("h", "1", "source", "OTHER-STREET"),
+                        ("i", "1", "source", "MAIN-LOCALITY"),
+                        ("j", "2", "source", "PARENT-LOCALITY-ALIAS"),
+                        ("k", "3", "source", "SOURCE-ADMINISTRATIVE-VARIANT"),
                     ],
                 )
                 # Compact aliases must only refer to actual code-bearing rows.
-                db.execute("DELETE FROM aliases WHERE building_id IN ('b','f')")
+                db.execute("DELETE FROM aliases WHERE building_id IN ('b','f','m')")
+                db.execute("INSERT INTO aliases VALUES('j','москва щербинка','самотечная','11')")
                 db.execute("INSERT INTO provenance VALUES(1,'a','gar_exact')")
                 index_streets(db)
             serving = tmp_path / "serving.db"
@@ -153,6 +161,31 @@ def test_bounded_reader_preserves_results_and_compact_building_ids(local_experim
             assert actual == sqlite.resolve(query)
             for item in actual.get("candidates", []) or ([actual] if actual.get("building_id") else []):
                 assert reader.building(item["building_id"]) == sqlite.building(item["building_id"])
+    finally:
+        reader.close()
+
+
+def test_reader_preserves_distinct_codes_for_administrative_variants_and_parent_locality_aliases(local_experiment):
+    sqlite = Catalog(str(local_experiment))
+    reader = production_reader()
+    try:
+        result = reader.resolve("Москва Самотечная 11")
+        assert result == sqlite.resolve("Москва Самотечная 11")
+        assert result["status"] == "ambiguous"
+        assert {option["building_id"] for option in result["candidates"]} == {"i", "j", "k"}
+        codes = {
+            code
+            for option in result["candidates"]
+            for items in reader.answer(reader.building(option["building_id"]))["data"].values()
+            for code, _ in items
+        }
+        assert codes == {"MAIN-LOCALITY", "PARENT-LOCALITY-ALIAS", "SOURCE-ADMINISTRATIVE-VARIANT"}
+        assert reader.resolve("Щербинка Самотечная 11")["building_id"] == "j"
+        assert reader.resolve("Москва Самотечная 11к1")["status"] == "not_found"
+        empty = reader.resolve("деревня Улица улица Зеленая 9")
+        assert empty["status"] == "no_codes"
+        assert empty["building_id"].startswith("address:")
+        assert empty == sqlite.resolve("деревня Улица улица Зеленая 9")
     finally:
         reader.close()
 

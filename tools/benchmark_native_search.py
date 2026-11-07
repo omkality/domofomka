@@ -21,6 +21,7 @@ from rapidfuzz.distance import DamerauLevenshtein
 
 from src.search.constraints import (
     complete_name_match,
+    has_misaligned_source_fields,
     legacy_result_matches,
     name_constraints_match,
     whole_location_match,
@@ -412,7 +413,7 @@ def native_result(
             continue
         if not building_kind_matches(query, row):
             continue
-        if not row["guid"] and re.search(r"\b(?:улица|проспект|шоссе|переулок|проезд)\b", row["city"], re.I):
+        if has_misaligned_source_fields(row):
             continue
         if sid in scores:
             eligible.append((sid, row))
