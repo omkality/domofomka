@@ -55,3 +55,34 @@ def test_frozen_v2_baseline_detects_replaced_codes_even_when_the_count_is_unchan
     assert not after["legacy_has_codes"]
     with pytest.raises(ValueError, match="Baseline variant is missing"):
         audit.compare(("synthetic query", rows[1:]))
+
+
+def test_audit_respects_frozen_per_source_fallback_policy(monkeypatch):
+    monkeypatch.setattr(audit, "worker_context", {"codes": {}, "legacy": "unused", "index": "unused"})
+
+    def lookup(query, source, index, *, accept_source=None):
+        sources = [
+            ("Москва", "улица", "13-я Парковая", "4", "valid"),
+            ("Москва", "улица", "Парковая 3-я", "14", "other-house"),
+        ]
+        return {
+            "data": {
+                "1": [(code, "test") for *fields, code in sources if accept_source is None or accept_source(*fields)]
+            }
+        }
+
+    monkeypatch.setattr(audit, "lookup", lookup)
+    rows = [
+        {
+            "case_id": 0,
+            "variant": scope or "before",
+            "status": "found",
+            "reference_retained": True,
+            "result": {"engine": "v1", "status": "found", **({"fallback_code_scope": scope} if scope else {})},
+        }
+        for scope in [None, "source_identity"]
+    ]
+    before, after = audit.compare(("Москва 13-я парковая дом 4", rows))
+    assert before["offered_unique_codes"] == 2
+    assert after["offered_unique_codes"] == 1
+    assert after["missing_unique_codes"] == 1

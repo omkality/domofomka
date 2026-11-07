@@ -11,8 +11,10 @@ import concurrent.futures
 import hashlib
 import json
 import time
+from functools import partial
 from pathlib import Path
 
+from src.search.constraints import legacy_source_matches
 from src.search.engine import Catalog
 from src.services.legacy_index import lookup
 
@@ -31,9 +33,7 @@ def offered_codes(result: dict, legacy: dict, read_codes) -> set[tuple[str, str,
     if result.get("engine") == "v1" and result["status"] == "found":
         return code_values(legacy)
     options = [result] if result["status"] == "found" else result.get("candidates", [])
-    return set().union(
-        *(read_codes(option["building_id"]) for option in options if option.get("building_id"))
-    )
+    return set().union(*(read_codes(option["building_id"]) for option in options if option.get("building_id")))
 
 
 def initialize(catalog_path, legacy, legacy_index, baseline=None):
@@ -50,10 +50,24 @@ def compare(item):
     if legacy is None:
         raise ValueError("A compatible immutable legacy index is required")
     expected = code_values(legacy)
-    available = [
-        (row, offered_codes(row["result"], legacy, lambda key: worker_context["codes"].get(key, set())))
-        for row in rows
-    ]
+    validated = {}
+    available = []
+    for row in rows:
+        result = row["result"]
+        scope = result.get("fallback_code_scope") if result.get("engine") == "v1" else None
+        if scope and scope not in {"source_identity", "whole_location"}:
+            raise ValueError("Unknown frozen fallback code scope")
+        if scope and scope not in validated:
+            validated[scope] = lookup(
+                query,
+                worker_context["legacy"],
+                worker_context["index"],
+                accept_source=partial(legacy_source_matches, query, whole_location=scope == "whole_location"),
+            )
+            if validated[scope] is None:
+                raise ValueError("A compatible immutable legacy index is required")
+        answer = validated[scope] if scope else legacy
+        available.append((row, offered_codes(result, answer, lambda key: worker_context["codes"].get(key, set()))))
     baseline = worker_context.get("baseline")
     baseline_codes = [codes for row, codes in available if row["variant"] == baseline] if baseline else []
     if baseline and not baseline_codes:

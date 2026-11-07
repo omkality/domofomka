@@ -53,7 +53,7 @@ def test_v2_does_not_return_legacy_house_number_reinterpretation(monkeypatch, tm
     monkeypatch.setattr(settings, "search_catalog_path", str(tmp_path / "missing.db"))
     monkeypatch.setattr(settings, "opensearch_url", None)
 
-    async def legacy(message):
+    async def legacy(message, *, accept_source):
         return {"address": "Москва, улица 1-я Парковая, дом 2", "data": {"1": [["CODE", "test"]]}}
 
     monkeypatch.setattr(v2, "get_data_from_db", legacy)
@@ -75,7 +75,7 @@ def test_v2_keeps_opaque_legacy_numbering_compatibility(monkeypatch, tmp_path, q
     monkeypatch.setattr(settings, "search_catalog_path", str(tmp_path / "missing.db"))
     monkeypatch.setattr(settings, "opensearch_url", None)
 
-    async def legacy(message):
+    async def legacy(message, *, accept_source):
         return {"address": address, "data": {"1": [["CODE", "test"]]}}
 
     monkeypatch.setattr(v2, "get_data_from_db", legacy)
@@ -92,7 +92,7 @@ async def test_empty_lexical_result_with_house_still_uses_compatible_v1(monkeypa
         def resolve(self, message: str, candidates: list[dict] | None = None):
             return {"status": "incomplete_query", "data": {}, "engine": "v2"}
 
-    async def legacy(message):
+    async def legacy(message, *, accept_source):
         return {"address": "Долгопрудный, улица Набережная, дом 19", "data": {"1": [["CODE", "test"]]}}
 
     monkeypatch.setattr(settings, "opensearch_url", None)

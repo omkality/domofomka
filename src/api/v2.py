@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import logging
 import threading
+from functools import partial
 from pathlib import Path
 
 import httpx
@@ -12,7 +13,7 @@ from src.api.config import settings
 from src.api.routes import get_dadata_client
 from src.api.telemetry import observed
 from src.network import tls_context
-from src.search.constraints import legacy_result_matches
+from src.search.constraints import legacy_result_matches, legacy_source_matches
 from src.search.engine import Catalog, search_body
 from src.search.normalize import parse_query
 from src.services.codes import get_data_from_db
@@ -176,7 +177,9 @@ async def uncached_lookup(message: str) -> dict:
     except Exception as exc:
         logger.warning("V2 unavailable error=%s; using legacy search", type(exc).__name__)
         reason = "unavailable"
-    result = await get_data_from_db(message)
+    result = await get_data_from_db(
+        message, accept_source=partial(legacy_source_matches, message, whole_location=whole_location)
+    )
     note(search_fallback_reason=reason)
     if result.get("data"):
         if not legacy_result_matches(message, result.get("address", ""), whole_location=whole_location):

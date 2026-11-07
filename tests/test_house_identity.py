@@ -163,7 +163,7 @@ def test_http_fallback_cannot_change_a_house_letter_corpus_or_structure(monkeypa
 
     returned_house = ""
 
-    async def legacy(message):
+    async def legacy(message, *, accept_source):
         return {
             "address": "Москва, улица Тестовая, дом " + returned_house,
             "data": {"1": [["ONLY-" + returned_house, "test"]]},

@@ -118,7 +118,7 @@ def test_known_street_guard_only_accepts_legacy_with_the_same_complete_name_and_
     monkeypatch.setattr(experiment, "analysis_probes", lambda *a: [])
     monkeypatch.setattr(experiment.search_lexical_profiles, "probes", lambda *a: [])
     monkeypatch.setattr(experiment.replay, "initialize", lambda *a: None)
-    monkeypatch.setattr(experiment.replay, "legacy_lookup", lambda *a: legacy)
+    monkeypatch.setattr(experiment.replay, "legacy_lookup", lambda *a, **kw: legacy)
     monkeypatch.setattr(experiment.replay, "expected_ids", {})
     monkeypatch.setattr(
         experiment,

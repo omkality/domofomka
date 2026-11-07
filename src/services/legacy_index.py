@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import sqlite3
+from collections.abc import Callable
 from contextlib import closing
 from functools import lru_cache
 from pathlib import Path
@@ -21,7 +22,13 @@ def compatible(source: str, index: str, source_stamp: tuple, index_stamp: tuple)
 
 
 @measured("search.v1.index")
-def lookup(message: str, source_path: str, index_path: str) -> dict | None:
+def lookup(
+    message: str,
+    source_path: str,
+    index_path: str,
+    *,
+    accept_source: Callable[[str, str, str, str], bool] | None = None,
+) -> dict | None:
     from src.services.codes import address_exists, street_types
 
     source, index = Path(source_path), Path(index_path)
@@ -55,7 +62,13 @@ def lookup(message: str, source_path: str, index_path: str) -> dict | None:
         if not matching:
             return {}
         city = min((r[1] for r in matching), key=len)
-        ids = [r[0] for r in matching if city in r[1]]
+        selected = [r for r in matching if city in r[1]]
+        if accept_source:
+            first = selected[0]
+            if not accept_source(city, first[2], first[3], first[4]):
+                return {}
+            selected = [r for r in selected if accept_source(r[1], r[2], r[3], r[4])]
+        ids = [r[0] for r in selected]
         source_ids = []
         for gid in ids:
             source_ids.extend(r[0] for r in db.execute("SELECT source_id FROM source_rows WHERE group_id=?", (gid,)))

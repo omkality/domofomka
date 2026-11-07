@@ -107,7 +107,7 @@ def test_search_http_failure_is_recorded_without_becoming_not_found_or_aborting_
     monkeypatch.setattr(experiment, "Catalog", FakeCatalog)
     monkeypatch.setattr(experiment, "sample", lambda *a: [case])
     monkeypatch.setattr(experiment.replay, "initialize", lambda *a: None)
-    monkeypatch.setattr(experiment.replay, "legacy_lookup", lambda *a: None)
+    monkeypatch.setattr(experiment.replay, "legacy_lookup", lambda *a, **kw: None)
     monkeypatch.setattr(experiment.replay, "expected_ids", {})
     output = tmp_path / "results"
     experiment.run(

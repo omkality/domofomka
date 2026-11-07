@@ -143,3 +143,19 @@ def legacy_result_matches(message: str, address: str, *, whole_location: bool = 
         and building_kind_matches(query, row)
         and (not whole_location or whole_location_match(query, row["city"], row["street"]))
     )
+
+def legacy_source_matches(
+    message: str, city: str, kind: str, street: str, house: str, *, whole_location: bool = False
+) -> bool:
+    """Проверять каждую исходную группу, прежде чем включать её коды в fallback v2."""
+    address = f"{city}, {kind} {street}, дом {house}"
+    if not legacy_result_matches(message, address, whole_location=whole_location):
+        return False
+    query, document = parse_query(message), parse_query(address)
+    if not {word for word in query.words.split() if word.isalpha()} <= set(document.words.split()):
+        return False
+    # A street ordinal must come from the query, not from part of the house
+    # number. Compare structured street fields, preserving opaque legacy houses.
+    street_numbers = {word for word in address_words(street).split() if any(char.isdigit() for char in word)}
+    query_numbers = {word for word in query.words.split() if any(char.isdigit() for char in word)}
+    return street_numbers <= query_numbers

@@ -37,6 +37,8 @@ def source_fingerprints() -> dict[str, str]:
         "tools/quality_suite.py",
         "tools/compare_postgres_catalog.py",
         "src/services/codes.py",
+        "src/services/legacy_index.py",
+        "src/api/v2.py",
         "uv.lock",
         "compose.search.yml",
     }
@@ -65,7 +67,7 @@ def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_c
             )
 
 
-def legacy_lookup(message: str):
+def legacy_lookup(message: str, *, accept_source=None):
     if not message:
         return None
     parts = re.split("[^а-я]", message)
@@ -81,7 +83,15 @@ def legacy_lookup(message: str):
     if not rows:
         return None
     city = min((r[1] for r in rows), key=len)
-    r = next(r for r in rows if city in r[1])
+    selected = [r for r in rows if city in r[1]]
+    if accept_source:
+        first = selected[0]
+        if not accept_source(city, first[2], first[3], first[4]):
+            return None
+        selected = [r for r in selected if accept_source(r[1], r[2], r[3], r[4])]
+    if not selected:
+        return None
+    r = selected[0]
     return f"{city}, {r[2]} {r[3]}, дом {r[4]}"
 
 

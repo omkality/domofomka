@@ -14,6 +14,7 @@ import re
 import threading
 import time
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 import httpx
@@ -23,6 +24,7 @@ from src.search.constraints import (
     complete_name_match,
     has_misaligned_source_fields,
     legacy_result_matches,
+    legacy_source_matches,
     name_constraints_match,
     whole_location_match,
 )
@@ -886,13 +888,26 @@ def run(args):
             recoverable = result["status"] == "incomplete_query" and bool(parse_query(case["query"]).house)
             if (result["status"] == "not_found" or recoverable) and old and legacy_result_matches(case["query"], old):
                 allowed = True
+                whole_location = False
                 if result.get("fallback_rejected") == "known_street_without_requested_house":
                     if variant.get("scoped_street_guard") or variant["mode"] == "catalog":
+                        whole_location = True
                         allowed = legacy_result_matches(case["query"], old, whole_location=True)
                     else:
                         allowed = legacy_exact_match(case["query"], old, variant, analyze)
                 if allowed:
-                    result = {"status": "found", "engine": "v1", "address": old, "data": {}}
+                    validated = replay.legacy_lookup(
+                        case["query"],
+                        accept_source=partial(legacy_source_matches, case["query"], whole_location=whole_location),
+                    )
+                    if validated:
+                        result = {
+                            "status": "found",
+                            "engine": "v1",
+                            "address": validated,
+                            "data": {},
+                            "fallback_code_scope": ("whole_location" if whole_location else "source_identity"),
+                        }
             elapsed = (time.perf_counter() - started) * 1000
             options = [result] if result["status"] == "found" else result.get("candidates", [])
             retained = (
@@ -935,6 +950,7 @@ def run(args):
                                     "candidates",
                                     "fallback_reason",
                                     "fallback_rejected",
+                                    "fallback_code_scope",
                                     "query_budget",
                                 )
                                 if key in result

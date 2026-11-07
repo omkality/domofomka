@@ -3,6 +3,7 @@ import logging
 import re
 import sqlite3
 import traceback
+from collections.abc import Callable
 
 import aiosqlite
 
@@ -81,21 +82,24 @@ def street_or_city_exists(word: str, city: str, street: str) -> bool:
     return word in city.lower() or word in street.lower()
 
 
-async def get_data_from_db(msg: str) -> dict:
+async def get_data_from_db(msg: str, *, accept_source: Callable[[str, str, str, str], bool] | None = None) -> dict:
     with span("search.v1", kind="search", engine="v1", query=(msg or "")[:2000]) as detail:
-        result = await _get_data_from_db(msg)
+        if accept_source:
+            note(v1_validation="source_identity")
+        result = await _get_data_from_db(msg, accept_source=accept_source)
         detail["result"] = search_result(
             dict(result, status="found" if result.get("data") else "not_found", engine="v1")
         )
         return result
 
 
-async def _get_data_from_db(msg: str) -> dict:
+async def _get_data_from_db(msg: str, *, accept_source: Callable[[str, str, str, str], bool] | None = None) -> dict:
     if msg:
         from src.services.legacy_index import lookup
 
         try:
-            indexed = await asyncio.to_thread(lookup, msg, settings.db_name, settings.legacy_index_path)
+            options = {"accept_source": accept_source} if accept_source else {}
+            indexed = await asyncio.to_thread(lookup, msg, settings.db_name, settings.legacy_index_path, **options)
             if indexed is not None:
                 note(v1_backend="index")
                 return indexed
@@ -103,10 +107,10 @@ async def _get_data_from_db(msg: str) -> dict:
             logger.warning("Legacy candidate index unavailable; using source scan")
     note(v1_backend="source_scan")
     with span("search.v1.source_scan"):
-        return await scan_data_from_db(msg)
+        return await scan_data_from_db(msg, **({"accept_source": accept_source} if accept_source else {}))
 
 
-async def scan_data_from_db(msg: str) -> dict:
+async def scan_data_from_db(msg: str, *, accept_source: Callable[[str, str, str, str], bool] | None = None) -> dict:
     result: dict = {}
 
     if not msg:
@@ -138,13 +142,7 @@ async def scan_data_from_db(msg: str) -> dict:
 
             async with connection.execute(query) as cursor:
                 async for row in cursor:
-                    if address_exists(
-                        msg,
-                        row["city"],
-                        row["street"],
-                        row["house"],
-                        row["street_type"],
-                    ):
+                    if address_exists(msg, row["city"], row["street"], row["house"], row["street_type"]):
                         data.append(row)
 
             if data:
@@ -153,21 +151,21 @@ async def scan_data_from_db(msg: str) -> dict:
                     if len(city) < len(shortest_city):
                         shortest_city = city
 
-                for (
-                    _id,
-                    city,
-                    street_type,
-                    street,
-                    house,
-                    entrance,
-                    code_type,
-                    code,
-                ) in data:
+                checked = {}
+                if accept_source:
+                    first = next(row for row in data if shortest_city in row["city"])
+                    if not accept_source(shortest_city, first["street_type"], first["street"], first["house"]):
+                        return {}
+
+                for _id, city, street_type, street, house, entrance, code_type, code in data:
                     if shortest_city in city:
-                        result.setdefault(
-                            "address",
-                            f"{shortest_city}, {street_type} {street}, дом {house}",
-                        )
+                        if accept_source:
+                            identity = (city, street_type, street, house)
+                            if identity not in checked:
+                                checked[identity] = accept_source(city, street_type, street, house)
+                            if not checked[identity]:
+                                continue
+                        result.setdefault("address", f"{shortest_city}, {street_type} {street}, дом {house}")
                         result.setdefault("data", {})
                         result["data"].setdefault(entrance, []).append((code, code_type))
 
