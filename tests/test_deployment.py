@@ -383,6 +383,47 @@ def test_failed_catalog_maintenance_restores_previous_apps_and_state(tmp_path, m
     assert not (deployment.home / "transaction.json").exists()
 
 
+def test_catalog_maintenance_reuses_active_images_without_pulling_third_copy(tmp_path, monkeypatch):
+    deployment, old, new, state = prepare(tmp_path)
+    requested = dict(manifest(), catalog_layout="street-key-v1")
+    requested["api"] = "ghcr.io/omkality/domofomka-api@sha256:" + "e" * 64
+    (new / "release.json").write_text(json.dumps(requested))
+    monkeypatch.setattr(deployment, "verify_environment", lambda: None)
+    monkeypatch.setattr(deployment, "free_space", lambda *a: None)
+    monkeypatch.setattr("ops.deploy.run", lambda *a, **k: pytest.fail("Must reuse already verified images"))
+    monkeypatch.setattr(deployment, "optimize_catalog_layout", lambda: True)
+    monkeypatch.setattr(deployment, "cleanup", lambda **kwargs: None)
+    activated = []
+    monkeypatch.setattr(deployment, "activate", activated.append)
+    deployment.deploy(new)
+    assert activated == [old]
+    assert json.loads(deployment.state_path.read_text()) == state
+
+
+def test_catalog_maintenance_requires_commit_already_deployed(tmp_path, monkeypatch):
+    deployment, _, new, state = prepare(tmp_path)
+    (new / "release.json").write_text(json.dumps(dict(manifest(), revision="d" * 40, catalog_layout="street-key-v1")))
+    monkeypatch.setattr(deployment, "verify_environment", lambda: None)
+    monkeypatch.setattr(deployment, "free_space", lambda *a: None)
+    monkeypatch.setattr("ops.deploy.run", lambda *a, **k: pytest.fail("Must reject before Docker operations"))
+    monkeypatch.setattr(deployment, "optimize_catalog_layout", lambda: pytest.fail("Wrong active revision"))
+    with pytest.raises(ValueError, match="already deployed"):
+        deployment.deploy(new)
+    assert json.loads(deployment.state_path.read_text()) == state
+
+
+def test_repeated_layout_maintenance_does_not_restart_apps(tmp_path, monkeypatch):
+    deployment, _, new, _ = prepare(tmp_path)
+    (new / "release.json").write_text(json.dumps(dict(manifest(), catalog_layout="street-key-v1")))
+    monkeypatch.setattr(deployment, "verify_environment", lambda: None)
+    monkeypatch.setattr(deployment, "free_space", lambda *a: None)
+    monkeypatch.setattr("ops.deploy.run", lambda *a, **k: pytest.fail("No image pull for maintenance"))
+    monkeypatch.setattr(deployment, "optimize_catalog_layout", lambda: False)
+    monkeypatch.setattr(deployment, "cleanup", lambda **kwargs: None)
+    monkeypatch.setattr(deployment, "activate", lambda _: pytest.fail("No-op must not restart apps"))
+    deployment.deploy(new)
+
+
 def test_disk_preflight_failure_does_not_stop_current_bot(tmp_path, monkeypatch):
     deployment, old, new, state = prepare(tmp_path)
     monkeypatch.setattr(deployment, "verify_environment", lambda: None)

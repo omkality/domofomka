@@ -500,6 +500,9 @@ asyncio.run(redis_ready())
         self.verify_environment()
         self.verify_legacy_retry(Path(previous["current"]))
         self.free_space()
+        if manifest.get("catalog_layout"):
+            self.maintain_catalog(release, previous)
+            return
         for service in ("api", "bot"):
             cached = subprocess.run(
                 ["docker", "image", "inspect", manifest[service]],
@@ -549,8 +552,6 @@ asyncio.run(redis_ready())
         try:
             if catalog:
                 self.run_catalog(catalog)
-            if manifest.get("catalog_layout"):
-                self.optimize_catalog_layout()
             self.activate(release)
         except BaseException:
             sys.stdout.write("Deployment failed; restoring previous application images\n")
@@ -642,9 +643,34 @@ asyncio.run(redis_ready())
             (self.root / ".deployed-revision").write_text(revision + "\n")
             journal.unlink()
 
-    def cleanup(self) -> None:
+    def maintain_catalog(self, request: Path, previous: dict) -> None:
+        """Обслужить уже проверенные образы текущего коммита, без третьей копии на диске."""
+        current = Path(previous["current"])
+        active = validate_manifest(json.loads((current / "release.json").read_text()), self.target)
+        requested = json.loads((request / "release.json").read_text())
+        if active["revision"] != requested["revision"]:
+            raise ValueError("Catalog maintenance requires this commit already deployed")
+        self.cleanup(extra_keep=request)
+        journal = self.home / "transaction.json"
+        write_json(journal, {"previous": str(current), "candidate": str(current), "catalog": None})
+        try:
+            changed = self.optimize_catalog_layout()
+        except BaseException:
+            self.activate(current)
+            journal.unlink()
+            self.cleanup()
+            raise
+        if changed:
+            self.activate(current)
+        journal.unlink()
+        self.cleanup()
+        sys.stdout.write(f"Healthy {self.target} catalog maintenance at {active['revision']}\n")
+
+    def cleanup(self, extra_keep: Path | None = None) -> None:
         state = json.loads(self.state_path.read_text())
         keep = {state["current"], state.get("previous")}
+        if extra_keep is not None:
+            keep.add(str(extra_keep))
         protected = {
             json.loads((Path(path) / "release.json").read_text())[s] for path in keep if path for s in ("api", "bot")
         }
