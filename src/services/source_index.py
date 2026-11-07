@@ -9,6 +9,7 @@ from contextlib import closing
 from functools import lru_cache
 from pathlib import Path
 
+from src.search.source_matching import STREET_TYPES, address_exists
 from src.telemetry import measured, span
 
 
@@ -29,8 +30,6 @@ def lookup(
     *,
     accept_source: Callable[[str, str, str, str], bool] | None = None,
 ) -> dict | None:
-    from src.services.codes import address_exists, street_types
-
     source, index = Path(source_path), Path(index_path)
     if not index.is_file():
         return None
@@ -38,7 +37,7 @@ def lookup(
     if not compatible(str(source), str(index), *stamps):
         return None
     parts = re.split(r"[^а-я]", message)
-    for kind in street_types:
+    for kind in STREET_TYPES:
         if kind in parts:
             parts.remove(kind)
     if not parts:

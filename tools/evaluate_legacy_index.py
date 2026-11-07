@@ -7,7 +7,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from src.services.legacy_index import lookup
+from src.services.source_index import lookup
 from tools import evaluate_search as reference
 
 paths = []

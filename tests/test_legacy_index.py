@@ -6,7 +6,7 @@ import pytest
 from src.config import settings
 from src.search.constraints import legacy_source_matches
 from src.services.codes import get_data_from_db, scan_data_from_db
-from src.services.legacy_index import lookup
+from src.services.source_index import lookup
 from tools.build_legacy_index import build
 
 

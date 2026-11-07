@@ -18,7 +18,7 @@ import httpx
 
 from src.search.engine import Catalog, search_body
 from src.search.normalize import address_words, legacy_house_matches, parse_query
-from src.services.codes import address_exists, street_types
+from src.search.source_matching import STREET_TYPES, address_exists
 
 legacy_groups = []
 legacy_cache = {}
@@ -37,7 +37,7 @@ def source_fingerprints() -> dict[str, str]:
         "tools/quality_suite.py",
         "tools/compare_postgres_catalog.py",
         "src/services/codes.py",
-        "src/services/legacy_index.py",
+        "src/services/source_index.py",
         "src/config.py",
         "src/services/catalog.py",
         "src/services/geocoding.py",
@@ -77,7 +77,7 @@ def legacy_lookup(message: str, *, accept_source=None):
     if not message:
         return None
     parts = re.split("[^а-я]", message)
-    for kind in street_types:
+    for kind in STREET_TYPES:
         if kind in parts:
             parts.remove(kind)
     if not parts:

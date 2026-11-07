@@ -16,7 +16,7 @@ from pathlib import Path
 
 from src.search.constraints import legacy_source_matches
 from src.search.engine import Catalog
-from src.services.legacy_index import lookup
+from src.services.source_index import lookup
 
 worker_context = {}
 
