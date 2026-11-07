@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ops.deploy import Deployment, validate_manifest
+from ops.deploy import Deployment, street_layout_sql, validate_manifest
 from ops.receive_release import unpack, verify_source
 from tools.ci_image_refs import published_image
 
@@ -46,6 +46,65 @@ def test_release_rejects_wrong_target_mutable_images_and_foreign_registry(field,
 def test_ci_release_cannot_select_legacy_runtime():
     with pytest.raises(ValueError, match="administrator-frozen"):
         validate_manifest(dict(manifest(), runtime="legacy-v1"), "dev")
+
+
+@pytest.mark.parametrize(("target", "layout"), [("prod", "street-key-v1"), ("dev", "arbitrary-sql")])
+def test_catalog_layout_request_is_dev_only_and_named(target, layout):
+    with pytest.raises(ValueError, match="catalog layout"):
+        validate_manifest(dict(manifest(), environment=target, catalog_layout=layout), target)
+
+
+def test_catalog_layout_disk_guard_does_not_stop_applications(tmp_path, monkeypatch):
+    deployment, _, _, _ = prepare(tmp_path)
+    deployment.config.update(
+        SEARCH_BACKEND="postgres",
+        CATALOG_DATABASE_URL="postgresql://queue/domofomka_catalog_test",
+        CATALOG_REVISION="d" * 64,
+    )
+    commands = []
+
+    def capture(args, **kwargs: object):
+        commands.append(args)
+        return SimpleNamespace(
+            stdout=json.dumps(
+                {"revision": "d" * 64, "state": "ready", "schema": "1", "layout": "", "bytes": 260_000_000}
+            )
+        )
+
+    monkeypatch.setattr("ops.deploy.run", capture)
+    monkeypatch.setattr("ops.deploy.shutil.disk_usage", lambda _: SimpleNamespace(free=400_000_000))
+    with pytest.raises(RuntimeError, match="Insufficient free disk"):
+        deployment.optimize_catalog_layout()
+    assert len(commands) == 1
+    assert "psql" in commands[0]
+
+
+def test_catalog_layout_is_idempotent_without_stopping_or_rewriting(tmp_path, monkeypatch):
+    deployment, _, _, _ = prepare(tmp_path)
+    deployment.config.update(
+        SEARCH_BACKEND="postgres",
+        CATALOG_DATABASE_URL="postgresql://queue/domofomka_catalog_test",
+        CATALOG_REVISION="d" * 64,
+    )
+    calls = []
+
+    def capture(args, **kwargs: object):
+        calls.append(args)
+        return SimpleNamespace(
+            stdout=json.dumps(
+                {"revision": "d" * 64, "state": "ready", "schema": "1", "layout": "street-key-v1", "bytes": 260_000_000}
+            )
+        )
+
+    monkeypatch.setattr("ops.deploy.run", capture)
+    assert not deployment.optimize_catalog_layout()
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("limits", [(0, 5, 16), (180, 0, 16), (180, 5, 1000)])
+def test_catalog_layout_rejects_unbounded_maintenance_settings(limits):
+    with pytest.raises(ValueError, match="maintenance limits"):
+        street_layout_sql(*limits)
 
 
 def test_legacy_snapshot_preserves_original_code_and_env_and_rejects_drift(tmp_path):
@@ -299,6 +358,29 @@ def test_failed_activation_restores_old_images_and_keeps_release_state(tmp_path,
         deployment.deploy(new)
     assert calls == [new, old]
     assert json.loads(deployment.state_path.read_text()) == state
+
+
+def test_failed_catalog_maintenance_restores_previous_apps_and_state(tmp_path, monkeypatch):
+    deployment, old, new, state = prepare(tmp_path)
+    value = json.loads((new / "release.json").read_text())
+    (new / "release.json").write_text(json.dumps(dict(value, catalog_layout="street-key-v1")))
+    monkeypatch.setattr(deployment, "verify_environment", lambda: None)
+    monkeypatch.setattr(deployment, "free_space", lambda *a: None)
+    monkeypatch.setattr(deployment, "catalog_change", lambda _: None)
+    monkeypatch.setattr("ops.deploy.run", lambda *a, **k: SimpleNamespace(stdout="a" * 40 + "\n"))
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0))
+
+    def fail():
+        raise RuntimeError("maintenance transaction failed")
+
+    monkeypatch.setattr(deployment, "optimize_catalog_layout", fail)
+    activated = []
+    monkeypatch.setattr(deployment, "activate", activated.append)
+    with pytest.raises(RuntimeError, match="maintenance transaction failed"):
+        deployment.deploy(new)
+    assert activated == [old]
+    assert json.loads(deployment.state_path.read_text()) == state
+    assert not (deployment.home / "transaction.json").exists()
 
 
 def test_disk_preflight_failure_does_not_stop_current_bot(tmp_path, monkeypatch):

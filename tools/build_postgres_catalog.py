@@ -82,7 +82,8 @@ def load(catalog: Path, full_catalog: Path, output: Path):
                 ("buildings", "SELECT * FROM buildings", ["text"] * 10),
                 ("codes", "SELECT * FROM codes", ["text"] * 4),
                 ("aliases", "SELECT * FROM aliases", ["text"] * 4),
-                ("streets", "SELECT * FROM streets", ["text"] * 4 + ["int4"]),
+                ("streets", 'SELECT * FROM streets ORDER BY street_key COLLATE BINARY,city_key COLLATE BINARY,id',
+                 ["text"] * 4 + ["int4"]),
                 ("street_houses", "SELECT * FROM street_houses", ["text", "bytea"]),
                 (
                     "alias_search",

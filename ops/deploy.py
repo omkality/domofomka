@@ -38,6 +38,8 @@ def validate_manifest(value: dict, target: str) -> dict:
         raise ValueError("Legacy runtime is only allowed in an administrator-frozen baseline")
     if value.get("environment") != target or not SHA.fullmatch(value.get("revision", "")):
         raise ValueError("Invalid release environment or commit")
+    if value.get("catalog_layout") and (target != "dev" or value["catalog_layout"] != "street-key-v1"):
+        raise ValueError("Invalid catalog layout request; dev-only maintenance")
     for service, pattern in IMAGES.items():
         if not pattern.fullmatch(value.get(service, "")):
             raise ValueError("Immutable image digest required")
@@ -45,6 +47,27 @@ def validate_manifest(value: dict, target: str) -> dict:
         if not isinstance(size, int) or not 0 < size <= 1073741824:
             raise ValueError("Image size must be bounded")
     return value
+
+
+def street_layout_sql(timeout: int, lock_timeout: int, memory_mb: int) -> str:
+    """Одна транзакция; адресные строки и постоянные индексы не изменяются."""
+    if not 30 <= timeout <= 600 or not 1 <= lock_timeout <= 10 or not 8 <= memory_mb <= 32:
+        raise ValueError("Invalid catalog maintenance limits")
+    return f"""
+BEGIN;
+SET LOCAL statement_timeout='{timeout}s';
+SET LOCAL lock_timeout='{lock_timeout}s';
+SET LOCAL maintenance_work_mem='{memory_mb}MB';
+SET LOCAL enable_sort=off;
+SELECT pg_advisory_xact_lock(20261109,1);
+CREATE INDEX catalog_street_layout ON public.streets(street_key COLLATE "C");
+CLUSTER public.streets USING catalog_street_layout;
+DROP INDEX public.catalog_street_layout;
+ANALYZE public.streets;
+INSERT INTO metadata(key,value) VALUES('street_layout','street-key-v1')
+ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value;
+COMMIT;
+"""
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -218,6 +241,70 @@ class Deployment:
             raise ValueError("Catalog artifact digest mismatch")
         self.free_space(info["raw_bytes"] * 2 + 134217728)
         return {**info, "image": image, "database": database, "patch": str(patch)}
+
+    def optimize_catalog_layout(self) -> bool:
+        """Явное обслуживание dev через Actions, без новой копии каталога на VDS."""
+        if self.target != "dev" or self.config.get("SEARCH_BACKEND") != "postgres":
+            raise ValueError("Catalog layout maintenance requires dev PostgreSQL")
+        database = urlsplit(self.config.get("CATALOG_DATABASE_URL", "").strip("\"'")).path.lstrip("/")
+        if not re.fullmatch(r"domofomka_catalog_[A-Za-z0-9_]+", database):
+            raise ValueError("Unexpected catalog database")
+        command = [
+            "docker",
+            "exec",
+            "-i",
+            f"{self.project}-queue-1",
+            "psql",
+            "-X",
+            "-U",
+            "domofomka",
+            "-d",
+            database,
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-At",
+        ]
+        info = json.loads(
+            run(
+                command
+                + [
+                    "-c",
+                    "SELECT json_build_object("
+                    "'revision',(SELECT value FROM metadata WHERE key='source_catalog_sha256'),"
+                    "'state',(SELECT value FROM metadata WHERE key='publication_state'),"
+                    "'schema',(SELECT value FROM metadata WHERE key='catalog_schema_version'),"
+                    "'layout',(SELECT value FROM metadata WHERE key='street_layout'),"
+                    "'bytes',pg_total_relation_size('public.streets'))",
+                ],
+                capture_output=True,
+            ).stdout
+        )
+        revision = self.config.get("CATALOG_REVISION", "")
+        if (
+            not re.fullmatch(r"[0-9a-f]{64}", revision)
+            or info["revision"] != revision
+            or info["schema"] != "1"
+            or info["state"] != "ready"
+        ):
+            raise ValueError("Catalog maintenance requires the reviewed ready revision")
+        if info["layout"] == "street-key-v1":
+            return False
+        timeout = int(self.config.get("CATALOG_MAINTENANCE_TIMEOUT_SECONDS", "180"))
+        statement = street_layout_sql(
+            timeout,
+            int(self.config.get("CATALOG_MAINTENANCE_LOCK_TIMEOUT_SECONDS", "5")),
+            int(self.config.get("CATALOG_MAINTENANCE_MEMORY_MB", "16")),
+        )
+        # Копия heap/индексов, их WAL и запас под временный индекс; аварийный резерв остаётся свободным.
+        self.free_space(3 * int(info["bytes"]) + 67108864)
+        run(
+            ["docker", "stop", "--time", "30", f"{self.project}-vkbot-1", f"{self.project}-api-1"],
+            stdout=subprocess.DEVNULL,
+        )
+        run(command, input=statement, timeout=timeout + 15, stdout=subprocess.DEVNULL)
+        self.free_space()
+        sys.stdout.write("Catalog street layout optimized; logical revision preserved\n")
+        return True
 
     def set_catalog_revision(self, revision: str) -> None:
         if not re.fullmatch(r"[0-9a-f]{64}", revision):
@@ -462,6 +549,8 @@ asyncio.run(redis_ready())
         try:
             if catalog:
                 self.run_catalog(catalog)
+            if manifest.get("catalog_layout"):
+                self.optimize_catalog_layout()
             self.activate(release)
         except BaseException:
             sys.stdout.write("Deployment failed; restoring previous application images\n")

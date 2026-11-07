@@ -13,6 +13,7 @@ import pytest
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from ops.deploy import street_layout_sql
 from src.search.engine import Catalog
 from src.search.normalize import text
 from src.search.postgres import PostgresCatalog
@@ -127,6 +128,40 @@ def test_experiment_has_foreign_keys_and_refuses_overwriting_loaded_data(local_e
         db.execute("INSERT INTO codes VALUES('missing','1','source','INVALID')")
     with pytest.raises(FileExistsError):
         importer.load(local_experiment, tmp_path / "not-used.db", tmp_path / "new-report")
+
+
+def test_street_layout_preserves_rows_indexes_and_foreign_keys(local_experiment):
+    with importer.connect() as db:
+        before = db.execute("SELECT * FROM streets ORDER BY id").fetchall()
+        index_query = "SELECT indexname,indexdef FROM pg_indexes WHERE tablename='streets' ORDER BY indexname"
+        indexes = db.execute(index_query).fetchall()
+        db.execute(street_layout_sql(180, 5, 16))
+        assert db.execute("SELECT * FROM streets ORDER BY id").fetchall() == before
+        assert db.execute(index_query).fetchall() == indexes
+        actual = [row["street_key"] for row in db.execute("SELECT street_key FROM streets ORDER BY ctid")]
+        assert actual == sorted(actual)
+        assert db.execute("SELECT value FROM metadata WHERE key='street_layout'").fetchone()["value"] == "street-key-v1"
+        count = db.execute("SELECT count(*) AS n FROM street_houses h JOIN streets s ON s.id=h.id").fetchone()["n"]
+        assert count == len(before)
+
+
+def test_new_catalog_load_groups_same_street_names_physically(local_experiment):
+    with importer.connect() as db:
+        actual = [row["street_key"] for row in db.execute("SELECT street_key FROM streets ORDER BY ctid")]
+        assert actual == sorted(actual)
+
+
+def test_failed_street_layout_rolls_back_metadata_and_temporary_index(local_experiment):
+    with importer.connect() as db:
+        db.execute("CLUSTER public.streets USING streets_pkey")
+        before = db.execute("SELECT * FROM streets ORDER BY ctid").fetchall()
+        statement = street_layout_sql(180, 5, 16).replace("ANALYZE public.streets;", "SELECT 1/0;")
+        with pytest.raises(psycopg.errors.DivisionByZero):
+            db.execute(statement)
+        db.execute("ROLLBACK")
+        assert db.execute("SELECT * FROM streets ORDER BY ctid").fetchall() == before
+        assert not db.execute("SELECT value FROM metadata WHERE key='street_layout'").fetchone()
+        assert db.execute("SELECT to_regclass('public.catalog_street_layout') AS name").fetchone()["name"] is None
 
 
 def test_experiment_rejects_non_benchmark_database(monkeypatch):

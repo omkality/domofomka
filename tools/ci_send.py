@@ -44,6 +44,8 @@ def main():
         "api_bytes": int(os.environ["API_IMAGE_BYTES"]),
         "bot_bytes": int(os.environ["BOT_IMAGE_BYTES"]),
     }
+    if os.environ.get("CATALOG_LAYOUT"):
+        manifest["catalog_layout"] = os.environ["CATALOG_LAYOUT"]
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
         for name in ("compose.deploy.yml", "ops/deploy.py"):

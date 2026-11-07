@@ -11,6 +11,10 @@ on:
         options: [dev, prod]
         default: dev
         required: true
+      optimize_catalog:
+        description: Order dev catalog streets to reduce disk reads (one-time maintenance)
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -23,8 +27,10 @@ jobs:
           REF: ${{ github.ref }}
           TARGET: ${{ inputs.environment }}
           PROD_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
+          OPTIMIZE_CATALOG: ${{ inputs.optimize_catalog }}
         run: |
           if [ "$EVENT" = workflow_dispatch ]; then
+            if [ "$OPTIMIZE_CATALOG" = true ]; then test "$TARGET" = dev; fi
             if [ "$TARGET" = dev ]; then test "$REF" = refs/heads/dev;
             else test "$REF" = refs/heads/master && test "$PROD_ENABLED" = true; fi
           fi
@@ -143,6 +149,7 @@ jobs:
           API_IMAGE_BYTES: ${{ needs.tests.outputs.api_bytes }}
           BOT_IMAGE_BYTES: ${{ needs.tests.outputs.bot_bytes }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CATALOG_LAYOUT: ${{ github.event_name == 'workflow_dispatch' && inputs.optimize_catalog && 'street-key-v1' || '' }}
         run: python tools/ci_send.py
       - name: Record release manifest
         if: always()
