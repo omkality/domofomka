@@ -36,12 +36,12 @@ def offered_codes(result: dict, legacy: dict, read_codes) -> set[tuple[str, str,
     )
 
 
-def initialize(catalog_path, legacy, legacy_index):
+def initialize(catalog_path, legacy, legacy_index, baseline=None):
     codes = collections.defaultdict(set)
     with Catalog(str(catalog_path)).connect() as db:
         for building_id, entrance, kind, code in db.execute("SELECT building_id,entrance,kind,code FROM codes"):
             codes[building_id].add((str(entrance), str(kind), str(code)))
-    worker_context.update(codes=codes, legacy=str(legacy), index=str(legacy_index))
+    worker_context.update(codes=codes, legacy=str(legacy), index=str(legacy_index), baseline=baseline)
 
 
 def compare(item):
@@ -50,9 +50,18 @@ def compare(item):
     if legacy is None:
         raise ValueError("A compatible immutable legacy index is required")
     expected = code_values(legacy)
+    available = [
+        (row, offered_codes(row["result"], legacy, lambda key: worker_context["codes"].get(key, set())))
+        for row in rows
+    ]
+    baseline = worker_context.get("baseline")
+    baseline_codes = [codes for row, codes in available if row["variant"] == baseline] if baseline else []
+    if baseline and not baseline_codes:
+        raise ValueError("Baseline variant is missing for a query")
+    if baseline_codes and any(codes != baseline_codes[0] for codes in baseline_codes):
+        raise ValueError("Baseline returns different code sets for the same query")
     outcomes = []
-    for row in rows:
-        actual = offered_codes(row["result"], legacy, lambda key: worker_context["codes"].get(key, set()))
+    for row, actual in available:
         outcomes.append(
             {
                 "query": query,
@@ -66,6 +75,14 @@ def compare(item):
                 "missing_unique_codes": len(expected - actual),
                 "extra_unique_codes": len(actual - expected),
                 "code_difference_with_retained_reference": bool(expected - actual) and bool(row["reference_retained"]),
+                **(
+                    {
+                        "baseline_missing_unique_codes": len(baseline_codes[0] - actual),
+                        "baseline_extra_unique_codes": len(actual - baseline_codes[0]),
+                    }
+                    if baseline
+                    else {}
+                ),
             }
         )
     return outcomes
@@ -100,7 +117,9 @@ def run(args):
     with (
         (output / "results.jsonl").open("w", encoding="utf8") as stream,
         concurrent.futures.ProcessPoolExecutor(
-            max_workers=args.workers, initializer=initialize, initargs=(args.catalog, args.legacy, args.legacy_index)
+            max_workers=args.workers,
+            initializer=initialize,
+            initargs=(args.catalog, args.legacy, args.legacy_index, args.baseline),
         ) as pool,
     ):
         for index, batch in enumerate(pool.map(compare, items, chunksize=20), 1):
@@ -108,6 +127,9 @@ def run(args):
                 stream.write(json.dumps(row, ensure_ascii=False) + "\n")
                 counts = counters[row["variant"]]
                 counts["cases"] += 1
+                if args.baseline:
+                    counts["baseline_code_loss_cases"] += row["baseline_missing_unique_codes"] > 0
+                    counts["baseline_code_gain_cases"] += row["baseline_extra_unique_codes"] > 0
                 if row["legacy_has_codes"]:
                     counts["legacy_has_codes"] += 1
                     counts["all_legacy_codes_offered"] += row["missing_unique_codes"] == 0
@@ -129,6 +151,7 @@ def run(args):
         "auditor_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "unique_queries": len(items),
         "workers": args.workers,
+        "baseline_variant": args.baseline,
         "elapsed_seconds": round(time.monotonic() - started, 3),
         "results": dict(counters),
         "interpretation": "Unique entrance/kind/code tuples; choice union counts as offered, not automatically sent. "
@@ -146,6 +169,7 @@ def main():
     parser.add_argument("--legacy", type=Path, default=Path("codes.db"))
     parser.add_argument("--legacy-index", type=Path, default=Path("artifacts/search/legacy-index.db"))
     parser.add_argument("--workers", type=int, choices=range(1, 17), default=4)
+    parser.add_argument("--baseline", help="Сравнить также с указанным <имя-прогона>/<вариант>, не только с v1")
     parser.add_argument("--limit", type=int, default=0)
     run(parser.parse_args())
 
