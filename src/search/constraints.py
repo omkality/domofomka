@@ -57,11 +57,22 @@ def complete_name_match(query: Query, row: dict, aliases: Iterable[dict] = ()) -
         street = alias["street"]
         words = alias.get("words", "")
         names.append((words.removesuffix(street).strip() if words.endswith(street) else "", street))
-    return any(
-        tokens - (literal_name_tokens(city) - name) == name
-        for city, street in names
-        for name in street_name_keys(row, street)
-    )
+    for city, street in names:
+        for name in street_name_keys(row, street):
+            if tokens - (literal_name_tokens(city) - name) != name:
+                continue
+            # A word can be noise in free text and still belong to the stored
+            # street name. Do not call a partial name complete after dropping it.
+            required = {
+                street_kind(word)
+                for word in text(street).split()
+                if word in LITERAL_NAME_NOISE and word not in {"им", "имени"}
+            }
+            if not required or required <= {
+                street_kind(word) for word in text(query.search_text or query.raw).split()
+            }:
+                return True
+    return False
 
 
 def name_constraints_match(query: Query, row: dict, aliases: Iterable[str] = ()) -> bool:

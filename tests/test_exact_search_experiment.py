@@ -373,3 +373,32 @@ def test_a_split_source_alias_does_not_skip_joined_word_candidates_in_another_ma
     result = Catalog(str(path)).resolve("Москва Малая Мичу рина 11")
     assert result["status"] == "ambiguous"
     assert {item["building_id"] for item in result["candidates"]} == {"exact", "satellite"}
+
+
+def test_a_locality_label_inside_the_stored_street_name_is_required_for_a_complete_match(names):
+    path, _ = names
+    with sqlite3.connect(path) as db:
+        for bid, street, key in [
+            ("exact", "Тестовый Поселок", "тестовый поселок"),
+            ("longer", "Тестовый Вал", "тестовый вал"),
+        ]:
+            db.execute(
+                "UPDATE buildings SET street=?,street_key=?,display=? WHERE id=?",
+                (street, key, f"Москва, улица {street}, дом 11", bid),
+            )
+        index_streets(db)
+    catalog = Catalog(str(path))
+    hits = [
+        {"_id": hashlib.sha256(("москва\0" + key).encode()).hexdigest()[:32], "_score": score}
+        for key, score in [("тестовый поселок", 100), ("тестовый вал", 1)]
+    ]
+    for query in ["Тестовый 11", "Тестовый поселок 11"]:
+        for result in [
+            catalog.resolve(query),
+            native_result(catalog, query, hits, 1, exact_tokens={"тестовый"}, literal_coverage=True),
+        ]:
+            if "поселок" in query:
+                assert result["building_id"] == "exact"
+            else:
+                assert result["status"] == "ambiguous"
+                assert {c["building_id"] for c in result["candidates"]} == {"exact", "longer"}
