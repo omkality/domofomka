@@ -96,6 +96,12 @@ PostgreSQL может повторно использовать освобожд
 
 ## Просмотр
 
+Для отмены накопленного хвоста `outcome.queue_disposition` содержит `pending_limit` или
+`superseded_duplicate`. Все действия целиком отменённого неначатого плана учитываются как
+`outbox_skipped`, `outbox_done=0`, `delivery_status=cancelled`; их нельзя считать принятыми VK.
+Исходные запросы остаются доступны для анализа. Перенос `next_at` при паузе пользователя
+учитывается обычными временами ожидания outbox.
+
 ```bash
 docker compose -p domofomka-dev --env-file .env.dev -f docker-compose.yml exec -T vkbot uv run --frozen python -m src.vkbot.manage telemetry
 ```

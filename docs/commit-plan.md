@@ -83,3 +83,7 @@ OpenSearch остаётся локальным инструментом срав
   `tests/test_source_field_alignment.py`, `src/search/catalog_release.json`.
 
 Закрытые патчи каталога доставляются отдельно с проверкой SHA-256. Ветка master и prod не меняются.
+
+`c9813fc` — ограничение накопленного хвоста и постоянный интервал ответов пользователю, [#11](https://github.com/omkality/domofomka/issues/11).
+Файлы: `src/vkbot/config.py`, `queue.py`, `runtime.py`, `telemetry.py`,
+`tests/test_queue_limits_postgres.py`, `.env.example`, `.env.dev.example`.
