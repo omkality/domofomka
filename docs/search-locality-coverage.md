@@ -102,8 +102,8 @@ python -m tools.build_locality_cohort --audit artifacts/private/locality-audit-n
 python -m tools.benchmark_native_search run --catalog artifacts/search/serving.source-fields-final.db --stage lexical --index domofomka-native-lab-20261107-coded-b02 --variants catalog,verified.coverage-AUTO-r1.0 --case-file artifacts/private/locality-cohort-new/cases.jsonl --output artifacts/private/locality-cohort-new/replay --details --workers 4
 ```
 
-Следующий P1 — отдельный проверяемый вариант защиты населённого пункта у native,
-разбор его влияния на опечатки в городах и повтор полного корпуса вместе с этими
-отрицательными примерами. Нельзя просто запрещать любое отличие строки города:
-сохраняются одноимённые улицы, официальная иерархия и исходные варианты адреса.
-До этой проверки native не внедряется, выпуск и prod остаются приостановлены.
+[Продолжение эксперимента](search-locality-guard.md) сравнивает варианты защиты
+на 47 857 записях. Широкое ограничение отклонено из-за потерь; узкое устраняет
+две подмены без дополнительных потерь кодовых наборов. Опечатки в городах,
+неполные имена и размещение JVM остаются отдельными проверками.
+Native не внедряется, выпуск и prod остаются приостановлены.

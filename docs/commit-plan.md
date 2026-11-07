@@ -165,3 +165,10 @@ OpenSearch остаётся локальным инструментом срав
 без изменения рабочего поиска или предположений о городе пользователя.
 Файлы: `tools/audit_query_localities.py`, `tools/build_locality_cohort.py`,
 `tests/test_query_locality_audit.py`, `tests/test_locality_cohort.py`.
+
+`b6d41e6` — `test(search): constrain locality roles in native ranking experiments`.
+Сравниваемые ограничения населённого пункта, частичная разметка буквальных
+ограничений и регрессионные проверки без изменения рабочего API.
+Файлы: `tools/search_locality_profiles.py`, `tools/search_lexical_profiles.py`,
+`tools/benchmark_native_search.py`, `tools/evaluate_search.py`,
+`tests/test_native_locality_profiles.py`.
