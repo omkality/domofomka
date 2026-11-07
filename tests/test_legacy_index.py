@@ -100,6 +100,25 @@ async def test_opt_in_fallback_checks_each_source_group_without_changing_v1(
     assert await get_data_from_db(query) == original
 
 
+@pytest.mark.parametrize(
+    ("query", "city", "street", "house", "matches"),
+    [
+        ("26ти Тестовых Комиссаров 10к2", "Москва", "26-ти Тестовых Комиссаров", "10к2", True),
+        ("МоскваТестовая 25", "Москва", "Тестовая", "25", True),
+        ("Москваулица Тестовая 25", "Москва", "Тестовая", "25", True),
+        ("Тесто вая 25", "Москва", "Тестовая", "25", True),
+        ("Тестовая 10 наха", "Нахабино", "Тестовая", "10", False),
+        ("Дзержинск Тестовая 10", "Дзержинский", "Тестовая", "10", False),
+        ("Тестовый бульвар 114а к2", "Москва", "Тестовый Бульвар 114А", "к2", True),
+    ],
+)
+def test_source_guard_preserves_spaces_and_numeric_compatibility_without_accepting_city_prefixes(
+    query, city, street, house, matches
+):
+    kind = "квартал" if house.startswith("к") else "улица"
+    assert legacy_source_matches(query, city, kind, street, house) == matches
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("with_index", [False, True])
 async def test_v2_catalog_failure_does_not_mix_another_house_into_a_valid_fallback(tmp_path, monkeypatch, with_index):

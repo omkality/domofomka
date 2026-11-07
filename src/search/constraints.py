@@ -152,10 +152,17 @@ def legacy_source_matches(
     if not legacy_result_matches(message, address, whole_location=whole_location):
         return False
     query, document = parse_query(message), parse_query(address)
-    if not {word for word in query.words.split() if word.isalpha()} <= set(document.words.split()):
-        return False
-    # A street ordinal must come from the query, not from part of the house
-    # number. Compare structured street fields, preserving opaque legacy houses.
-    street_numbers = {word for word in address_words(street).split() if any(char.isdigit() for char in word)}
-    query_numbers = {word for word in query.words.split() if any(char.isdigit() for char in word)}
-    return street_numbers <= query_numbers
+    names = {word for word in document.words.split() if word.isalpha()}
+    names.update(word for word in text(kind).split() if word.isalpha())
+    words = [word for word in query.words.split() if word.isalpha()]
+    if set(words) <= names:
+        return True
+    # Accept missing/extra spaces only when all letters partition into complete
+    # words of this actual source. A city prefix is not a complete locality.
+    # Digit/house identity remains the responsibility of legacy_result_matches.
+    letters = "".join(words)
+    positions = {0}
+    for start in range(len(letters)):
+        if start in positions:
+            positions.update(start + len(word) for word in names if letters.startswith(word, start))
+    return len(letters) in positions
