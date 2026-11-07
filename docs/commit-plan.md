@@ -159,3 +159,9 @@ OpenSearch остаётся локальным инструментом срав
 `c0c2a32` — `test(ci): verify broad queries after catalog maintenance`.
 Приёмка исходных широких запросов не принимает скрытый отказ каталога за успешный fallback.
 Файлы: `ops/deploy.py`, `tests/test_deployment.py`.
+
+`03aeb46` — `test(search): audit locality coverage across all exported conversations`.
+Офлайн-учёт названий из входящего текста и равномерная дополнительная выборка,
+без изменения рабочего поиска или предположений о городе пользователя.
+Файлы: `tools/audit_query_localities.py`, `tools/build_locality_cohort.py`,
+`tests/test_query_locality_audit.py`, `tests/test_locality_cohort.py`.
