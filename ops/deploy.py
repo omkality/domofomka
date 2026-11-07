@@ -14,9 +14,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from http.client import HTTPConnection
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 
 SHA = re.compile(r"[0-9a-f]{40}")
 IMAGES = {
@@ -643,6 +644,32 @@ asyncio.run(redis_ready())
             (self.root / ".deployed-revision").write_text(revision + "\n")
             journal.unlink()
 
+    def verify_catalog_layout(self) -> None:
+        """Проверить исходные широкие запросы, не принимая fallback после отказа БД."""
+        for number, address in enumerate(("Ленина 28-30", "Ленина 2830"), 1):
+            connection = HTTPConnection("127.0.0.1", int(self.port), timeout=self.timeout)
+            started = time.monotonic()
+            try:
+                connection.request("GET", "/api/v2/codes?" + urlencode({"address": address, "observe": "true"}))
+                response = connection.getresponse()
+                value = json.loads(response.read())
+                if response.status != 200 or value.get("fallback_reason") == "unavailable":
+                    raise RuntimeError("Catalog broad-query acceptance failed")
+            finally:
+                connection.close()
+            sys.stdout.write(
+                "Catalog query "
+                + json.dumps(
+                    {
+                        "case": number,
+                        "milliseconds": round((time.monotonic() - started) * 1000, 3),
+                        "cache_hit": value.get("_diagnostics", {}).get("notes", {}).get("cache_hit"),
+                        "fallback_reason": value.get("fallback_reason"),
+                    }
+                )
+                + "\n"
+            )
+
     def maintain_catalog(self, request: Path, previous: dict) -> None:
         """Обслужить уже проверенные образы текущего коммита, без третьей копии на диске."""
         current = Path(previous["current"])
@@ -662,6 +689,7 @@ asyncio.run(redis_ready())
             raise
         if changed:
             self.activate(current)
+        self.verify_catalog_layout()
         journal.unlink()
         self.cleanup()
         sys.stdout.write(f"Healthy {self.target} catalog maintenance at {active['revision']}\n")

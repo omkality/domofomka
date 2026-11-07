@@ -392,6 +392,7 @@ def test_catalog_maintenance_reuses_active_images_without_pulling_third_copy(tmp
     monkeypatch.setattr(deployment, "free_space", lambda *a: None)
     monkeypatch.setattr("ops.deploy.run", lambda *a, **k: pytest.fail("Must reuse already verified images"))
     monkeypatch.setattr(deployment, "optimize_catalog_layout", lambda: True)
+    monkeypatch.setattr(deployment, "verify_catalog_layout", lambda: None)
     monkeypatch.setattr(deployment, "cleanup", lambda **kwargs: None)
     activated = []
     monkeypatch.setattr(deployment, "activate", activated.append)
@@ -419,9 +420,30 @@ def test_repeated_layout_maintenance_does_not_restart_apps(tmp_path, monkeypatch
     monkeypatch.setattr(deployment, "free_space", lambda *a: None)
     monkeypatch.setattr("ops.deploy.run", lambda *a, **k: pytest.fail("No image pull for maintenance"))
     monkeypatch.setattr(deployment, "optimize_catalog_layout", lambda: False)
+    monkeypatch.setattr(deployment, "verify_catalog_layout", lambda: None)
     monkeypatch.setattr(deployment, "cleanup", lambda **kwargs: None)
     monkeypatch.setattr(deployment, "activate", lambda _: pytest.fail("No-op must not restart apps"))
     deployment.deploy(new)
+
+
+@pytest.mark.parametrize(("status", "reason", "fails"), [(200, "unavailable", True), (200, "not_found", False),
+                                                           (503, None, True)])
+def test_layout_acceptance_rejects_hidden_catalog_failure(tmp_path, monkeypatch, status, reason, fails):
+    deployment, _, _, _ = prepare(tmp_path)
+    body = {
+        "engine": "v1",
+        "status": "not_found",
+        "fallback_reason": reason,
+        "_diagnostics": {"notes": {"cache_hit": False}},
+    }
+    response = SimpleNamespace(status=status, read=lambda: json.dumps(body).encode())
+    connection = SimpleNamespace(request=lambda *a: None, getresponse=lambda: response, close=lambda: None)
+    monkeypatch.setattr("ops.deploy.HTTPConnection", lambda *a, **k: connection)
+    if fails:
+        with pytest.raises(RuntimeError, match="broad-query"):
+            deployment.verify_catalog_layout()
+    else:
+        deployment.verify_catalog_layout()
 
 
 def test_disk_preflight_failure_does_not_stop_current_bot(tmp_path, monkeypatch):
