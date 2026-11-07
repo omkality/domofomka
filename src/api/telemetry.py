@@ -13,7 +13,7 @@ async def observed(operation: Callable[[], Awaitable[dict]], requested: bool) ->
         return await operation()
     with Capture() as capture:
         note(api_revision=settings.app_revision, catalog_revision=settings.catalog_revision)
-        from src.api.config import settings as api_settings
+        from src.config import settings as api_settings
 
         note(
             search_config={

@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from src.api.config import settings
+from src.config import settings
 from src.services.codes import get_data_from_db
 from tools import evaluate_search as replay
 

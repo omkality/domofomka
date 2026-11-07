@@ -327,9 +327,9 @@ def test_http_postgres_cache_without_sqlite_catalog_and_building_endpoint(local_
     from litestar.testing import TestClient
     from pydantic import SecretStr
 
-    from src.api import v2
     from src.api.app import app
-    from src.api.config import settings
+    from src.application import search
+    from src.config import settings
 
     monkeypatch.setattr(settings, "search_backend", "postgres")
     monkeypatch.setattr(settings, "catalog_database_url", SecretStr(os.environ["CATALOG_BENCHMARK_DSN"]))
@@ -341,16 +341,16 @@ def test_http_postgres_cache_without_sqlite_catalog_and_building_endpoint(local_
     monkeypatch.setattr(settings, "opensearch_url", None)
     monkeypatch.setattr(settings, "search_cache_ttl_seconds", 120)
     fallback = AsyncMock(return_value={"data": {}})
-    monkeypatch.setattr(v2, "get_data_from_db", fallback)
-    v2.result_cache.entries.clear()
+    monkeypatch.setattr(search, "get_data_from_db", fallback)
+    search.result_cache.entries.clear()
     with TestClient(app) as client:
         first = client.get("/api/v2/codes/msg", params={"message": "Москва Перерва 62к1"}).json()
-        reader = v2.get_catalog()
+        reader = search.get_catalog()
         second = client.get("/api/v2/codes/msg", params={"message": "Москва Перерва 62к1"}).json()
         assert first == second
         assert first["engine"] == "v2"
-        assert len(v2.result_cache.entries) == 1
-        assert v2.get_catalog() is reader
+        assert len(search.result_cache.entries) == 1
+        assert search.get_catalog() is reader
         building = client.get("/api/v2/buildings/a").json()
         assert building["data"] == first["data"]
         assert client.get("/api/v2/buildings/missing").status_code == 404

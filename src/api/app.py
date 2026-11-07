@@ -6,9 +6,10 @@ from litestar.openapi import OpenAPIConfig
 from litestar.openapi.plugins import ScalarRenderPlugin
 from litestar.response import Redirect
 
-from src.api.config import settings
-from src.api.routes import codes_router
-from src.api.v2 import building_codes, close_catalog, v2_router
+from src.api.v1.routes import codes_router
+from src.api.v2.routes import router as v2_router
+from src.config import settings
+from src.services.catalog import close_catalog
 from src.version import get_app_info
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,6 @@ app = Litestar(
         codes_router,
         Router(path="/api/v1", route_handlers=[deepcopy(codes_router)]),
         v2_router,
-        building_codes,
     ],
     openapi_config=OpenAPIConfig(
         title="Domofomka",

@@ -3,7 +3,7 @@ from functools import partial
 
 import pytest
 
-from src.api.config import settings
+from src.config import settings
 from src.search.constraints import legacy_source_matches
 from src.services.codes import get_data_from_db, scan_data_from_db
 from src.services.legacy_index import lookup
@@ -122,7 +122,7 @@ def test_source_guard_preserves_spaces_and_numeric_compatibility_without_accepti
 @pytest.mark.asyncio
 @pytest.mark.parametrize("with_index", [False, True])
 async def test_v2_catalog_failure_does_not_mix_another_house_into_a_valid_fallback(tmp_path, monkeypatch, with_index):
-    from src.api import v2
+    from src.application import search
 
     source, index = tmp_path / "source.db", tmp_path / "index.db"
     with sqlite3.connect(source) as db:
@@ -146,8 +146,8 @@ async def test_v2_catalog_failure_does_not_mix_another_house_into_a_valid_fallba
     def unavailable():
         raise OSError("isolated catalog failure")
 
-    monkeypatch.setattr(v2, "get_catalog", unavailable)
-    answer = await v2.uncached_lookup("Москва 13-я парковая дом 4")
+    monkeypatch.setattr(search, "get_catalog", unavailable)
+    answer = await search.uncached_lookup("Москва 13-я парковая дом 4")
     assert answer["status"] == "found"
     assert answer["engine"] == "v1"
     assert answer["data"] == {"1": [("VALID", "test")]}

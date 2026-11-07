@@ -111,6 +111,46 @@ def test_legacy_readiness_uses_v1_dependencies_without_starting_another_collecto
     assert "pg_try_advisory_lock" not in probes[1]
 
 
+@pytest.mark.parametrize("engine", ["v1", "v2"])
+def test_v2_readiness_uses_http_and_rejects_a_masked_catalog_failure(tmp_path, monkeypatch, engine):
+    import http.client
+
+    deployment, _, release, _ = prepare(tmp_path)
+    probes = []
+    monkeypatch.setattr(deployment, "compose", lambda release, *args, **kwargs: probes.append(args[-1]))
+    deployment.check(release)
+    monkeypatch.setenv("SEARCH_BACKEND", "postgres")
+    responses = iter([
+        {"name": "domofomka", "version": "2.0.0"},
+        {"status": "found", "engine": engine, "building_id": "gar:test"},
+        {"status": "found", "engine": "v2"},
+    ])
+    requested = []
+
+    class Connection:
+        def __init__(self, host, port, timeout):
+            pass
+
+        def request(self, method, path):
+            requested.append((method, path))
+
+        def getresponse(self):
+            body = json.dumps(next(responses)).encode()
+            return SimpleNamespace(status=200, read=lambda: body)
+
+    monkeypatch.setattr(http.client, "HTTPConnection", Connection)
+    if engine == "v1":
+        with pytest.raises(AssertionError):
+            exec(probes[0], {})
+    else:
+        exec(probes[0], {})
+    assert len(requested) == (2 if engine == "v1" else 3)
+    assert requested[0] == ("GET", "/version")
+    assert requested[1][1].startswith("/api/v2/codes/msg?")
+    if engine == "v2":
+        assert requested[2] == ("GET", "/api/v2/buildings/gar%3Atest")
+
+
 @pytest.mark.parametrize("bad", ["../release.json", "/release.json", "symlink"])
 def test_receiver_rejects_archive_paths_and_symlinks(tmp_path, bad):
     buf = io.BytesIO()

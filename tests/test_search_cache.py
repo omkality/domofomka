@@ -3,10 +3,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from litestar.testing import TestClient
 
-from src.api import v2
 from src.api.app import app
-from src.api.cache import LookupCache
-from src.api.config import settings
+from src.application import search
+from src.application.cache import LookupCache
+from src.config import settings
+from src.search.engine import Catalog
 
 
 def test_cache_expiry_eviction_copy_and_memory_budget():
@@ -49,7 +50,7 @@ def cached_lookup(tmp_path, monkeypatch):
     resolve = MagicMock(
         return_value={"status": "found", "engine": "v2", "address": "Дом", "data": {"1": [["CODE", "test"]]}}
     )
-    monkeypatch.setattr(v2.Catalog, "resolve", resolve)
+    monkeypatch.setattr(Catalog, "resolve", resolve)
     return catalog, resolve
 
 
@@ -74,7 +75,7 @@ def test_unavailable_search_fallback_is_not_cached(cached_lookup, monkeypatch):
     _, resolve = cached_lookup
     success = resolve.return_value
     resolve.side_effect = [RuntimeError("offline"), success]
-    monkeypatch.setattr(v2, "get_data_from_db", AsyncMock(return_value={"data": {"1": []}}))
+    monkeypatch.setattr(search, "get_data_from_db", AsyncMock(return_value={"data": {"1": []}}))
     with TestClient(app) as client:
         first = client.get("/api/v2/codes/msg", params={"message": "Перерва 62к1"}).json()
         assert first["fallback_reason"] == "unavailable"
@@ -86,7 +87,7 @@ def test_unavailable_search_fallback_is_not_cached(cached_lookup, monkeypatch):
 def test_geolocation_cache_uses_exact_coordinates(cached_lookup, monkeypatch):
     geocoder = MagicMock()
     geocoder.get_address_by_geo = AsyncMock(return_value="Москва Перерва 62к1")
-    monkeypatch.setattr(v2, "get_dadata_client", AsyncMock(return_value=geocoder))
+    monkeypatch.setattr("src.services.dadata_client.DadataClient.get_address_by_geo", geocoder.get_address_by_geo)
     with TestClient(app) as client:
         for _ in range(2):
             assert client.get("/api/v2/codes/geo", params={"lat": 55.1, "lon": 37.1}).status_code == 200

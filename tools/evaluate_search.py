@@ -38,11 +38,17 @@ def source_fingerprints() -> dict[str, str]:
         "tools/compare_postgres_catalog.py",
         "src/services/codes.py",
         "src/services/legacy_index.py",
-        "src/api/v2.py",
+        "src/config.py",
+        "src/services/catalog.py",
+        "src/services/geocoding.py",
+        "src/services/search_index.py",
+        "src/services/dadata_client.py",
         "uv.lock",
         "compose.search.yml",
     }
     names.update(path.relative_to(root).as_posix() for path in (root / "src/search").glob("*.py"))
+    names.update(path.relative_to(root).as_posix() for path in (root / "src/application").glob("*.py"))
+    names.update(path.relative_to(root).as_posix() for path in (root / "src/api").rglob("*.py"))
     return {
         name: hashlib.sha256((root / name).read_bytes()).hexdigest()
         for name in sorted(names)

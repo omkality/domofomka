@@ -1,9 +1,10 @@
 import pytest
 from litestar.testing import TestClient
 
-from src.api import v2
 from src.api.app import app
-from src.api.config import settings
+from src.application import search
+from src.config import settings
+from src.search.engine import Catalog
 
 
 @pytest.mark.parametrize("path", ["/codes/geo", "/api/v1/codes/geo", "/api/v2/codes/geo"])
@@ -33,15 +34,17 @@ def test_geolocation_uses_the_same_v2_and_guarded_fallback_as_text(monkeypatch, 
     result = {"status": status, "engine": "v2", "address": "Москва, улица Тестовая, дом 4к1с1", "data": {}}
     if status == "found":
         result["data"] = {"1": [["EXPECTED", "test"]]}
+
     class Reader:
         def resolve(self, message, candidates=None):
             assert message == address
             return result
+
     legacy = AsyncMock(return_value={"address": result["address"], "data": {"1": [["LEGACY", "test"]]}})
     monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
     monkeypatch.setattr(settings, "opensearch_url", None)
-    monkeypatch.setattr(v2, "get_catalog", Reader)
-    monkeypatch.setattr(v2, "get_data_from_db", legacy)
+    monkeypatch.setattr(search, "get_catalog", Reader)
+    monkeypatch.setattr(search, "get_data_from_db", legacy)
     monkeypatch.setattr(DadataClient, "get_address_by_geo", AsyncMock(return_value=address))
     with TestClient(app) as client:
         geo = client.get("/api/v2/codes/geo", params={"lat": 1, "lon": 2})
@@ -60,6 +63,49 @@ def test_legacy_paths_remain_equivalent(monkeypatch):
         assert old.json() == versioned.json() == {}
 
 
+def test_v1_collection_endpoint_preserves_the_existing_response():
+    with TestClient(app) as client:
+        canonical = client.get("/api/v1/codes", params={"address": ""})
+        compatible = client.get("/api/v1/codes/msg", params={"message": ""})
+    assert canonical.status_code == compatible.status_code == 200
+    assert canonical.json() == compatible.json() == {}
+
+
+def test_v2_collection_endpoint_uses_the_same_application_scenario(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    result = {"status": "no_codes", "engine": "v2", "address": "Known house", "data": {}}
+    lookup = AsyncMock(return_value=result)
+    monkeypatch.setattr(search, "lookup", lookup)
+    with TestClient(app) as client:
+        canonical = client.get("/api/v2/codes", params={"address": "Тестовая 1"})
+        compatible = client.get("/api/v2/codes/msg", params={"message": "Тестовая 1"})
+    assert canonical.status_code == compatible.status_code == 200
+    assert canonical.json() == compatible.json() == result
+    assert [call.args for call in lookup.await_args_list] == [("Тестовая 1",), ("Тестовая 1",)]
+
+
+@pytest.mark.parametrize("version", ["v1", "v2"])
+def test_nearby_resource_and_compatible_geo_route_share_error_contract(monkeypatch, version):
+    from unittest.mock import AsyncMock
+
+    from src.services.dadata_client import DadataClient, DadataUnavailable
+
+    monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
+    monkeypatch.setattr(DadataClient, "get_address_by_geo", AsyncMock(side_effect=DadataUnavailable(retryable=False)))
+    with TestClient(app) as client:
+        canonical = client.get(f"/api/{version}/codes/nearby", params={"lat": 1, "lon": 2})
+        compatible = client.get(f"/api/{version}/codes/geo", params={"lat": 1, "lon": 2})
+    assert canonical.status_code == compatible.status_code == 503
+    assert canonical.json() == compatible.json()
+
+
+@pytest.mark.parametrize("version", ["v1", "v2"])
+def test_code_resources_do_not_accept_writes(version):
+    with TestClient(app) as client:
+        assert client.post(f"/api/{version}/codes", json={"address": ""}).status_code == 405
+
+
 def test_v2_unavailable_falls_back(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "opensearch_url", None)
     monkeypatch.setattr(settings, "search_catalog_path", str(tmp_path / "missing.db"))
@@ -72,7 +118,7 @@ def test_v2_unavailable_falls_back(monkeypatch, tmp_path):
 def test_identity_without_codes_is_not_overridden(monkeypatch):
     monkeypatch.setattr(settings, "opensearch_url", None)
     monkeypatch.setattr(
-        v2.Catalog,
+        Catalog,
         "resolve",
         lambda self, message, candidates: {"status": "no_codes", "address": "Known house", "data": {}, "engine": "v2"},
     )
@@ -80,7 +126,7 @@ def test_identity_without_codes_is_not_overridden(monkeypatch):
     async def should_not_run(message):
         raise AssertionError("Do not replace a known house with legacy guesses")
 
-    monkeypatch.setattr(v2, "get_data_from_db", should_not_run)
+    monkeypatch.setattr(search, "get_data_from_db", should_not_run)
     with TestClient(app) as client:
         response = client.get("/api/v2/codes/msg", params={"message": "something"})
         assert response.json()["status"] == "no_codes"
@@ -101,7 +147,7 @@ def test_v2_does_not_return_legacy_house_number_reinterpretation(monkeypatch, tm
     async def legacy(message, *, accept_source):
         return {"address": "Москва, улица 1-я Парковая, дом 2", "data": {"1": [["CODE", "test"]]}}
 
-    monkeypatch.setattr(v2, "get_data_from_db", legacy)
+    monkeypatch.setattr(search, "get_data_from_db", legacy)
     with TestClient(app) as client:
         result = client.get("/api/v2/codes/msg", params={"message": "Москва Парковая 12"}).json()
         assert result["status"] == "not_found"
@@ -123,7 +169,7 @@ def test_v2_keeps_opaque_legacy_numbering_compatibility(monkeypatch, tmp_path, q
     async def legacy(message, *, accept_source):
         return {"address": address, "data": {"1": [["CODE", "test"]]}}
 
-    monkeypatch.setattr(v2, "get_data_from_db", legacy)
+    monkeypatch.setattr(search, "get_data_from_db", legacy)
     with TestClient(app) as client:
         result = client.get("/api/v2/codes/msg", params={"message": query}).json()
         assert result["status"] == "found"
@@ -141,9 +187,9 @@ async def test_empty_lexical_result_with_house_still_uses_compatible_v1(monkeypa
         return {"address": "Долгопрудный, улица Набережная, дом 19", "data": {"1": [["CODE", "test"]]}}
 
     monkeypatch.setattr(settings, "opensearch_url", None)
-    monkeypatch.setattr(v2, "get_catalog", EmptyCatalog)
-    monkeypatch.setattr(v2, "get_data_from_db", legacy)
-    result = await v2.uncached_lookup(query)
+    monkeypatch.setattr(search, "get_catalog", EmptyCatalog)
+    monkeypatch.setattr(search, "get_data_from_db", legacy)
+    result = await search.uncached_lookup(query)
     assert result["status"] == "found"
     assert result["engine"] == "v1"
 
@@ -158,6 +204,6 @@ async def test_incomplete_address_does_not_reinterpret_an_area_number_as_a_house
         raise AssertionError("A house number was not supplied")
 
     monkeypatch.setattr(settings, "opensearch_url", None)
-    monkeypatch.setattr(v2, "get_catalog", EmptyCatalog)
-    monkeypatch.setattr(v2, "get_data_from_db", forbidden)
-    assert (await v2.uncached_lookup("квартал 114А"))["status"] == "incomplete_query"
+    monkeypatch.setattr(search, "get_catalog", EmptyCatalog)
+    monkeypatch.setattr(search, "get_data_from_db", forbidden)
+    assert (await search.uncached_lookup("квартал 114А"))["status"] == "incomplete_query"

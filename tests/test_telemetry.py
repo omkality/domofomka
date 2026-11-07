@@ -11,10 +11,11 @@ from litestar.testing import TestClient
 from requests import Response, Session
 from requests.exceptions import ProxyError
 
-from src.api import v2
 from src.api.app import app
-from src.api.config import settings as api_settings
+from src.application import search
+from src.config import settings as api_settings
 from src.network import network_settings
+from src.search.engine import Catalog
 from src.services.dadata_client import DadataClient
 from src.services.outbound import proxy_health
 from src.telemetry import Capture, merge, note, search_result, settings, span
@@ -94,16 +95,16 @@ def observed_api(tmp_path, monkeypatch):
     monkeypatch.setattr(api_settings, "legacy_index_path", str(tmp_path / "absent-index.db"))
     monkeypatch.setattr(api_settings, "opensearch_url", None)
     monkeypatch.setattr(api_settings, "search_cache_ttl_seconds", 120)
-    v2.result_cache.configure(0, 1, 1024)
+    search.result_cache.configure(0, 1, 1024)
     yield
-    v2.result_cache.configure(0, 1, 1024)
+    search.result_cache.configure(0, 1, 1024)
 
 
 def test_api_cache_does_not_fake_new_search_or_reuse_old_measurements(observed_api, monkeypatch):
     resolve = MagicMock(
         return_value={"status": "found", "engine": "v2", "address": "House", "data": {"1": [["CODE", "test"]]}}
     )
-    monkeypatch.setattr(v2.Catalog, "resolve", resolve)
+    monkeypatch.setattr(Catalog, "resolve", resolve)
     with TestClient(app) as client:
         first = client.get("/api/v2/codes/msg", params={"message": "test", "observe": "true"}).json()
         second = client.get("/api/v2/codes/msg", params={"message": "test", "observe": "true"}).json()
@@ -122,7 +123,7 @@ def test_api_cache_does_not_fake_new_search_or_reuse_old_measurements(observed_a
 def test_api_records_v2_error_and_actual_v1_result(observed_api, monkeypatch):
     from src.services import codes
 
-    monkeypatch.setattr(v2.Catalog, "resolve", MagicMock(side_effect=RuntimeError("offline")))
+    monkeypatch.setattr(Catalog, "resolve", MagicMock(side_effect=RuntimeError("offline")))
     monkeypatch.setattr(
         codes,
         "scan_data_from_db",
@@ -144,7 +145,7 @@ def test_api_failed_geo_keeps_diagnostic_packet(observed_api, monkeypatch):
 
     geocoder = MagicMock()
     geocoder.get_address_by_geo = AsyncMock(side_effect=DadataUnavailable("offline"))
-    monkeypatch.setattr(v2, "get_dadata_client", AsyncMock(return_value=geocoder))
+    monkeypatch.setattr("src.services.dadata_client.DadataClient.get_address_by_geo", geocoder.get_address_by_geo)
     with TestClient(app) as client:
         response = client.get("/api/v2/codes/geo", params={"lat": 1, "lon": 2, "observe": "true"})
     assert response.status_code == 503

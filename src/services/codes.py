@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 import aiosqlite
 
-from src.api.config import settings
+from src.config import settings
 from src.telemetry import note, search_result, span
 
 logger = logging.getLogger(__name__)

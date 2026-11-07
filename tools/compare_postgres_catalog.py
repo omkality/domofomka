@@ -9,8 +9,8 @@ import os
 import time
 from pathlib import Path
 
-from src.api import v2
-from src.api.config import settings
+from src.application import search
+from src.config import settings
 from src.search.engine import Catalog
 from src.search.postgres import PostgresCatalog
 from tools.postgres_search_experiment import PostgresExperiment
@@ -49,21 +49,23 @@ async def compare(args):
     postgres = (
         PostgresCatalog(
             os.environ.get("CATALOG_BUILD_DSN") or os.environ["CATALOG_BENCHMARK_DSN"],
-            settings.search_min_similarity, settings.search_ambiguity_margin,
+            settings.search_min_similarity,
+            settings.search_ambiguity_margin,
         )
         if args.implementation == "production"
         else PostgresExperiment(settings.search_min_similarity, settings.search_ambiguity_margin)
     )
-    baseline_factory = v2.Catalog
+    baseline_factory = search.get_catalog
+    sqlite = Catalog(str(args.catalog), settings.search_min_similarity, settings.search_ambiguity_margin)
     records = select(args.corpus, args.limit)
     times = {"sqlite": [], "postgres": []}
     counts = collections.Counter()
     fingerprint = hashlib.sha256(json.dumps(records, sort_keys=True).encode()).hexdigest()
 
     async def lookup(backend, query):
-        v2.Catalog = Catalog if backend == "sqlite" else lambda *a, **kw: postgres
+        search.get_catalog = lambda: sqlite if backend == "sqlite" else postgres
         started = time.perf_counter()
-        result = await v2.lookup(query)
+        result = await search.lookup(query)
         elapsed = (time.perf_counter() - started) * 1000
         return result, elapsed
 
@@ -114,7 +116,7 @@ async def compare(args):
         (args.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf8")
         print(json.dumps(summary, ensure_ascii=False), flush=True)
     finally:
-        v2.Catalog = baseline_factory
+        search.get_catalog = baseline_factory
         postgres.close()
 
 

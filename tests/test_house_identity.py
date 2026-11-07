@@ -8,9 +8,9 @@ from litestar.testing import TestClient
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
-from src.api import v2
 from src.api.app import app
-from src.api.config import settings
+from src.application import search
+from src.config import settings
 from src.search.engine import Catalog
 from src.search.normalize import legacy_house_matches, parse_query
 from src.search.postgres import PostgresCatalog
@@ -171,8 +171,8 @@ def test_http_fallback_cannot_change_a_house_letter_corpus_or_structure(monkeypa
 
     monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
     monkeypatch.setattr(settings, "opensearch_url", None)
-    monkeypatch.setattr(v2, "get_catalog", catalog)
-    monkeypatch.setattr(v2, "get_data_from_db", legacy)
+    monkeypatch.setattr(search, "get_catalog", catalog)
+    monkeypatch.setattr(search, "get_data_from_db", legacy)
     with TestClient(app) as client:
         for requested in HOUSES:
             for returned in HOUSES:
@@ -225,14 +225,14 @@ def test_real_postgres_and_http_preserve_house_components_and_empty_neighbors(tm
             importer.load(serving, source, tmp_path / "report")
             reader = PostgresCatalog(test_dsn)
             try:
-                monkeypatch.setattr(v2, "get_catalog", lambda: reader)
+                monkeypatch.setattr(search, "get_catalog", lambda: reader)
                 monkeypatch.setattr(settings, "opensearch_url", None)
                 monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
 
                 async def unexpected_legacy(message):
                     raise AssertionError("A resolved house must not be replaced by legacy search")
 
-                monkeypatch.setattr(v2, "get_data_from_db", unexpected_legacy)
+                monkeypatch.setattr(search, "get_data_from_db", unexpected_legacy)
                 with TestClient(app) as client:
                     for spelling, expected in HOUSE_FORMS:
                         response = client.get(

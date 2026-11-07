@@ -1,68 +1,34 @@
+"""Сценарии поиска: выбор каталога, кеш и проверенный резервный поиск.
+
+HTTP-маршруты и коды ответа здесь не используются.
+"""
+
 import asyncio
 import hashlib
 import logging
-import threading
 from functools import partial
 from pathlib import Path
 
-import httpx
-from litestar import Router, get
-
-from src.api.cache import LookupCache
-from src.api.config import settings
-from src.api.routes import get_dadata_client
-from src.api.telemetry import observed
-from src.network import tls_context
+from src.application.cache import LookupCache
+from src.config import settings
 from src.search.constraints import legacy_result_matches, legacy_source_matches
-from src.search.engine import Catalog, search_body
 from src.search.normalize import parse_query
+from src.services.catalog import get_catalog
 from src.services.codes import get_data_from_db
+from src.services.dadata_client import DadataClient
+from src.services.search_index import candidate_ids
 from src.telemetry import note, search_result, span
 
 logger = logging.getLogger(__name__)
 result_cache = LookupCache()
-_postgres_readers: dict = {}
-_postgres_guard = threading.Lock()
 
 
-def close_catalog() -> None:
-    with _postgres_guard:
-        for reader in _postgres_readers.values():
-            reader.close()
-        _postgres_readers.clear()
+class CatalogUnavailable(RuntimeError):
+    """Каталог не смог завершить чтение в заданных пределах."""
 
 
-def get_catalog() -> Catalog:
-    if settings.search_backend == "sqlite":
-        return Catalog(settings.search_catalog_path, settings.search_min_similarity, settings.search_ambiguity_margin)
-    if not settings.catalog_database_url:
-        raise ValueError("CATALOG_DATABASE_URL required for PostgreSQL catalog")
-    from src.search.postgres import PostgresCatalog
-
-    config = (
-        settings.catalog_database_url.get_secret_value(),
-        settings.search_min_similarity,
-        settings.search_ambiguity_margin,
-        settings.catalog_connect_timeout_seconds,
-        settings.catalog_statement_timeout_ms,
-        settings.catalog_lock_timeout_seconds,
-        settings.catalog_operation_timeout_seconds,
-        settings.catalog_revision,
-    )
-    with _postgres_guard:
-        if config not in _postgres_readers:
-            for reader in _postgres_readers.values():
-                reader.close()
-            _postgres_readers.clear()
-            _postgres_readers[config] = PostgresCatalog(
-                *config[:3],
-                connect_timeout_seconds=config[3],
-                statement_timeout_ms=config[4],
-                lock_timeout_seconds=config[5],
-                operation_timeout_seconds=config[6],
-                revision=config[7],
-            )
-        return _postgres_readers[config]
+class BuildingNotFound(LookupError):
+    """Дома с указанным идентификатором нет в каталоге."""
 
 
 def cache_key(request: tuple) -> tuple | None:
@@ -110,6 +76,8 @@ def remember(key: tuple | None, result: dict) -> None:
 
 
 async def lookup(message: str) -> dict:
+    if len(message) > settings.search_max_query_length:
+        return {"status": "invalid_query", "data": {}, "engine": "v2"}
     note(catalog_backend=settings.search_backend)
     key = cache_key(("text", message))
     cached = result_cache.get(key) if key is not None else None
@@ -130,26 +98,8 @@ async def uncached_lookup(message: str) -> dict:
         candidates = None
         if settings.opensearch_url:
             try:
-                async with (
-                    asyncio.timeout(settings.opensearch_timeout_seconds),
-                    httpx.AsyncClient(
-                        verify=tls_context(), trust_env=False, timeout=settings.opensearch_timeout_seconds
-                    ) as client,
-                ):
-                    response = await client.post(
-                        settings.opensearch_url + "/" + settings.opensearch_index + "/_search",
-                        json=search_body(
-                            message,
-                            settings.search_candidate_limit,
-                            fuzziness=settings.opensearch_fuzziness,
-                            prefix_length=settings.opensearch_prefix_length,
-                        ),
-                    )
-                    if response.status_code != 200:
-                        raise RuntimeError("Search index unavailable")
-                    result = response.json()
-                    ids = [r["_id"] for r in result["hits"]["hits"]]
-
+                async with asyncio.timeout(settings.opensearch_timeout_seconds):
+                    ids = await candidate_ids(message, settings)
                     candidates = (
                         await asyncio.to_thread(catalog.load_candidates, ids, parse_query(message).house)
                         if ids
@@ -203,53 +153,22 @@ async def uncached_lookup(message: str) -> dict:
     return answer
 
 
-@get("/msg")
-async def message_codes(message: str, observe: bool = False) -> dict:
-    if len(message) > settings.search_max_query_length:
-        return {"status": "invalid_query", "data": {}, "engine": "v2"}
-    return await observed(lambda: lookup(message), observe)
-
-
-@get("/geo")
-async def geo_codes(lat: float, lon: float, observe: bool = False) -> dict:
-    return await observed(lambda: geo_lookup(lat, lon), observe)
-
-
-async def geo_lookup(lat: float, lon: float) -> dict:
+async def geo_lookup(lat: float, lon: float, dadata: DadataClient) -> dict:
     note(catalog_backend=settings.search_backend)
-    from litestar.exceptions import ServiceUnavailableException
-
-    from src.services.dadata_client import DadataUnavailable
-
     key = cache_key(("geo", lat, lon))
     cached = result_cache.get(key) if key is not None else None
     if cached is not None:
         note(geo_cache_hit=True, cached_result_engine=cached.get("engine"), result=search_result(cached))
         return cached
     note(geo_cache_hit=False)
-    try:
-        with span("geo.resolve"):
-            address = await (await get_dadata_client()).get_address_by_geo(lat, lon)
-    except DadataUnavailable as exc:
-        raise ServiceUnavailableException(
-            detail="Geocoding unavailable; send text", extra={"geocoding_retryable": exc.retryable}
-        ) from exc
+    with span("geo.resolve"):
+        address = await dadata.get_address_by_geo(lat, lon)
     result = await lookup(address or "")
     remember(key, result)
     return result
 
 
-v2_router = Router(path="/api/v2/codes", route_handlers=[message_codes, geo_codes])
-
-
-@get("/api/v2/buildings/{building_id:str}")
-async def building_codes(building_id: str, observe: bool = False) -> dict:
-    return await observed(lambda: read_building(building_id), observe)
-
-
 async def read_building(building_id: str) -> dict:
-    from litestar.exceptions import NotFoundException, ServiceUnavailableException
-
     note(catalog_backend=settings.search_backend)
 
     def read() -> dict | None:
@@ -262,7 +181,7 @@ async def read_building(building_id: str) -> dict:
             result = await asyncio.to_thread(read)
             detail["result"] = search_result(result) if result is not None else {"status": "not_found"}
     except Exception as exc:
-        raise ServiceUnavailableException(detail="Catalog unavailable") from exc
+        raise CatalogUnavailable("Catalog unavailable") from exc
     if result is None:
-        raise NotFoundException()
+        raise BuildingNotFound(building_id)
     return result

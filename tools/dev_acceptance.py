@@ -132,7 +132,7 @@ def main():
             )
         time.sleep(args.interval)
     dadata = (
-        "import asyncio; from src.services.dadata_client import DadataClient; from src.api.config import settings; "
+        "import asyncio; from src.services.dadata_client import DadataClient; from src.config import settings; "
         "c=DadataClient(settings.dadata_token,proxy_url=settings.dadata_proxy_url); "
         "assert asyncio.run(c.get_address_by_geo(lat=55.617586,lon=37.495482))"
     )

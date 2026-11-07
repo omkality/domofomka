@@ -171,8 +171,8 @@ def address_fields(address: str) -> dict:
 def review_evaluate(catalog: Path, output: Path):
     import asyncio
 
-    from src.api import v2
-    from src.api.config import settings
+    from src.application import search
+    from src.config import settings
 
     settings.search_catalog_path = str(catalog)
     settings.legacy_index_path = "artifacts/search/legacy-index.db"
@@ -187,7 +187,7 @@ def review_evaluate(catalog: Path, output: Path):
         if case["review_status"] in {"unreviewed", "unresolved_intent"}:
             counts["not_scored"] += 1
             continue
-        result = asyncio.run(v2.lookup(case["query"]))
+        result = asyncio.run(search.lookup(case["query"]))
         counts["scored"] += 1
         counts["status_" + result["status"]] += 1
         checks = []

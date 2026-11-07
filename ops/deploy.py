@@ -306,7 +306,7 @@ class Deployment:
         manifest = json.loads((Path(release) / "release.json").read_text())
         legacy = manifest.get("runtime") == "legacy-v1"
         # Выполняется внутри готового API, без зависимости хоста от Python-пакетов.
-        # Прямая проверка каталога выявляет ошибку, которую fallback v1 мог бы скрыть.
+        # Проверяем v2 через HTTP: probe подходит для обеих компоновок модулей при откате.
         probe = """
 import http.client,json,os
 c=http.client.HTTPConnection('127.0.0.1',int(os.environ.get('API_PORT','8000')),timeout=10)
@@ -317,11 +317,15 @@ info=json.loads(r.read()); assert info['name']=='domofomka'
             probe += "assert info['version']=='1.5.6'\n"
         else:
             probe += """
-from src.api.config import settings
-from src.api.v2 import get_catalog
-if settings.search_backend=='postgres':
-    catalog=get_catalog()
-    assert catalog.resolve('мичурина 1а')['status']=='found'
+from urllib.parse import quote,urlencode
+if os.environ.get('SEARCH_BACKEND','sqlite')=='postgres':
+    c.request('GET','/api/v2/codes/msg?'+urlencode({'message':'мичурина 1а'}))
+    r=c.getresponse(); assert r.status==200
+    result=json.loads(r.read())
+    assert result['status']=='found' and result['engine']=='v2'
+    c.request('GET','/api/v2/buildings/'+quote(result['building_id'],safe=''))
+    r=c.getresponse(); assert r.status==200
+    assert json.loads(r.read())['status']=='found'
 """
         self.compose(
             release,
