@@ -213,6 +213,9 @@ def profiles() -> list[dict]:
     )
     values.append(verified)
     values.append(dict(verified, name="verified.coverage-AUTO-r1.0", literal_coverage=True))
+    coverage = values[-1]
+    for policy in ("marked", "structured", "scoped"):
+        values.append(dict(coverage, name=f"locality.{policy}-AUTO-r1.0", locality_policy=policy))
     return values
 
 

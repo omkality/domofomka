@@ -33,6 +33,7 @@ from src.search.normalize import STOP, address_words, building_kind_matches, par
 from tools import (
     evaluate_search as replay,
     search_lexical_profiles,
+    search_locality_profiles,
 )
 from tools.compare_postgres_catalog import select
 from tools.quality_suite import address_fields, literal_words
@@ -367,7 +368,16 @@ def analysis_probes(client, index):
 
 
 def native_result(
-    catalog, message, hits, ratio, *, query_numbers=None, exact_tokens=None, require_exact=False, literal_coverage=False
+    catalog,
+    message,
+    hits,
+    ratio,
+    *,
+    query_numbers=None,
+    exact_tokens=None,
+    require_exact=False,
+    literal_coverage=False,
+    locality_hint=None,
 ):
     query = parse_query(message)
     if not query.words and query.name_words:
@@ -399,6 +409,8 @@ def native_result(
         hit = hit_by_id.get(sid, {})
         alias_hits = hit.get("inner_hits", {}).get("aliases", {}).get("hits", {})
         matching = [a["_source"] for a in alias_hits.get("hits", []) if a["_source"]["building_id"] == row["id"]]
+        if not search_locality_profiles.locality_matches(locality_hint, row, matching):
+            continue
         if not name_constraints_match(query, row, [alias["street"] for alias in matching]):
             continue
         if alias_hits and "canonical" not in hit.get("matched_queries", []):
@@ -539,6 +551,8 @@ def sample(corpus, reviewed, limit, full=False):
 
 
 def reviewed_conflict(case, result, catalog):
+    if case.get("expected_status") and result["status"] != case["expected_status"]:
+        return True
     options = [result] if result["status"] in {"found", "no_codes"} else result.get("candidates", [])
     for option in options:
         if option.get("building_id"):
@@ -550,11 +564,11 @@ def reviewed_conflict(case, result, catalog):
         else:
             building = address_fields(option["address"])
             aliases = []
-        if literal_words(case["expected_street"]) not in [
+        if case.get("expected_street") and literal_words(case["expected_street"]) not in [
             literal_words(re.sub(r"\([^()]*\)", "", street)) for street in [building["street"], *aliases]
         ]:
             return True
-        if building["house"].casefold().replace("ё", "е") != case["expected_house"]:
+        if case.get("expected_house") and building["house"].casefold().replace("ё", "е") != case["expected_house"]:
             return True
         if case.get("expected_city") and not literal_words(case["expected_city"]) <= literal_words(
             building["city"] + " " + building.get("lineage", "")
@@ -570,6 +584,16 @@ def reviewed_conflict(case, result, catalog):
 
 def search_variant(catalog, message, variant, search, analyze=None):
     parsed = parse_query(message)
+    locality = (
+        search_locality_profiles.locality_hint(
+            message,
+            partial(search_locality_profiles.known_locality, catalog),
+            comma_prefix=variant["locality_policy"] in {"structured", "scoped"},
+            require_street_field=variant["locality_policy"] == "scoped",
+        )
+        if variant.get("locality_policy")
+        else None
+    )
     if variant.get("preserve_names") and not parsed.words and parsed.name_words:
         variant = dict(variant, text_source="names", analyzer="ordinal_names")
     numbers = None
@@ -639,6 +663,7 @@ def search_variant(catalog, message, variant, search, analyze=None):
         exact_tokens=set(tokens) if variant.get("decision") == "exact_tokens" else None,
         require_exact=known or scoped,
         literal_coverage=bool(variant.get("literal_coverage") and literal_hits),
+        locality_hint=locality,
     )
     if guarded:
         result["query_budget"] = budget

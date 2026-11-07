@@ -34,6 +34,7 @@ def source_fingerprints() -> dict[str, str]:
         "tools/evaluate_search.py",
         "tools/benchmark_native_search.py",
         "tools/search_lexical_profiles.py",
+        "tools/search_locality_profiles.py",
         "tools/quality_suite.py",
         "tools/compare_postgres_catalog.py",
         "src/services/codes.py",
