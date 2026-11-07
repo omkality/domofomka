@@ -20,6 +20,8 @@ class VKBotSettings(BaseSettings):
 
     queue_database_url: str
     queue_workers: int = 2
+    queue_max_pending_messages_per_peer: int = Field(default=3, ge=1, le=100)
+    outbox_peer_min_interval_seconds: float = Field(default=5, gt=0)
     geo_retry_delay_seconds: float = Field(default=60, gt=0)
     geo_retry_max_age_seconds: float = Field(default=1800, gt=0)
     queue_retention_days: int = Field(default=180, ge=1)

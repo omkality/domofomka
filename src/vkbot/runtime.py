@@ -42,6 +42,8 @@ class Runtime:
             int(settings.vk_group_id),
             settings.queue_lease_seconds,
             telemetry=telemetry_settings.telemetry_enabled,
+            max_pending_messages_per_peer=getattr(settings, "queue_max_pending_messages_per_peer", 3),
+            reply_interval_seconds=getattr(settings, "outbox_peer_min_interval_seconds", 5),
         )
         self.store.environment = settings.app_environment
         self.gate = RateGate(settings.vk_min_interval_seconds)

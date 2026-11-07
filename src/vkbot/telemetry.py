@@ -196,7 +196,11 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
         action = json.loads(action)
     existing = conn.execute("SELECT outcome FROM request_log WHERE id=%s", (identity(group, inbox),)).fetchone()
     skipped = (existing or {}).get("outcome", {}).get("skipped_outbox_ids", [])
+    disposition = row["payload"].get("_queue_disposition")
+    if disposition:
+        skipped = [e["id"] for e in effects]
     state = {
+        "queue_disposition": disposition,
         "inbox_status": row["status"],
         "last_error": row["last_error"],
         "outbox_total": len(effects),
@@ -244,6 +248,8 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
         state["delivery_status"] = "accepted_by_vk" if effects else "no_delivery"
         if state["outbox_skipped"]:
             state["delivery_status"] = "accepted_with_skips" if state["outbox_done"] else "cancelled"
+    if disposition:
+        state["delivery_status"] = "cancelled"
     if receipt.get("throttled"):
         conn.execute("UPDATE request_log SET telemetry_state='not_applicable' WHERE id=%s", (identity(group, inbox),))
     conn.execute(
