@@ -378,6 +378,29 @@ def test_geolocation_failure_plans_text_fallback_instead_of_blocking_peer(proces
     assert "адрес текстом" in effects[0]["params"]["message"]
 
 
+@pytest.mark.parametrize("kind", ["message_new", "geo_retry"])
+def test_geo_access_failure_finishes_with_notice_instead_of_enqueuing_retries(processor, kind):
+    processor._get = MagicMock()
+    processor._get.return_value.status_code = 503
+    processor._get.return_value.json.return_value = {"extra": {"geocoding_retryable": False}}
+    job = {"kind": kind, "peer_id": 100,
+           "payload": {"message": {"id": 42, "text": "", "geo": {"coordinates": {"latitude": 1, "longitude": 2}}}}}
+    processor.plan(job)
+    effects = processor.store.plan.call_args.args[1]
+    assert len(effects) == 1
+    assert "временно недоступно" in effects[0]["params"]["message"]
+    assert "defer_geo" not in effects[0]
+    processor.store.defer_geo_retry.assert_not_called()
+
+
+def test_access_error_marker_does_not_disable_text_retries(processor):
+    processor._get = MagicMock()
+    processor._get.return_value.status_code = 503
+    processor._get.return_value.json.return_value = {"extra": {"geocoding_retryable": False}}
+    with pytest.raises(LookupUnavailable):
+        processor.lookup("Москва Тестовая 1")
+
+
 def test_text_lookup_failure_keeps_durable_retry_behavior(processor: Processor) -> None:
     processor.lookup = MagicMock(side_effect=LookupUnavailable())
     with pytest.raises(LookupUnavailable):

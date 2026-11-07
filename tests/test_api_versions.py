@@ -6,6 +6,51 @@ from src.api.app import app
 from src.api.config import settings
 
 
+@pytest.mark.parametrize("path", ["/codes/geo", "/api/v1/codes/geo", "/api/v2/codes/geo"])
+@pytest.mark.parametrize("observe", [False, True])
+def test_geocoding_access_denial_is_typed_service_unavailable(monkeypatch, path, observe):
+    from unittest.mock import AsyncMock
+
+    from src.services.dadata_client import DadataClient, DadataUnavailable
+    from src.telemetry import settings as telemetry_settings
+
+    monkeypatch.setattr(telemetry_settings, "telemetry_enabled", True)
+    monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
+    monkeypatch.setattr(DadataClient, "get_address_by_geo", AsyncMock(side_effect=DadataUnavailable(retryable=False)))
+    with TestClient(app) as client:
+        response = client.get(path, params={"lat": 1, "lon": 2, "observe": observe})
+    assert response.status_code == 503
+    assert response.json()["extra"]["geocoding_retryable"] is False
+
+
+@pytest.mark.parametrize("status", ["found", "no_codes", "not_found"])
+def test_geolocation_uses_the_same_v2_and_guarded_fallback_as_text(monkeypatch, status):
+    from unittest.mock import AsyncMock
+
+    from src.services.dadata_client import DadataClient
+
+    address = "Москва Тестовая 4к1с1"
+    result = {"status": status, "engine": "v2", "address": "Москва, улица Тестовая, дом 4к1с1", "data": {}}
+    if status == "found":
+        result["data"] = {"1": [["EXPECTED", "test"]]}
+    class Reader:
+        def resolve(self, message, candidates=None):
+            assert message == address
+            return result
+    legacy = AsyncMock(return_value={"address": result["address"], "data": {"1": [["LEGACY", "test"]]}})
+    monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
+    monkeypatch.setattr(settings, "opensearch_url", None)
+    monkeypatch.setattr(v2, "get_catalog", Reader)
+    monkeypatch.setattr(v2, "get_data_from_db", legacy)
+    monkeypatch.setattr(DadataClient, "get_address_by_geo", AsyncMock(return_value=address))
+    with TestClient(app) as client:
+        geo = client.get("/api/v2/codes/geo", params={"lat": 1, "lon": 2})
+        text = client.get("/api/v2/codes/msg", params={"message": address})
+    assert geo.status_code == text.status_code == 200
+    assert geo.json() == text.json()
+    assert legacy.await_count == (2 if status == "not_found" else 0)
+
+
 def test_legacy_paths_remain_equivalent(monkeypatch):
     # Real routing and real v1 implementation; empty input avoids the production DB.
     with TestClient(app) as client:

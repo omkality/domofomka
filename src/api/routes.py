@@ -41,7 +41,8 @@ async def legacy_geo(lat: float, lon: float, dadata: DadataClient) -> dict:
             address = await dadata.get_address_by_geo(lat=lat, lon=lon)
     except DadataUnavailable as exc:
         raise ServiceUnavailableException(
-            detail="Geolocation is temporarily unavailable; send an address as text"
+            detail="Geolocation is temporarily unavailable; send an address as text",
+            extra={"geocoding_retryable": exc.retryable},
         ) from exc
     return await get_data_from_db(address)
 

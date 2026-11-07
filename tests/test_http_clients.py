@@ -103,6 +103,30 @@ def test_dadata_response_error_keeps_route_and_closes_client(clients):
     assert len(configurations) == 1
 
 
+@pytest.mark.parametrize("status", [401, 403])
+def test_dadata_access_error_stops_retries_without_switching_routes(clients, monkeypatch, status):
+    from types import SimpleNamespace
+
+    from src.services import dadata_client
+
+    now = [100.0]
+    monkeypatch.setattr(dadata_client, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    configurations = clients(lambda request: httpx.Response(status, json={"message": "access denied"}))
+
+    async def run():
+        for _ in range(2):
+            with pytest.raises(DadataUnavailable) as error:
+                await DadataClient("unused", proxy_url="http://proxy.test:8888").geolocate(1, 2)
+            assert not error.value.retryable
+
+    asyncio.run(run())
+    assert len(configurations) == 1
+    assert configurations[0]["proxy"] == "http://proxy.test:8888"
+    now[0] += dadata_client.network_settings.dadata_access_cooldown_seconds + 1
+    clients(lambda request: httpx.Response(200, json={"suggestions": []}))
+    assert asyncio.run(DadataClient("unused").geolocate(1, 2)) == {"suggestions": []}
+
+
 def test_dadata_total_deadline_also_covers_body_consumption(clients):
     body = SlowBody()
     clients(lambda request: httpx.Response(200, stream=body))

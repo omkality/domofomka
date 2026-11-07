@@ -68,7 +68,24 @@ def test_missing_block_type_does_not_crash_geocoding(builder: MagicMock) -> None
     builder.return_value = SimpleNamespace(
         status_code=200, json=MagicMock(return_value={"suggestions": [{"data": data}]})
     )
-    assert asyncio.run(DadataClient("fake").get_address_by_geo(1, 2)) == "Город Улица 1 2"
+    assert asyncio.run(DadataClient("fake").get_address_by_geo(1, 2)) is None
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({"city": None, "settlement": "Нахабино", "street": "Тестовая", "house": "7"}, "Нахабино Тестовая 7"),
+        ({"city": "Москва", "street": "Тестовая", "house": None}, None),
+        ({"city": None, "street": "Тестовая", "house": "7"}, None),
+        ({"city": "Москва", "street": "Тестовая", "house": "4", "block_type": "к", "block": "1 стр 1"},
+         "Москва Тестовая 4 к1с1"),
+    ],
+)
+def test_geocoding_requires_a_house_and_locality_and_preserves_blocks(builder, data, expected):
+    builder.return_value = SimpleNamespace(
+        status_code=200, json=MagicMock(return_value={"suggestions": [{"data": data}]})
+    )
+    assert asyncio.run(DadataClient("fake").get_address_by_geo(1, 2)) == expected
 
 
 @pytest.fixture

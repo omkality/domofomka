@@ -16,9 +16,14 @@ logger = logging.getLogger(__name__)
 class DadataUnavailable(RuntimeError):
     """Temporary geocoding failure; callers can distinguish it from no results."""
 
+    def __init__(self, message: str = "Geocoding is temporarily unavailable", *, retryable: bool = True):
+        super().__init__(message)
+        self.retryable = retryable
+
 
 class DadataClient:
     _unavailable_until = 0.0
+    _unavailable_retryable = True
 
     def __init__(self, token: str, timeout_seconds: float | None = None, proxy_url: str | None = None):
         if proxy_url and (urlsplit(proxy_url).scheme not in {"http", "https"} or not urlsplit(proxy_url).hostname):
@@ -40,7 +45,7 @@ class DadataClient:
 
         if time.monotonic() < type(self)._unavailable_until:
             note(geocoding_skipped="service_cooldown")
-            raise DadataUnavailable("Geocoding is temporarily unavailable")
+            raise DadataUnavailable(retryable=type(self)._unavailable_retryable)
         try:
             # One deadline covers proxy, direct fallback and response decoding.
             async with asyncio.timeout(self.timeout_seconds):
@@ -79,9 +84,15 @@ class DadataClient:
         except Exception as exc:
             # Separate client instances are created for requests. Keep the short
             # circuit breaker at process level to avoid repeated long waits.
-            type(self)._unavailable_until = time.monotonic() + network_settings.dadata_failure_cooldown_seconds
+            retryable = not isinstance(exc, DadataUnavailable) or exc.retryable
+            cooldown = (
+                network_settings.dadata_failure_cooldown_seconds if retryable
+                else network_settings.dadata_access_cooldown_seconds
+            )
+            type(self)._unavailable_until = time.monotonic() + cooldown
+            type(self)._unavailable_retryable = retryable
             logger.warning("Geocoding unavailable error=%s", type(exc).__name__)
-            raise DadataUnavailable("Geocoding is temporarily unavailable") from None
+            raise DadataUnavailable(retryable=retryable) from None
 
     async def _request(self, url: str, payload: dict, use_proxy: bool) -> dict:
         async with httpx.AsyncClient(
@@ -96,6 +107,10 @@ class DadataClient:
         ) as client:
             response = await client.post(url, headers=self.headers, json=payload)
             amend(http_status=response.status_code)
+            if response.status_code in {401, 403}:
+                # 403 also covers invalid credentials/unconfirmed mail: do not
+                # claim the daily quota is certainly exhausted or change routes.
+                raise DadataUnavailable("Geocoding access unavailable", retryable=False)
             if response.status_code != 200:
                 raise DadataUnavailable("Geocoding returned an unsuccessful response")
             return response.json()
@@ -106,11 +121,14 @@ class DadataClient:
         if houses and "suggestions" in houses and houses["suggestions"]:
             house_data: dict[str, str] = houses["suggestions"][0]["data"]
 
-            if house_data.get("street"):
-                address = f"{house_data['city']} {house_data['street']} {house_data['house']}"
+            locality = house_data.get("settlement") or house_data.get("city")
+            if locality and house_data.get("street") and house_data.get("house"):
+                address = f"{locality} {house_data['street']} {house_data['house']}"
 
                 if house_data.get("block"):
-                    block_type = (house_data.get("block_type") or "").replace("стр", "с")
+                    if not house_data.get("block_type"):
+                        return None
+                    block_type = house_data["block_type"].replace("стр", "с")
                     block = house_data["block"].replace(" стр ", "с")
                     address += f" {block_type}{block}"
 

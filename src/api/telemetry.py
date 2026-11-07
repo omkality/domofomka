@@ -33,5 +33,8 @@ async def observed(operation: Callable[[], Awaitable[dict]], requested: bool) ->
             with span("api.handle"):
                 result = await operation()
         except HTTPException as exc:
-            return Response({"detail": exc.detail, "_diagnostics": capture.packet()}, status_code=exc.status_code)
+            return Response(
+                {"detail": exc.detail, "_diagnostics": capture.packet(), **({"extra": exc.extra} if exc.extra else {})},
+                status_code=exc.status_code,
+            )
         return dict(result, _diagnostics=capture.packet())

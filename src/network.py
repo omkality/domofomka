@@ -15,6 +15,7 @@ class NetworkSettings(BaseSettings):
     dadata_timeout_seconds: float = Field(default=8, gt=0)
     dadata_connect_timeout_seconds: float = Field(default=2, gt=0)
     dadata_failure_cooldown_seconds: float = Field(default=30, gt=0)
+    dadata_access_cooldown_seconds: float = Field(default=3600, gt=0)
     proxy_retry_initial_seconds: float = Field(default=30, gt=0)
     proxy_retry_max_seconds: float = Field(default=300, gt=0)
     proxy_retry_multiplier: float = Field(default=2, ge=1)

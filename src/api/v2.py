@@ -231,7 +231,9 @@ async def geo_lookup(lat: float, lon: float) -> dict:
         with span("geo.resolve"):
             address = await (await get_dadata_client()).get_address_by_geo(lat, lon)
     except DadataUnavailable as exc:
-        raise ServiceUnavailableException(detail="Geocoding unavailable; send text") from exc
+        raise ServiceUnavailableException(
+            detail="Geocoding unavailable; send text", extra={"geocoding_retryable": exc.retryable}
+        ) from exc
     result = await lookup(address or "")
     remember(key, result)
     return result
