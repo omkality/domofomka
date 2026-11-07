@@ -234,4 +234,5 @@ API опубликован только на localhost. Лимиты памят�
 
 Методика и результаты сравнения поиска: [эксперименты](docs/search-experiments.md).
 Проверки значимых слов, кварталов, корпусов и совместимого fallback: [разбор исправлений](docs/search-name-identity.md).
-Сохранность вариантов, геопоиск и разделение API: [последняя проверка](docs/search-prefix-performance.md).
+Сохранность вариантов и геопоиск: [проверка поиска](docs/search-prefix-performance.md).
+Стоимость широких запросов и обслуживание: [проверка PostgreSQL](docs/catalog-street-layout.md).

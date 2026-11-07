@@ -145,3 +145,17 @@ OpenSearch остаётся локальным инструментом срав
   Файлы: `src/search/source_matching.py`, `src/services/codes.py`,
   `src/services/legacy_index.py` → `src/services/source_index.py`, `tests/test_legacy_index.py`,
   `tools/audit_search_code_coverage.py`, `tools/evaluate_legacy_index.py`, `tools/evaluate_search.py`.
+
+`1808667` — `perf(catalog): group street rows with guarded dev maintenance`.
+Новая загрузка улиц рядом по названию и явное транзакционное обслуживание dev через Actions.
+Файлы: `tools/build_postgres_catalog.py`, `ops/deploy.py`, `tools/ci_send.py`,
+`.github/workflows/dev-tests.yml`, `.env.example`, `.env.dev.example`,
+`tests/test_deployment.py`, `tests/test_postgres_catalog.py`.
+
+`2d3ae97` — `fix(ci): reuse active images for catalog maintenance`.
+Обслуживание использует активные digest уже развёрнутого коммита, не загружает третью копию
+образов и сохраняет прежний резерв диска. Файлы: `ops/deploy.py`, `tests/test_deployment.py`.
+
+`c0c2a32` — `test(ci): verify broad queries after catalog maintenance`.
+Приёмка исходных широких запросов не принимает скрытый отказ каталога за успешный fallback.
+Файлы: `ops/deploy.py`, `tests/test_deployment.py`.
