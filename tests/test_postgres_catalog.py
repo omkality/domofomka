@@ -45,6 +45,7 @@ def local_experiment(tmp_path, monkeypatch):
                     ("e", "Москва", "2-я Парковая", "3"),
                     ("f", "Москва", "Коломенская", "2"),
                     ("g", "Москва", "Коломенская", "2а"),
+                    ("h", "Москва", "Большая Коломенская", "2"),
                 ]:
                     db.execute(
                         "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -71,6 +72,7 @@ def local_experiment(tmp_path, monkeypatch):
                         ("d", "1", "source", "FIRST"),
                         ("e", "1", "source", "SECOND"),
                         ("g", "1", "source", "NEIGHBOUR"),
+                        ("h", "1", "source", "OTHER-STREET"),
                     ],
                 )
                 # Compact aliases must only refer to actual code-bearing rows.
@@ -134,6 +136,11 @@ def test_bounded_reader_preserves_results_and_compact_building_ids(local_experim
     sqlite = Catalog(str(local_experiment))
     reader = production_reader()
     try:
+        empty = reader.resolve("Москва Коломенская 2")
+        assert empty["status"] == "no_codes"
+        identity = reader.building(empty["building_id"])
+        assert identity["street"] == "Коломенская"
+        assert identity["house"] == "2"
         for query in [
             "Перерва 62к1",
             "Москва Перерва 62к1",

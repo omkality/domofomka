@@ -5,6 +5,7 @@ from collections.abc import Iterable
 
 from src.search.normalize import (
     NAME_LABELS,
+    STOP,
     Query,
     address_words,
     building_kind_matches,
@@ -13,6 +14,41 @@ from src.search.normalize import (
     street_kind,
     text,
 )
+
+LITERAL_NAME_NOISE = frozenset(word for word in set(STOP) - NAME_LABELS if len(word) > 1) | {"им", "имени"}
+NAME_KINDS = frozenset(street_kind(word) for word in NAME_LABELS)
+
+
+def literal_name_tokens(value: str) -> frozenset[str]:
+    return frozenset(
+        street_kind(word) if word in NAME_LABELS else word
+        for word in text(value).split()
+        if word not in LITERAL_NAME_NOISE
+    )
+
+
+def street_name_keys(row: dict, street: str | None = None) -> set[frozenset[str]]:
+    """Сравнить полное имя с типом элемента, сохраняя инициалы и значимые слова."""
+    name = literal_name_tokens(row["street"] if street is None else street)
+    prefix = row["display"].removeprefix(row["city"] + ", ").rsplit(", дом ", 1)[0]
+    own_type = prefix.removesuffix(row["street"])
+    kind = street_kind(own_type)
+    labels = frozenset([kind]) if kind in NAME_KINDS else literal_name_tokens(own_type)
+    return {name, name | labels} - {frozenset()}
+
+
+def complete_name_match(query: Query, row: dict, aliases: Iterable[dict] = ()) -> bool:
+    tokens = literal_name_tokens(query.name_words or query.words)
+    names = [(row["city"], row["street"])]
+    for alias in aliases:
+        street = alias["street"]
+        words = alias.get("words", "")
+        names.append((words.removesuffix(street).strip() if words.endswith(street) else "", street))
+    return any(
+        tokens - (literal_name_tokens(city) - name) == name
+        for city, street in names
+        for name in street_name_keys(row, street)
+    )
 
 
 def name_constraints_match(query: Query, row: dict, aliases: Iterable[str] = ()) -> bool:

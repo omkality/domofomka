@@ -19,14 +19,14 @@ from pathlib import Path
 import httpx
 from rapidfuzz.distance import DamerauLevenshtein
 
-from src.search.constraints import legacy_result_matches, name_constraints_match
-from src.search.engine import MAPPING, Catalog, documents, search_body
-from src.search.normalize import (
-    STOP,
-    address_words,
-    building_kind_matches,
-    parse_query,
+from src.search.constraints import (
+    complete_name_match,
+    legacy_result_matches,
+    name_constraints_match,
+    whole_location_match,
 )
+from src.search.engine import MAPPING, Catalog, documents, search_body
+from src.search.normalize import STOP, address_words, building_kind_matches, parse_query
 from tools import (
     evaluate_search as replay,
     search_lexical_profiles,
@@ -60,11 +60,7 @@ def mapping(*, aliases=False, lexical=False, similarity=None, bm25_b=0.75):
     )
     analysis["analyzer"].update(
         plain={"type": "custom", "tokenizer": "standard", "filter": ["lowercase"]},
-        query_plain={
-            "type": "custom",
-            "tokenizer": "standard",
-            "filter": ["lowercase", "address_stop"],
-        },
+        query_plain={"type": "custom", "tokenizer": "standard", "filter": ["lowercase", "address_stop"]},
         query_stem={
             "type": "custom",
             "tokenizer": "standard",
@@ -79,16 +75,8 @@ def mapping(*, aliases=False, lexical=False, similarity=None, bm25_b=0.75):
     value["mappings"]["properties"]["words"].update(
         search_analyzer="query_stem",
         fields={
-            "plain": {
-                "type": "text",
-                "analyzer": "plain",
-                "search_analyzer": "query_plain",
-            },
-            "synonyms": {
-                "type": "text",
-                "analyzer": "address",
-                "search_analyzer": "query_synonyms",
-            },
+            "plain": {"type": "text", "analyzer": "plain", "search_analyzer": "query_plain"},
+            "synonyms": {"type": "text", "analyzer": "address", "search_analyzer": "query_synonyms"},
         },
     )
     for field in ("city", "street"):
@@ -135,10 +123,7 @@ def mapping(*, aliases=False, lexical=False, similarity=None, bm25_b=0.75):
 def configurations(stage="initial"):
     if stage == "lexical":
         return search_lexical_profiles.profiles()
-    values = [
-        {"name": "catalog", "mode": "catalog"},
-        {"name": "hybrid", "mode": "hybrid"},
-    ]
+    values = [{"name": "catalog", "mode": "catalog"}, {"name": "hybrid", "mode": "hybrid"}]
     for field, fuzziness, prefix in itertools.product(
         ["words", "words.plain", "words.synonyms"], ["1", "AUTO", "AUTO:4,7"], [0, 1]
     ):
@@ -232,13 +217,7 @@ def native_body(message, variant, *, analyzed_tokens=None):
         "max_expansions": variant["expansions"],
         "fuzzy_transpositions": True,
     }
-    exact = {
-        "query": lexical_text,
-        "operator": "and",
-        "fuzziness": 0,
-        "boost": 4,
-        "_name": "exact",
-    }
+    exact = {"query": lexical_text, "operator": "and", "fuzziness": 0, "boost": 4, "_name": "exact"}
     if variant.get("analyzer"):
         match["analyzer"] = exact["analyzer"] = variant["analyzer"]
     body = {
@@ -347,11 +326,7 @@ def build_index(catalog, url, index, *, aliases=False, lexical=False, source_ind
                 + "\n"
                 for doc in batch
             )
-            response = client.post(
-                "/_bulk",
-                content=payload.encode(),
-                headers={"Content-Type": "application/x-ndjson"},
-            )
+            response = client.post("/_bulk", content=payload.encode(), headers={"Content-Type": "application/x-ndjson"})
             response.raise_for_status()
             if response.json().get("errors"):
                 raise RuntimeError("Experiment bulk indexing failed")
@@ -388,7 +363,9 @@ def analysis_probes(client, index):
     return probes
 
 
-def native_result(catalog, message, hits, ratio, *, query_numbers=None, exact_tokens=None, require_exact=False):
+def native_result(
+    catalog, message, hits, ratio, *, query_numbers=None, exact_tokens=None, require_exact=False, literal_coverage=False
+):
     query = parse_query(message)
     if not query.words and query.name_words:
         query = replace(query, words=query.name_words)
@@ -445,6 +422,7 @@ def native_result(catalog, message, hits, ratio, *, query_numbers=None, exact_to
         return {"status": "not_found", "data": {}}
     best = max(scores[sid] for sid, _ in eligible)
     precise = []
+    coded_ids = None
     if exact_tokens is not None:
         for sid, row in eligible:
             aliases = [
@@ -453,29 +431,59 @@ def native_result(catalog, message, hits, ratio, *, query_numbers=None, exact_to
                 if inner["_source"]["building_id"] == row["id"]
             ]
             alias_texts = [value for alias in aliases for value in [alias["street"], alias.get("words", "")]]
-            if search_lexical_profiles.exact_text_match(exact_tokens, row, alias_texts):
+            complete = (
+                complete_name_match(query, row, aliases)
+                if literal_coverage
+                else search_lexical_profiles.exact_text_match(exact_tokens, row, alias_texts)
+            )
+            if complete:
                 precise.append(row)
-    if require_exact and not precise:
-        return {"status": "not_found", "data": {}, "fallback_rejected": "known_street_without_requested_house"}
-    close = precise or [row for sid, row in eligible if scores[sid] >= best * ratio]
-    if len(close) > 1:
+    if literal_coverage:
         with catalog.connect() as db:
-            coded = {
+            coded_ids = {
                 r[0]
                 for r in db.execute(
                     "SELECT DISTINCT building_id FROM codes WHERE building_id IN ("
-                    + ",".join("?" for _ in close)
+                    + ",".join("?" for _ in eligible)
                     + ")",
-                    [row["id"] for row in close],
+                    [row["id"] for _, row in eligible],
                 )
             }
-        if coded:
-            close = [row for row in close if row["id"] in coded]
+        if precise and not any(whole_location_match(query, row["city"], row["street"]) for row in precise):
+            # A different city/street decomposition elsewhere in GAR is not
+            # evidence that this otherwise complete street query names that city.
+            require_exact = False
+        # Without a complete location, an empty exact street in another city
+        # cannot hide literal coded candidates. A fully scoped name stays protected.
+        if not require_exact and not any(row["id"] in coded_ids for row in precise):
+            precise = []
+    if require_exact and not precise:
+        return {"status": "not_found", "data": {}, "fallback_rejected": "known_street_without_requested_house"}
+    close = precise or [row for sid, row in eligible if literal_coverage or scores[sid] >= best * ratio]
+    if len(close) > 1:
+        if coded_ids is None:
+            with catalog.connect() as db:
+                coded_ids = {
+                    r[0]
+                    for r in db.execute(
+                        "SELECT DISTINCT building_id FROM codes WHERE building_id IN ("
+                        + ",".join("?" for _ in close)
+                        + ")",
+                        [row["id"] for row in close],
+                    )
+                }
+        coded_ids &= {row["id"] for row in close}
+        if coded_ids:
+            close = [row for row in close if row["id"] in coded_ids]
         else:
             return {"status": "no_codes_ambiguous", "data": {}}
     if len(close) == 1:
         answer = catalog.answer(close[0], query.entrance)
-        if answer["status"] == "no_codes" and not precise and not any(sid in exact for sid, _ in eligible):
+        if (
+            answer["status"] == "no_codes"
+            and not precise
+            and (literal_coverage or not any(sid in exact for sid, _ in eligible))
+        ):
             return {"status": "no_codes_ambiguous", "data": {}}
         return answer
     return {
@@ -499,10 +507,7 @@ def sample(corpus, reviewed, limit, full=False):
             break
     if full:
         records = [
-            dict(
-                row,
-                cohort=("historical" if row["evidence"] == "bot_address_response" else "correction_hypothesis"),
-            )
+            dict(row, cohort=("historical" if row["evidence"] == "bot_address_response" else "correction_hypothesis"))
             for row in select(corpus, 0)
         ]
     seen.clear()
@@ -537,11 +542,7 @@ def reviewed_conflict(case, result, catalog):
             building = catalog.building(option["building_id"])
             with catalog.connect() as db:
                 aliases = [
-                    r[0]
-                    for r in db.execute(
-                        "SELECT street_key FROM aliases WHERE building_id=?",
-                        (building["id"],),
-                    )
+                    r[0] for r in db.execute("SELECT street_key FROM aliases WHERE building_id=?", (building["id"],))
                 ]
         else:
             building = address_fields(option["address"])
@@ -598,6 +599,7 @@ def search_variant(catalog, message, variant, search, analyze=None):
         search_body(message) if variant["mode"] == "hybrid" else native_body(message, variant, analyzed_tokens=tokens)
     )
     known = False
+    literal_hits = False
     scoped = bool(variant.get("scoped_street_guard") and catalog.has_exact_location(parsed))
     if variant["mode"] in {"structured", "aliases", "lexical"}:
         exact_variant = dict(variant, fuzziness="0", minimum="100%")
@@ -609,6 +611,7 @@ def search_variant(catalog, message, variant, search, analyze=None):
         coded_body["query"]["bool"]["filter"].append({"term": {"coded_house": parse_query(message).house or ""}})
         if variant.get("decision") == "exact_tokens":
             hits = search(exact_body) + search(coded_body)
+            literal_hits = bool(hits)
             if not hits and not known:
                 coded_fuzzy = copy.deepcopy(body)
                 coded_fuzzy["query"]["bool"]["filter"].append(
@@ -632,6 +635,7 @@ def search_variant(catalog, message, variant, search, analyze=None):
         query_numbers=numbers,
         exact_tokens=set(tokens) if variant.get("decision") == "exact_tokens" else None,
         require_exact=known or scoped,
+        literal_coverage=bool(variant.get("literal_coverage") and literal_hits),
     )
     if guarded:
         result["query_budget"] = budget
@@ -895,10 +899,7 @@ def run(args):
                     option.get("building_id") in expected_ids
                     or (
                         option.get("address")
-                        and (
-                            parse_query(option["address"]).words,
-                            parse_query(option["address"]).house,
-                        )
+                        and (parse_query(option["address"]).words, parse_query(option["address"]).house)
                         == (expected.words, expected.house)
                     )
                     for option in options
@@ -974,10 +975,7 @@ def run(args):
         ):
             record(stream, outcomes)
             if i % 50 == 0:
-                print(
-                    json.dumps({"cases": i + 1, "total": len(cases), "variants": len(variants)}),
-                    flush=True,
-                )
+                print(json.dumps({"cases": i + 1, "total": len(cases), "variants": len(variants)}), flush=True)
     summary = {
         "stage": args.stage,
         "index_similarity": index_similarity,
@@ -1020,27 +1018,16 @@ def run(args):
         if current_settings.json()[args.index]["settings"]["index"].get("similarity", {}) != index_similarity:
             raise RuntimeError("Index similarity changed during experiment")
     (args.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf8")
-    print(
-        json.dumps({"complete": True, "cases": len(cases), "variants": len(variants)}),
-        flush=True,
-    )
+    print(json.dumps({"complete": True, "cases": len(cases), "variants": len(variants)}), flush=True)
 
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("command", choices=["index", "run"])
-    p.add_argument(
-        "--catalog",
-        type=Path,
-        default=Path("artifacts/search/serving.house-identity.db"),
-    )
+    p.add_argument("--catalog", type=Path, default=Path("artifacts/search/serving.house-identity.db"))
     p.add_argument("--legacy", type=Path, default=Path("codes.db"))
     p.add_argument("--corpus", type=Path, default=Path("artifacts/private/audit"))
-    p.add_argument(
-        "--reviewed",
-        type=Path,
-        default=Path("artifacts/private/quality/history-review.jsonl"),
-    )
+    p.add_argument("--reviewed", type=Path, default=Path("artifacts/private/quality/history-review.jsonl"))
     p.add_argument("--output", type=Path, default=Path("artifacts/private/native-search-20261106"))
     p.add_argument("--url", default="http://127.0.0.1:19200")
     p.add_argument("--index", default="domofomka-native-lab-20261106-house-v2")

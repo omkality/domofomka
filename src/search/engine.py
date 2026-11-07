@@ -17,7 +17,14 @@ from rapidfuzz.distance import DamerauLevenshtein
 from rapidfuzz.fuzz import ratio
 from rapidfuzz.process import extract, extractOne
 
-from src.search.constraints import full_name_match, name_constraints_match, whole_location_match
+from src.search.constraints import (
+    complete_name_match,
+    full_name_match,
+    literal_name_tokens,
+    name_constraints_match,
+    street_name_keys,
+    whole_location_match,
+)
 from src.search.normalize import Query, address_words, building_kind_matches, parse_query, query_name_words
 from src.telemetry import measured, note
 
@@ -328,14 +335,12 @@ class Catalog:
             if fast["status"] == "found"
             else [r["building_id"] for r in fast.get("candidates", [])]
         )
-        for bid in selected:
-            row = cheap_by_id.get(bid)
-            if row and any(
-                set(v.words.split()) - set(address_words(row["city"]).split())
-                == set(address_words(row["street"]).split())
-                for v in variants
-            ):
-                return fast
+        if selected and all(
+            (row := cheap_by_id.get(bid))
+            and complete_name_match(query, row)
+            for bid in selected
+        ):
+            return fast
         variants.extend(self.joined_variants(query, candidates or []))
         indexed = [row for variant in variants for row in [*self.candidates(variant), *self.alias_candidates(variant)]]
         result = self._resolve_candidates(
@@ -396,6 +401,32 @@ class Catalog:
         # Code availability must not replace an exact address with a fuzzy one.
         cutoff = 1 if best == 1 else best - self.ambiguity_margin
         close = [row for score, row in scored if score >= cutoff]
+        locations = [
+            row
+            for row in close
+            if whole_location_match(query, row["city"], row["street"])
+            and complete_name_match(query, row)
+        ]
+        if locations:
+            # A complete city/street must be respected before code availability.
+            # Keep source aliases of that same full name, including administrative
+            # locality spellings; a longer or different street cannot supply codes.
+            tokens = literal_name_tokens(query.name_words or query.words)
+            names = {
+                key
+                for row in locations
+                for key in street_name_keys(row)
+                if tokens - (literal_name_tokens(row["city"]) - key) == key
+            }
+            if names:
+                close = [
+                    row
+                    for row in close
+                    if any(
+                        bool(street_name_keys(row, name) & names)
+                        for name in [row["street"], *row.get("_alias_streets", [])]
+                    )
+                ]
         if len(close) > 1:
             with self.connect() as db:
                 ids = [r["id"] for r in close]

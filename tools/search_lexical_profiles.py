@@ -203,16 +203,16 @@ def profiles() -> list[dict]:
         values.append(
             dict(guarded, name=f"scoring.{policy}-AUTO-r{ratio}", ratio=ratio, known_street_guard=known_guard)
         )
-    values.append(
-        dict(
-            guarded,
-            name="verified.names-AUTO-r1.0",
-            known_street_guard=False,
-            scoped_street_guard=True,
-            preserve_names=True,
-            catalog_fallback=True,
-        )
+    verified = dict(
+        guarded,
+        name="verified.names-AUTO-r1.0",
+        known_street_guard=False,
+        scoped_street_guard=True,
+        preserve_names=True,
+        catalog_fallback=True,
     )
+    values.append(verified)
+    values.append(dict(verified, name="verified.coverage-AUTO-r1.0", literal_coverage=True))
     return values
 
 
@@ -311,10 +311,7 @@ def clone_documents(client, source: str, target: str, definition: dict, expected
     response = client.post(
         "/_reindex",
         params={"wait_for_completion": "false"},
-        json={
-            "source": {"index": source, "size": 500},
-            "dest": {"index": target},
-        },
+        json={"source": {"index": source, "size": 500}, "dest": {"index": target}},
     )
     response.raise_for_status()
     task = response.json()["task"]
