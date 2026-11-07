@@ -118,3 +118,5 @@ HTTP-отказов нет. В таблице ниже для native выбра�
 `tools/benchmark_native_search.py`, оценка ограничений — `tools/review_search_differences.py`.
 
 [Агрегаты матрицы](search-scoring-summary.json) не содержат переписок и кодов домофонов.
+
+Продолжение с исправлением потери слов и разбором кварталов: [проверка идентичности адреса](search-name-identity.md).

@@ -69,3 +69,17 @@ OpenSearch остаётся локальным инструментом срав
   Файлы: Dockerfile API/бота, `docker-compose.yml`, `compose.dev.yml`, уточнение комментария `src/api/telemetry.py`.
 - `4c2df8e` — сборка минимальных образов и проверка их рабочих импортов в CI.
   Файл: `.github/workflows/dev-tests.yml`.
+
+Исправления идентичности адресов 7 ноября:
+
+- `9008dde` — сохранение значимых названий и точной нумерации кварталов.
+  Файлы: `src/search/normalize.py`, `constraints.py`, `engine.py`, `postgres.py`, `catalog_update.py`,
+  `src/api/v2.py`, `src/search/catalog_release.json`, построители и профили в `tools/`,
+  регрессионные тесты адресных ограничений.
+- `5cb1a2d` — сохранение выбора для сокращённых и частичных официальных имён.
+  Файлы: `src/search/constraints.py`, `engine.py`, `tests/test_search_name_identity.py`.
+- `facc929` — точная привязка неправильно разделённых полей источника к единственному дому ГАР.
+  Файлы: `tools/reconcile_source_fields.py`, `reconcile_street_order.py`, `repair_house_identity.py`,
+  `tests/test_source_field_alignment.py`, `src/search/catalog_release.json`.
+
+Закрытые патчи каталога доставляются отдельно с проверкой SHA-256. Ветка master и prod не меняются.
