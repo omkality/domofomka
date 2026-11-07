@@ -40,10 +40,13 @@ def name_constraints_match(query: Query, row: dict, aliases: Iterable[str] = ())
 
 def full_name_match(query: Query, row: dict) -> bool:
     tokens = set(query.words.split())
+    # B/M and initials belong to the name even when query cleanup treats them
+    # as noise. They cannot make a partial street look like its complete name.
+    street = set(text(row["street"]).split()) - {"им", "имени"}
     return tokens in [
-        set(address_words(row["street"]).split()),
-        set(address_words(row["city"] + " " + row["street"]).split()),
-        *(set(address_words(alias).split()) for alias in row.get("_aliases", [])),
+        street,
+        set(address_words(row["city"]).split()) | street,
+        *(set(text(alias).split()) for alias in row.get("_aliases", [])),
     ]
 
 

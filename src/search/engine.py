@@ -412,7 +412,11 @@ class Catalog:
                 close = [row for row in close if row["id"] in coded]
             else:
                 return {"status": "no_codes_ambiguous", "data": {}, "engine": "v2"}
-        exact = [row for row in close if any(full_name_match(variant, row) for variant in variants)]
+        exact = (
+            [row for row in close if any(full_name_match(variant, row) for variant in variants)]
+            if query.name_words == query.words
+            else []
+        )
         if exact:
             close = exact
         if len(close) > 1:

@@ -27,6 +27,9 @@ def names(tmp_path):
         ("full-name", "Москва", "улица", "Большая Набережная", "1"),
         ("wrong-type", "Москва", "набережная", "Большая", "1"),
         ("split", "Москва", "улица", "Мичурина", "1а"),
+        ("large", "Москва", "улица", "Большая Переяславская", "10"),
+        ("small", "Москва", "улица", "Малая Переяславская", "10"),
+        ("abbreviated", "Москва", "улица", "Переяславская Б.", "10"),
     ]
     with sqlite3.connect(path) as db:
         db.executescript(SCHEMA)
@@ -88,6 +91,12 @@ def test_numbered_area_without_a_house_is_incomplete_and_cannot_fall_back_to_tha
     assert parse_query(query).house is None
     assert names.resolve(query)["status"] == "incomplete_query"
     assert not legacy_result_matches(query, "Москва, квартал Тестовый, дом 114А")
+
+
+def test_short_name_cannot_automatically_choose_a_large_street_via_its_abbreviated_duplicate(names):
+    result = names.resolve("Переяславская 10")
+    assert result["status"] == "ambiguous"
+    assert {row["building_id"] for row in result["candidates"]} == {"large", "small", "abbreviated"}
 
 
 def test_repair_preserves_addresses_codes_and_bundles(names, tmp_path):
