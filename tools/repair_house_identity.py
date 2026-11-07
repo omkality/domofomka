@@ -30,6 +30,8 @@ def repair(source: Path, legacy: Path, output: Path, locality_facts: Path | None
         raise ValueError("Not enough space for an independent candidate")
     with closing(sqlite3.connect(f"file:{source.resolve().as_posix()}?mode=ro", uri=True)) as db:
         stats = json.loads(db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()[0])
+    if stats.get("normalization_schema", 0) > 7:
+        raise ValueError("Repair house keys before source field alignment; use the preceding frozen snapshot")
     with legacy.open("rb") as stream:
         if hashlib.file_digest(stream, "sha256").hexdigest() != stats["source_sha256"]:
             raise ValueError("Legacy source does not match the frozen catalog")

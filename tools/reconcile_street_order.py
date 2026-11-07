@@ -125,8 +125,11 @@ def apply(
             normalization_schema=max(schema_version, stats.get("normalization_schema", 0)),
             unique_codes=db.execute("SELECT count(*) FROM codes").fetchone()[0],
             buildings_with_codes=db.execute("SELECT count(DISTINCT building_id) FROM codes").fetchone()[0],
+            street_documents=db.execute("SELECT count(*) FROM streets").fetchone()[0],
         )
-        prefix = "street_order" if resolution == "gar_street_word_order" else "source_syntax"
+        prefix = {"gar_street_word_order": "street_order", "gar_source_field_alignment": "source_fields"}.get(
+            resolution, "source_syntax"
+        )
         stats[prefix + "_linked_groups"] = stats.get(prefix + "_linked_groups", 0) + len(links)
         stats[prefix + "_linked_source_rows"] = db.execute(
             "SELECT count(*) FROM provenance WHERE resolution=? OR substr(resolution,1,?)=?",
