@@ -1,0 +1,15 @@
+# Только замороженный откат первого выпуска v2. Redis сохраняется до его приёмки.
+services:
+  api:
+    environment:
+      UV_NO_SYNC: '1'
+      UV_NO_CACHE: '1'
+    volumes:
+      - ${LEGACY_SNAPSHOT_ROOT:?Set LEGACY_SNAPSHOT_ROOT}/src:/backend/src:ro
+  vkbot:
+    environment:
+      UV_NO_SYNC: '1'
+      UV_NO_CACHE: '1'
+    volumes:
+      - ${LEGACY_SNAPSHOT_ROOT}/src:/backend/src:ro
+      - ${LEGACY_SNAPSHOT_ROOT}/start_message.txt:/backend/start_message.txt:ro

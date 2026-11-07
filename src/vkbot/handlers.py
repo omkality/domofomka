@@ -1,13 +1,13 @@
+import asyncio
 import json
 import logging
 import traceback
-from datetime import timedelta
 
-from pyreqwest.client import ClientBuilder
+import httpx
 from vk_api.utils import get_random_id
 from vk_api.vk_api import VkApiMethod
 
-from src.network import network_settings
+from src.network import network_settings, tls_context
 from src.storages.interfaces import KeyValueClientProtocol
 from src.vkbot.config import settings
 from src.vkbot.keyboard import build_many_buttons, get_location_keyboard
@@ -49,16 +49,19 @@ class MessageHandler:
     async def _lookup(self, path: str, query: dict, timeout: float) -> dict:
         url = f"http://{settings.domofomka_api_host}:{settings.domofomka_api_port}/codes/{path}"
         async with (
-            ClientBuilder()
-            .no_proxy()
-            .connect_timeout(timedelta(seconds=network_settings.internal_api_connect_timeout_seconds))
-            .timeout(timedelta(seconds=timeout))
-            .build() as client
+            asyncio.timeout(timeout),
+            httpx.AsyncClient(
+                verify=tls_context(),
+                trust_env=False,
+                timeout=httpx.Timeout(
+                    timeout, connect=min(network_settings.internal_api_connect_timeout_seconds, timeout)
+                ),
+            ) as client,
         ):
-            response = await client.get(url).query(query).build().send()
-            if response.status != 200:
-                raise RuntimeError(f"API returned status {response.status}")
-            return await response.json()
+            response = await client.get(url, params=query)
+            if response.status_code != 200:
+                raise RuntimeError(f"API returned status {response.status_code}")
+            return response.json()
 
     async def get_codes_by_geo(self, lat: float, lon: float) -> dict:
         try:

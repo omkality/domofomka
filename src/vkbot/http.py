@@ -8,6 +8,7 @@ from requests.exceptions import ConnectionError, ConnectTimeout, ProxyError, Tim
 
 from src.network import network_settings
 from src.services.outbound import proxy_health
+from src.telemetry import active, span
 
 
 class TimeoutSession(Session):
@@ -56,9 +57,12 @@ class TimeoutSession(Session):
             if retryable
             else (network_settings.vk_fallback_attempts if managed_proxy and safe_replay else 1)
         )
+        proxy_failed = False
         for attempt in range(attempts):
             routed = dict(kwargs)
-            use_proxy = bool(managed_proxy and proxy_health.choose("vk", managed_proxy))
+            use_proxy, reason = proxy_health.decision("vk", managed_proxy) if managed_proxy else (False, "not_managed")
+            if proxy_failed and not use_proxy:
+                reason = "proxy_connect_failed"
             if managed_proxy:
                 # Explicit empty proxy values also disable environment proxies.
                 routed["proxies"] = {
@@ -66,7 +70,25 @@ class TimeoutSession(Session):
                     "https": managed_proxy if use_proxy else "",
                 }
             try:
-                response = super().request(method, url, **routed)
+                with span(
+                    "network.vk",
+                    kind="network",
+                    target="vk",
+                    operation="longpoll" if self.longpoll else api_method,
+                    route="ru_proxy" if use_proxy else ("external" if "proxies" in kwargs else "direct"),
+                    route_reason=reason,
+                    attempt=attempt + 1,
+                    timeout_seconds=kwargs["timeout"],
+                ) as detail:
+                    response = super().request(method, url, **routed)
+                    detail["http_status"] = response.status_code
+                    if active() and endpoint.hostname == "api.vk.com":
+                        try:
+                            error = response.json().get("error", {})
+                            if error.get("error_code") is not None:
+                                detail["provider_error_code"] = str(error["error_code"])
+                        except (ValueError, AttributeError, TypeError):
+                            pass
                 if use_proxy:
                     proxy_health.succeeded("vk", managed_proxy)
                 return response
@@ -74,10 +96,12 @@ class TimeoutSession(Session):
                 # Only a failed proxy connection changes routing. A response
                 # timeout may follow a successful mutation; keep existing safe retries.
                 if use_proxy and isinstance(exc, (ProxyError, ConnectTimeout)):
+                    proxy_failed = True
                     proxy_health.failed("vk", managed_proxy)
                 elif use_proxy:
                     proxy_health.succeeded("vk", managed_proxy)
                 if attempt == attempts - 1:
                     raise
-                time.sleep((attempt + 1) * network_settings.vk_retry_delay_seconds)
+                with span("network.retry_wait", target="vk"):
+                    time.sleep((attempt + 1) * network_settings.vk_retry_delay_seconds)
         raise RuntimeError("Request attempts exhausted")

@@ -1,0 +1,32 @@
+{
+  "counts": {
+    "dialogs": 2282,
+    "messages": 198060,
+    "incoming_text": 84488,
+    "address_responses": 62966,
+    "incoming_nontext": 13673,
+    "explicit_no_results": 19310
+  },
+  "patterns": {
+    "with_entrance": 1141,
+    "city_alias": 2,
+    "written_ordinal": 83,
+    "numeric_street": 3375,
+    "punctuation": 31651,
+    "polite_request": 65
+  },
+  "failed_message_features": {
+    "mentions_entrance": 1046,
+    "mentions_apartment": 35,
+    "written_ordinal": 60,
+    "city_alias": 1,
+    "no_house_number": 1386,
+    "house_component_words": 812,
+    "punctuation": 6832,
+    "length_gt_500": 3
+  },
+  "correction_hypotheses": 2623,
+  "complete": true,
+  "note": "Исходные переписки и тексты запросов остаются в игнорируемой папке artifacts. Ответы бота и пары исправлений — предварительная разметка, а не подтверждённая истина.",
+  "dialogs_total": 2282
+}

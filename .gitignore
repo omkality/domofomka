@@ -4,3 +4,17 @@ __pycache__
 *.db
 test_main.http
 .env
+.env.*
+!.env.example
+!.env.dev.example
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.tar
+*.tar.gz
+/artifacts/
+/backups/
+/.codex-local/
+/history.txt
+/.ci/
+/release.json

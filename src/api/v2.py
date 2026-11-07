@@ -1,0 +1,268 @@
+import asyncio
+import hashlib
+import logging
+import threading
+from functools import partial
+from pathlib import Path
+
+import httpx
+from litestar import Router, get
+
+from src.api.cache import LookupCache
+from src.api.config import settings
+from src.api.routes import get_dadata_client
+from src.api.telemetry import observed
+from src.network import tls_context
+from src.search.constraints import legacy_result_matches, legacy_source_matches
+from src.search.engine import Catalog, search_body
+from src.search.normalize import parse_query
+from src.services.codes import get_data_from_db
+from src.telemetry import note, search_result, span
+
+logger = logging.getLogger(__name__)
+result_cache = LookupCache()
+_postgres_readers: dict = {}
+_postgres_guard = threading.Lock()
+
+
+def close_catalog() -> None:
+    with _postgres_guard:
+        for reader in _postgres_readers.values():
+            reader.close()
+        _postgres_readers.clear()
+
+
+def get_catalog() -> Catalog:
+    if settings.search_backend == "sqlite":
+        return Catalog(settings.search_catalog_path, settings.search_min_similarity, settings.search_ambiguity_margin)
+    if not settings.catalog_database_url:
+        raise ValueError("CATALOG_DATABASE_URL required for PostgreSQL catalog")
+    from src.search.postgres import PostgresCatalog
+
+    config = (
+        settings.catalog_database_url.get_secret_value(),
+        settings.search_min_similarity,
+        settings.search_ambiguity_margin,
+        settings.catalog_connect_timeout_seconds,
+        settings.catalog_statement_timeout_ms,
+        settings.catalog_lock_timeout_seconds,
+        settings.catalog_operation_timeout_seconds,
+        settings.catalog_revision,
+    )
+    with _postgres_guard:
+        if config not in _postgres_readers:
+            for reader in _postgres_readers.values():
+                reader.close()
+            _postgres_readers.clear()
+            _postgres_readers[config] = PostgresCatalog(
+                *config[:3],
+                connect_timeout_seconds=config[3],
+                statement_timeout_ms=config[4],
+                lock_timeout_seconds=config[5],
+                operation_timeout_seconds=config[6],
+                revision=config[7],
+            )
+        return _postgres_readers[config]
+
+
+def cache_key(request: tuple) -> tuple | None:
+    result_cache.configure(
+        settings.search_cache_ttl_seconds, settings.search_cache_max_entries, settings.search_cache_max_bytes
+    )
+    if settings.search_cache_ttl_seconds == 0:
+        return None
+    try:
+        files = []
+        filenames = [settings.db_name]
+        if settings.search_backend == "sqlite":
+            filenames.insert(0, settings.search_catalog_path)
+        for filename in filenames:
+            path = Path(filename).resolve()
+            stat = path.stat()
+            files.append((str(path), stat.st_ino, stat.st_mtime_ns, stat.st_size))
+    except OSError:
+        return None
+    return (
+        *files,
+        settings.search_backend,
+        settings.catalog_revision,
+        hashlib.sha256(
+            (settings.catalog_database_url.get_secret_value() if settings.catalog_database_url else "").encode()
+        ).hexdigest(),
+        settings.opensearch_url,
+        settings.opensearch_index,
+        settings.opensearch_fuzziness,
+        settings.opensearch_prefix_length,
+        settings.search_min_similarity,
+        settings.search_ambiguity_margin,
+        settings.search_candidate_limit,
+        request,
+    )
+
+
+def remember(key: tuple | None, result: dict) -> None:
+    if (
+        key is not None
+        and result.get("fallback_reason") != "unavailable"
+        and result.get("status") in {"found", "no_codes", "ambiguous", "no_codes_ambiguous", "not_found"}
+    ):
+        result_cache.put(key, result)
+
+
+async def lookup(message: str) -> dict:
+    note(catalog_backend=settings.search_backend)
+    key = cache_key(("text", message))
+    cached = result_cache.get(key) if key is not None else None
+    if cached is not None:
+        note(cache_hit=True, cached_result_engine=cached.get("engine"), result=search_result(cached))
+        return cached
+    note(cache_hit=False)
+    result = await uncached_lookup(message)
+    remember(key, result)
+    return result
+
+
+async def uncached_lookup(message: str) -> dict:
+    reason = None
+    whole_location = False
+    try:
+        catalog = get_catalog()
+        candidates = None
+        if settings.opensearch_url:
+            try:
+                async with (
+                    asyncio.timeout(settings.opensearch_timeout_seconds),
+                    httpx.AsyncClient(
+                        verify=tls_context(), trust_env=False, timeout=settings.opensearch_timeout_seconds
+                    ) as client,
+                ):
+                    response = await client.post(
+                        settings.opensearch_url + "/" + settings.opensearch_index + "/_search",
+                        json=search_body(
+                            message,
+                            settings.search_candidate_limit,
+                            fuzziness=settings.opensearch_fuzziness,
+                            prefix_length=settings.opensearch_prefix_length,
+                        ),
+                    )
+                    if response.status_code != 200:
+                        raise RuntimeError("Search index unavailable")
+                    result = response.json()
+                    ids = [r["_id"] for r in result["hits"]["hits"]]
+
+                    candidates = (
+                        await asyncio.to_thread(catalog.load_candidates, ids, parse_query(message).house)
+                        if ids
+                        else None
+                    )
+
+                candidates = candidates or None
+            except Exception as exc:
+                logger.warning("OpenSearch unavailable error=%s; using catalog index", type(exc).__name__)
+        with span(
+            "search.v2",
+            kind="search",
+            engine="v2",
+            storage_backend=settings.search_backend,
+            query=message[: settings.search_max_query_length],
+        ) as detail:
+            result = await asyncio.to_thread(catalog.resolve, message, candidates)
+            detail["result"] = search_result(result)
+        note(result=search_result(result))
+        recoverable_incomplete = result["status"] == "incomplete_query" and bool(parse_query(message).house)
+        if result["status"] != "not_found" and not recoverable_incomplete:
+            return result
+        whole_location = result.get("fallback_rejected") == "known_street_without_requested_house"
+        reason = result["status"]
+    except Exception as exc:
+        logger.warning("V2 unavailable error=%s; using legacy search", type(exc).__name__)
+        reason = "unavailable"
+    result = await get_data_from_db(
+        message, accept_source=partial(legacy_source_matches, message, whole_location=whole_location)
+    )
+    note(search_fallback_reason=reason)
+    if result.get("data"):
+        if not legacy_result_matches(message, result.get("address", ""), whole_location=whole_location):
+            rejected = {
+                "status": "not_found",
+                "engine": "v2",
+                "data": {},
+                "fallback_reason": reason,
+                "fallback_rejected": "house_conflict",
+            }
+            note(result=search_result(rejected))
+            return rejected
+    answer = dict(
+        result,
+        status="found" if result.get("data") else "not_found",
+        engine="v1",
+        fallback_reason=reason,
+        data=result.get("data", {}),
+    )
+    note(result=search_result(answer))
+    return answer
+
+
+@get("/msg")
+async def message_codes(message: str, observe: bool = False) -> dict:
+    if len(message) > settings.search_max_query_length:
+        return {"status": "invalid_query", "data": {}, "engine": "v2"}
+    return await observed(lambda: lookup(message), observe)
+
+
+@get("/geo")
+async def geo_codes(lat: float, lon: float, observe: bool = False) -> dict:
+    return await observed(lambda: geo_lookup(lat, lon), observe)
+
+
+async def geo_lookup(lat: float, lon: float) -> dict:
+    note(catalog_backend=settings.search_backend)
+    from litestar.exceptions import ServiceUnavailableException
+
+    from src.services.dadata_client import DadataUnavailable
+
+    key = cache_key(("geo", lat, lon))
+    cached = result_cache.get(key) if key is not None else None
+    if cached is not None:
+        note(geo_cache_hit=True, cached_result_engine=cached.get("engine"), result=search_result(cached))
+        return cached
+    note(geo_cache_hit=False)
+    try:
+        with span("geo.resolve"):
+            address = await (await get_dadata_client()).get_address_by_geo(lat, lon)
+    except DadataUnavailable as exc:
+        raise ServiceUnavailableException(
+            detail="Geocoding unavailable; send text", extra={"geocoding_retryable": exc.retryable}
+        ) from exc
+    result = await lookup(address or "")
+    remember(key, result)
+    return result
+
+
+v2_router = Router(path="/api/v2/codes", route_handlers=[message_codes, geo_codes])
+
+
+@get("/api/v2/buildings/{building_id:str}")
+async def building_codes(building_id: str, observe: bool = False) -> dict:
+    return await observed(lambda: read_building(building_id), observe)
+
+
+async def read_building(building_id: str) -> dict:
+    from litestar.exceptions import NotFoundException, ServiceUnavailableException
+
+    note(catalog_backend=settings.search_backend)
+
+    def read() -> dict | None:
+        catalog = get_catalog()
+        row = catalog.building(building_id)
+        return catalog.answer(row) if row else None
+
+    try:
+        with span("search.v2.building", kind="search", engine="v2", storage_backend=settings.search_backend) as detail:
+            result = await asyncio.to_thread(read)
+            detail["result"] = search_result(result) if result is not None else {"status": "not_found"}
+    except Exception as exc:
+        raise ServiceUnavailableException(detail="Catalog unavailable") from exc
+    if result is None:
+        raise NotFoundException()
+    return result

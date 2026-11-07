@@ -5,8 +5,10 @@ from litestar.di import Provide
 from litestar.exceptions import ServiceUnavailableException
 
 from src.api.config import settings
+from src.api.telemetry import observed
 from src.services.codes import get_data_from_db
 from src.services.dadata_client import DadataClient, DadataUnavailable
+from src.telemetry import span
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +21,8 @@ async def get_dadata_client() -> DadataClient:
 
 
 @get("/msg")
-async def get_codes_by_message(message: str) -> dict[str, dict]:
-    return await get_data_from_db(message)
+async def get_codes_by_message(message: str, observe: bool = False) -> dict[str, dict]:
+    return await observed(lambda: get_data_from_db(message), observe)
 
 
 @get("/geo")
@@ -28,12 +30,19 @@ async def get_codes_by_geo(
     lat: float,
     lon: float,
     dadata: DadataClient,
+    observe: bool = False,
 ) -> dict[str, dict]:
+    return await observed(lambda: legacy_geo(lat, lon, dadata), observe)
+
+
+async def legacy_geo(lat: float, lon: float, dadata: DadataClient) -> dict:
     try:
-        address = await dadata.get_address_by_geo(lat=lat, lon=lon)
+        with span("geo.resolve"):
+            address = await dadata.get_address_by_geo(lat=lat, lon=lon)
     except DadataUnavailable as exc:
         raise ServiceUnavailableException(
-            detail="Geolocation is temporarily unavailable; send an address as text"
+            detail="Geolocation is temporarily unavailable; send an address as text",
+            extra={"geocoding_retryable": exc.retryable},
         ) from exc
     return await get_data_from_db(address)
 

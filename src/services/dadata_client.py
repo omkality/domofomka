@@ -2,17 +2,13 @@ import asyncio
 import logging
 import time
 import typing as tp
-from contextlib import AsyncExitStack
-from datetime import timedelta
 from urllib.parse import urlsplit
 
-from pyreqwest.client import ClientBuilder
-from pyreqwest.exceptions import ConnectError, ConnectTimeoutError
-from pyreqwest.proxy import ProxyBuilder
-from pyreqwest.simple.request import pyreqwest_post
+import httpx
 
-from src.network import network_settings
+from src.network import network_settings, tls_context
 from src.services.outbound import proxy_health
+from src.telemetry import amend, note, span
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +16,14 @@ logger = logging.getLogger(__name__)
 class DadataUnavailable(RuntimeError):
     """Temporary geocoding failure; callers can distinguish it from no results."""
 
+    def __init__(self, message: str = "Geocoding is temporarily unavailable", *, retryable: bool = True):
+        super().__init__(message)
+        self.retryable = retryable
+
 
 class DadataClient:
     _unavailable_until = 0.0
+    _unavailable_retryable = True
 
     def __init__(self, token: str, timeout_seconds: float | None = None, proxy_url: str | None = None):
         if proxy_url and (urlsplit(proxy_url).scheme not in {"http", "https"} or not urlsplit(proxy_url).hostname):
@@ -43,47 +44,76 @@ class DadataClient:
         payload = {"lat": lat, "lon": lon}
 
         if time.monotonic() < type(self)._unavailable_until:
-            raise DadataUnavailable("Geocoding is temporarily unavailable")
+            note(geocoding_skipped="service_cooldown")
+            raise DadataUnavailable(retryable=type(self)._unavailable_retryable)
         try:
             # One deadline covers proxy, direct fallback and response decoding.
             async with asyncio.timeout(self.timeout_seconds):
-                use_proxy = bool(self.proxy_url and proxy_health.choose("dadata", self.proxy_url))
+                use_proxy, reason = (
+                    proxy_health.decision("dadata", self.proxy_url) if self.proxy_url else (False, "not_configured")
+                )
                 if use_proxy:
                     try:
-                        result = await self._request(url, payload, True)
-                    except (ConnectError, ConnectTimeoutError):
+                        with span(
+                            "network.dadata",
+                            kind="network",
+                            target="dadata",
+                            operation="geolocate",
+                            route="ru_proxy",
+                            route_reason=reason,
+                            attempt=1,
+                            timeout_ms=self.timeout_seconds * 1000,
+                        ):
+                            result = await self._request(url, payload, True)
+                    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ProxyError):
                         proxy_health.failed("dadata", self.proxy_url)
                     else:
                         proxy_health.succeeded("dadata", self.proxy_url)
                         return result
-                return await self._request(url, payload, False)
+                with span(
+                    "network.dadata",
+                    kind="network",
+                    target="dadata",
+                    operation="geolocate",
+                    route="direct",
+                    route_reason="proxy_connect_failed" if use_proxy else reason,
+                    attempt=2 if use_proxy else 1,
+                    timeout_ms=self.timeout_seconds * 1000,
+                ):
+                    return await self._request(url, payload, False)
         except Exception as exc:
             # Separate client instances are created for requests. Keep the short
             # circuit breaker at process level to avoid repeated long waits.
-            type(self)._unavailable_until = time.monotonic() + network_settings.dadata_failure_cooldown_seconds
+            retryable = not isinstance(exc, DadataUnavailable) or exc.retryable
+            cooldown = (
+                network_settings.dadata_failure_cooldown_seconds if retryable
+                else network_settings.dadata_access_cooldown_seconds
+            )
+            type(self)._unavailable_until = time.monotonic() + cooldown
+            type(self)._unavailable_retryable = retryable
             logger.warning("Geocoding unavailable error=%s", type(exc).__name__)
-            raise DadataUnavailable("Geocoding is temporarily unavailable") from None
+            raise DadataUnavailable(retryable=retryable) from None
 
     async def _request(self, url: str, payload: dict, use_proxy: bool) -> dict:
-        async with AsyncExitStack() as stack:
-            request = pyreqwest_post
-            if self.proxy_url:
-                builder = ClientBuilder()
-                builder = builder.proxy(ProxyBuilder.https(self.proxy_url)) if use_proxy else builder.no_proxy()
-                # Bound failed proxy connection setup, preserving the total deadline.
-                client = await stack.enter_async_context(
-                    builder.connect_timeout(timedelta(seconds=network_settings.dadata_connect_timeout_seconds)).build()
-                )
-                request = client.post
-            pending = (
-                request(url).headers(self.headers).body_json(payload).timeout(timedelta(seconds=self.timeout_seconds))
-            )
-            if self.proxy_url:
-                pending = pending.build()
-            response = await pending.send()
-            if response.status != 200:
+        async with httpx.AsyncClient(
+            verify=tls_context(),
+            proxy=self.proxy_url if use_proxy else None,
+            trust_env=False,
+            timeout=httpx.Timeout(
+                self.timeout_seconds,
+                connect=min(network_settings.dadata_connect_timeout_seconds, self.timeout_seconds),
+            ),
+            follow_redirects=True,
+        ) as client:
+            response = await client.post(url, headers=self.headers, json=payload)
+            amend(http_status=response.status_code)
+            if response.status_code in {401, 403}:
+                # 403 also covers invalid credentials/unconfirmed mail: do not
+                # claim the daily quota is certainly exhausted or change routes.
+                raise DadataUnavailable("Geocoding access unavailable", retryable=False)
+            if response.status_code != 200:
                 raise DadataUnavailable("Geocoding returned an unsuccessful response")
-            return await response.json()
+            return response.json()
 
     async def get_address_by_geo(self, lat: float, lon: float) -> str | None:
         houses = await self.geolocate(lat=lat, lon=lon)
@@ -91,11 +121,14 @@ class DadataClient:
         if houses and "suggestions" in houses and houses["suggestions"]:
             house_data: dict[str, str] = houses["suggestions"][0]["data"]
 
-            if house_data.get("street"):
-                address = f"{house_data['city']} {house_data['street']} {house_data['house']}"
+            locality = house_data.get("settlement") or house_data.get("city")
+            if locality and house_data.get("street") and house_data.get("house"):
+                address = f"{locality} {house_data['street']} {house_data['house']}"
 
                 if house_data.get("block"):
-                    block_type = (house_data.get("block_type") or "").replace("стр", "с")
+                    if not house_data.get("block_type"):
+                        return None
+                    block_type = house_data["block_type"].replace("стр", "с")
                     block = house_data["block"].replace(" стр ", "с")
                     address += f" {block_type}{block}"
 

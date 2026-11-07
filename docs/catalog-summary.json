@@ -1,0 +1,51 @@
+{
+  "source_rows": 1008682,
+  "unique_code_records": 1001687,
+  "exact_duplicate_code_records": 6995,
+  "gar_buildings": 34851597,
+  "code_bearing_identities": 105274,
+  "street_documents": 1076095,
+  "resolution": [
+    {
+      "resolution": "ambiguous",
+      "source_rows": 8794,
+      "identities": 1811
+    },
+    {
+      "resolution": "gar_exact",
+      "source_rows": 795317,
+      "identities": 68160
+    },
+    {
+      "resolution": "gar_locality_alias",
+      "source_rows": 2582,
+      "identities": 424
+    },
+    {
+      "resolution": "gar_source_syntax_embedded_type",
+      "source_rows": 27,
+      "identities": 27
+    },
+    {
+      "resolution": "gar_source_syntax_explicit_region",
+      "source_rows": 1557,
+      "identities": 1225
+    },
+    {
+      "resolution": "gar_street_word_order",
+      "source_rows": 11226,
+      "identities": 1554
+    },
+    {
+      "resolution": "unresolved",
+      "source_rows": 189179,
+      "identities": 34514
+    }
+  ],
+  "source_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
+  "normalization_schema": 7,
+  "catalog_revision": "f8f351f58188210ea2d352902ee4416e740835f3c4f6c8931a2bedc4a3c00495",
+  "runtime_storage": "PostgreSQL",
+  "build_artifact_bytes": 823619584,
+  "search_terms_version": 2
+}

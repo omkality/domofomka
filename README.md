@@ -1,81 +1,150 @@
 # domofomka
 
-Application for getting the intercom code at the given address.
-Used stack: *Litestar*, *Granian*, *SQLite*, *Redis*, *VK API*.
+Бот для поиска кодов домофонов по адресу.
+Технологии: *Litestar*, *Granian*, *PostgreSQL* (каталог v2, очередь и диагностика), *SQLite* (источник v1), необязательный *OpenSearch*, *VK API*.
 
-## Architecture
+## Устройство
 
 ```mermaid
 flowchart LR
-    VK[VK] <-->|Long Poll and API| B[Bot]
-    B --> A[HTTP API]
-    A --> DB[(SQLite codes)]
-    A --> D[DaData geocoding]
-    B <--> R[(Redis context and cooldown)]
+    VK[VK] <-->|Long Poll| B[Бот]
+    B --> I[(Входящие события PostgreSQL)]
+    H[Сверка истории VK] --> I
+    I --> W[Обработчики]
+    W --> A[HTTP API]
+    A --> V2[API v2: нормализация запроса]
+    V2 --> C[(PostgreSQL: улицы, точный дом и коды)]
+    V2 --> OS[Кандидаты OpenSearch — по настройке]
+    OS --> C
+    V2 -->|Сбой или адрес не найден| V1[API v1: прежний поиск]
+    V1 --> DB[(Исходная SQLite с кодами)]
+    A --> D[Геокодирование DaData]
+    W --> O[(Исходящие действия PostgreSQL)]
+    O -->|Отправка или редактирование с повторами| VK
 ```
 
-Messages are processed sequentially. Geocoding failures ask the user to send an address as text. This branch has no persistent message queue.
+События и подготовленные ответы сохраняются при перезапуске. Записанные нажатия кнопок можно повторить; нажатия, которые VK не доставил боту, из истории восстановить нельзя.
+Отложенный повтор геолокации пропускает новые сообщения вперёд. Очистка очереди сохраняет защиту от дублей;
+резервные копии и контроль ресурсов описаны в [инструкции эксплуатации](docs/operations.md).
+Этапы поиска и сетевые маршруты описаны в [измерениях запросов](docs/telemetry.md),
+ближайшие задачи — в [плане dev](docs/roadmap.md).
+
+```mermaid
+erDiagram
+    buildings ||--o{ entrances : "дом"
+    entrances ||--o{ codes : "подъезд"
+    code_sources ||--o{ codes : "источник"
+    buildings ||--o{ aliases : "варианты адреса"
+    buildings ||--o{ provenance : "исходные строки"
+```
+
+[Полная схема БД](docs/database.md) показывает поля, ключи, поисковые таблицы и очередь.
 
 ```mermaid
 flowchart LR
-    A[VK and DaData clients] --> P{Proxy connection available?}
-    P -->|Yes| T[SSH tunnel]
-    T --> R[Tinyproxy in Russia]
-    R --> S[VK or DaData]
-    P -->|No| D[Direct connection from Europe]
+    D[Push dev] --> CI[Тесты и сборка в GitHub Actions]
+    CI --> R[GHCR: проверенные образы]
+    R --> DEV[Автоматический dev]
+    R --> G[Ручной выпуск master с подтверждением]
+    G --> P[Prod: включим после принятия dev]
+```
+
+[CI/CD и откат](docs/cicd.md): сервер запускает готовые образы без сборки; базы и `.env` остаются на сервере.
+
+```mermaid
+flowchart LR
+    A[Клиенты VK и DaData] --> P{Соединение с прокси доступно?}
+    P -->|Да| T[SSH-туннель]
+    T --> R[Tinyproxy в России]
+    R --> S[VK или DaData]
+    P -->|Нет| D[Прямое соединение из Европы]
     D --> S
-    D -.->|Retry proxy after 30 to 300 seconds| P
+    D -.->|Повтор прокси через 30–300 секунд| P
 ```
 
-Optional `VK_PROXY_URL` and `DADATA_PROXY_URL` point to the host-side SSH tunnel; empty values use direct connections. Tinyproxy listens on localhost and forwards HTTPS with CONNECT without decrypting it. OpenSSH and systemd maintain the tunnel outside Docker.
+Необязательные `VK_PROXY_URL` и `DADATA_PROXY_URL` указывают на SSH-туннель на хосте; пустые значения включают прямые запросы. Tinyproxy слушает localhost и передаёт HTTPS через CONNECT без расшифровки. OpenSSH и systemd поддерживают туннель вне Docker.
 
-Only connection failures trigger direct fallback. API errors and response timeouts do not switch routes. Safe VK retries keep the same `random_id` or edit result. Timeouts, retries and recovery intervals are configurable in `.env`; see [`.env.example`](.env.example) for defaults. Restart containers after changing them.
+Переход к прямому соединению происходит при ошибке подключения к прокси. Ошибки API и таймауты ожидания ответа маршрут не меняют. Безопасные повторы VK сохраняют `random_id` или тот же результат редактирования. Таймауты, повторы и интервалы восстановления задаются в `.env`; значения по умолчанию приведены в [`.env.example`](.env.example). После изменения настроек перезапустите контейнеры.
 
-The service API is bound to localhost. Container memory/PID limits and the Redis cache limit are configurable in `.env`.
+## Поиск v2
 
-## Prerequisites
+`/api/v1/codes/msg` и `/api/v1/codes/geo` сохраняют прежний поиск; `/codes/*` остаётся совместимым.
+`/api/v2/codes/*` обрабатывает лишние символы, сокращения городов и номера улиц, написанные словами. Номера домов, корпусов и строений проверяются точно.
+Один подходящий адрес с кодами открывается сразу; несколько — через выбор с кнопкой «Ни один не подходит».
+Дома без кодов не заполняют меню выбора. Если конкретный дом распознан, но кодов в базе нет, бот сообщает об этом явно.
+Повторные запросы ускоряет небольшой ограниченный кэш в процессе API; сохранность событий обеспечивает PostgreSQL.
+
+```mermaid
+flowchart LR
+    GAR[XML ГАР: действующие дома и иерархия] --> IMP[Потоковый импорт по регионам]
+    OLD[Исходная codes.db] --> N[Адреса, варианты написания и происхождение записей]
+    IMP --> N
+    N --> CAT[Новая БД каталога PostgreSQL]
+    N --> IDX[Версионируемый индекс OpenSearch]
+    HISTORY[Закрытая выгрузка истории VK] --> AUDIT[Аудит и набор проверок с разделением по диалогам]
+    AUDIT --> TEST[Сравнение v1 и v2 перед выпуском]
+```
+
+Полная сборка ГАР хранится отдельно от рабочего сервера. Компактный каталог содержит упакованные номера известных домов и отдельные записи домов с кодами.
+Большие данные и исходные переписки остаются в игнорируемой папке `artifacts/`. Они не попадают в Git и контекст сборки Docker.
+Каталог v2 работает в отдельной БД существующего PostgreSQL рядом с тестовым ботом на Германии
+и не зависит от компьютера разработчика. API читает его через отдельную роль с ограниченными правами;
+при сбое поиска сохраняется fallback на исходную SQLite v1. Файловый каталог v2 поддержан для отката.
+OpenSearch подключается по настройке и остаётся локальным инструментом сравнения, на VDS он не запущен.
+Подробности: [поиск и результаты проверок](docs/search-v2.md), [очередь и сценарии отказов](docs/message-delivery.md), [тестовое окружение](docs/dev-stand.md).
+
+## Требования
+
 * Docker & Docker Compose
-* Python 3.12+ (for local development)
+* Python 3.12+ для локальной разработки
 
-## Install
+## Установка
 
-Build `domofomka` from source:
+Склонируйте проект:
 ~~~~bash
 git clone https://github.com/omkality/domofomka
 cd domofomka
 ~~~~
 
-You should have `.env` file and SQLite3 database with `DB_NAME` name (configured in environment file) at the */domofomka* folder.
+В корне проекта нужны `.env` и база SQLite3 с именем из `DB_NAME`.
 
-Environment file `.env` should contain:
+Основные параметры `.env`:
 
 ```dosini
-# API Configuration
+# Настройки API
 API_HOST=0.0.0.0
 API_PORT=8000
 DB_NAME=codes.db
 DADATA_TOKEN=your_dadata_token_here
-DADATA_TIMEOUT_SECONDS=8
-DADATA_PROXY_URL=
 
-# VK Bot Configuration
+# Настройки бота VK
 VK_GROUP_TOKEN=your_vk_group_token_here
 VK_GROUP_ID=your_vk_group_id_here
 VK_PROXY_URL=
 
-# Redis Configuration
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_PASSWORD=
+# Постоянная очередь VK — обязательна для этой версии dev
+EXPECTED_VK_GROUP_ID=your_vk_group_id_here
+POSTGRES_PASSWORD=replace_with_long_random_password
+QUEUE_DATABASE_URL=postgresql://domofomka:${POSTGRES_PASSWORD}@queue:5432/domofomka
+
+# Каталог v2 — отдельная опубликованная БД и роль только для чтения
+SEARCH_BACKEND=postgres
+CATALOG_DATABASE_URL=postgresql://catalog_reader:replace_with_reader_password@queue:5432/domofomka_catalog_release
+CATALOG_REVISION=replace_with_published_catalog_sha256
+
 CACHE_EXPIRE_TIME=1200
 ANTI_SPAM_TIME=5
 
-# API for VK Bot
+# Внутренний API для бота VK
 DOMOFOMKA_API_HOST=api
 DOMOFOMKA_API_PORT=8000
 ```
 
-Your SQLite3 database should contain table `codes`, that has the structure:
+До запуска PostgreSQL-варианта нужно загрузить проверенный каталог и выдать роли API права чтения:
+[публикация и восстановление](docs/database.md#обновление-и-восстановление).
+SQLite-вариант выбирается через `SEARCH_BACKEND=sqlite` и `SEARCH_CATALOG_PATH`.
+
+Исходная база SQLite3 для v1 должна содержать таблицу `codes`:
 
 ~~~~sql
 CREATE TABLE codes (
@@ -90,23 +159,24 @@ CREATE TABLE codes (
 );
 ~~~~
 
-## Run
+## Запуск
 
-Run this command at the working directory */domofomka*:
+Выполните в корне проекта:
 
 ~~~~bash
 docker compose up --build -d
 ~~~~
 
 ## API
-### Get codes by message
-#### Request
+### Поиск кодов по тексту
+
+#### Запрос
 
 `GET /codes/msg/`
 
     GET http://localhost:8000/codes/msg?message=трофимова 3
 
-#### Response
+#### Ответ
 
 ~~~~json
 {
@@ -119,13 +189,13 @@ docker compose up --build -d
 }
 ~~~~
 
-### Get codes by latitude and longitude
+### Поиск кодов по координатам
 
 `GET /codes/geo/`
 
     GET http://localhost:8000/codes/geo?lat=55.617586&lon=37.495482
 
-#### Response
+#### Ответ
 
 ~~~~json
 {
@@ -142,13 +212,22 @@ docker compose up --build -d
 }
 ~~~~
 
-## VK Bot
-### Get codes by message
-![codes_by_msg](https://github.com/omkality/domofomka/assets/56554057/d21e6146-95a7-4f09-a501-31d8fd2ae7df)
+## Бот VK
 
-### Get codes by latitude and longitude
-![codes_by_lat_lon](https://github.com/omkality/domofomka/assets/56554057/85f2b4f6-7634-4b3a-b7a7-5ae10cdc9219)
+### Поиск по тексту
 
-## Telegram Bot
+![Поиск кодов по тексту](https://github.com/omka0708/domofomka/assets/56554057/d21e6146-95a7-4f09-a501-31d8fd2ae7df)
 
-*soon*
+### Поиск по координатам
+
+![Поиск кодов по координатам](https://github.com/omka0708/domofomka/assets/56554057/85f2b4f6-7634-4b3a-b7a7-5ae10cdc9219)
+
+## Бот Telegram
+
+Пока не реализован.
+
+API опубликован только на localhost. Лимиты памяти и процессов контейнеров, ресурсы очереди и ротация журналов настраиваются в `.env`.
+
+Методика и результаты сравнения поиска: [эксперименты](docs/search-experiments.md).
+Проверки значимых слов, кварталов, корпусов и совместимого fallback: [разбор исправлений](docs/search-name-identity.md).
+Сохранность вариантов и кодов: [последняя проверка](docs/search-source-coverage.md).

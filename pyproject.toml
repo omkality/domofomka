@@ -1,6 +1,6 @@
 [project]
 name = "domofomka"
-version = "1.5.6"
+version = "2.0.0"
 description = "Application for getting the intercom code at the given address"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -13,7 +13,9 @@ api = [
     "litestar>=2.19.0",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
-    "pyreqwest>=0.10.1",
+    "psycopg[binary]>=3.3.6,<4",
+    "httpx>=0.28.1,<0.29",
+    "rapidfuzz>=3.14,<4",
     "toml>=0.10.2",
 ]
 dev = [
@@ -25,10 +27,10 @@ dev = [
     "ruff>=0.14.14",
 ]
 vkbot = [
+    "psycopg[binary]>=3.2.0,<4",
     "pydantic>=2.12.5",
     "pydantic-settings>=2.12.0",
-    "pyreqwest>=0.10.1",
-    "redis>=7.1.0",
+    "httpx>=0.28.1,<0.29",
     "requests>=2.32.5",
     "vk-api>=11.10.0",
 ]

@@ -1,0 +1,829 @@
+{
+  "date": "2026-11-07",
+  "release_approved": false,
+  "runtime_strategy_changed": false,
+  "history_export": {
+    "dialogs": 2282,
+    "messages": 198060,
+    "incoming_text": 84488
+  },
+  "parser_parity": {
+    "dialogs": 2282,
+    "incoming_text": 84488,
+    "default_differences": 0,
+    "structural_differences": 0,
+    "lexical_restorations": 3467,
+    "input_sha256": "eaf52b7ce05ea18c1dd71ae83c807367fd8b16919d36428283db7800b49c365e",
+    "frozen_normalizer_sha256": "542f45b44a63230e0e3333518d95269efb946cb35ff4d3bf3d35e63b8db63b0c"
+  },
+  "disagreement_categories": {
+    "cases": 2031,
+    "categories": {
+      "existing_candidate_selected": 1695,
+      "new_automatic_candidate": 196,
+      "same_result_on_current_code": 92,
+      "different_street_or_address": 7,
+      "reference_house_conflict": 10,
+      "different_status_or_candidate_set": 31
+    },
+    "input_sha256": "0f45062d2ca5c6f11794c6085bbb3dc651e2bdcbf5704daaa550c23cd380c1f2",
+    "note": "Категории описывают расхождение, а не правильный ответ. Равенство текста не подтверждает физический дубль."
+  },
+  "context_scoring": {
+    "counts": {
+      "catalog": {
+        "labeled": 37,
+        "literal_conflicts": 2,
+        "with_observed_target": 25,
+        "target_offered": 0,
+        "target_code_offered": 0,
+        "other_automatic_target": 7
+      },
+      "lexical.analyzer_exact-AUTO-r1.0": {
+        "labeled": 37,
+        "literal_conflicts": 2,
+        "with_observed_target": 25,
+        "target_offered": 24,
+        "target_code_offered": 24,
+        "other_automatic_target": 1
+      },
+      "lexical.python_expanded-AUTO-r1.0": {
+        "labeled": 37,
+        "literal_conflicts": 2,
+        "with_observed_target": 25,
+        "target_offered": 24,
+        "target_code_offered": 24,
+        "other_automatic_target": 1
+      },
+      "lexical.python_guarded-AUTO-r1.0": {
+        "labeled": 37,
+        "literal_conflicts": 0,
+        "with_observed_target": 25,
+        "target_offered": 24,
+        "target_code_offered": 24,
+        "other_automatic_target": 0
+      },
+      "lexical.analyzer_guarded-AUTO-r1.0": {
+        "labeled": 37,
+        "literal_conflicts": 0,
+        "with_observed_target": 25,
+        "target_offered": 24,
+        "target_code_offered": 24,
+        "other_automatic_target": 0
+      }
+    },
+    "input_sha256": "4e45adc6dc6d8bb3fe7cc3a303633937cfedd0aff1f0b2ffd412a4c98a5bafa5",
+    "note": "Цель из последующего уточнения отделена от буквальных ограничений исходного запроса. Другие допустимые варианты в меню не считаются ошибкой.",
+    "review_script_sha256": "525e008ebb51891cfa5958d12d7b21c5cbb2e92db1de8afa928d817b2f2e58f2"
+  },
+  "temporal_scoring": {
+    "counts": {
+      "catalog": {
+        "labeled": 142,
+        "literal_conflicts": 0,
+        "with_observed_target": 0,
+        "target_offered": 0,
+        "target_code_offered": 0,
+        "other_automatic_target": 0
+      },
+      "lexical.python_expanded-AUTO-r1.0": {
+        "labeled": 142,
+        "literal_conflicts": 0,
+        "with_observed_target": 0,
+        "target_offered": 0,
+        "target_code_offered": 0,
+        "other_automatic_target": 0
+      },
+      "lexical.python_guarded-AUTO-r1.0": {
+        "labeled": 142,
+        "literal_conflicts": 0,
+        "with_observed_target": 0,
+        "target_offered": 0,
+        "target_code_offered": 0,
+        "other_automatic_target": 0
+      },
+      "lexical.analyzer_guarded-AUTO-r1.0": {
+        "labeled": 142,
+        "literal_conflicts": 0,
+        "with_observed_target": 0,
+        "target_offered": 0,
+        "target_code_offered": 0,
+        "other_automatic_target": 0
+      }
+    },
+    "input_sha256": "324a82a74c90e0589f24979d3b73ff57395873ab6de3c2cf535427f91b44a363",
+    "note": "Цель из последующего уточнения отделена от буквальных ограничений исходного запроса. Другие допустимые варианты в меню не считаются ошибкой.",
+    "review_script_sha256": "525e008ebb51891cfa5958d12d7b21c5cbb2e92db1de8afa928d817b2f2e58f2"
+  },
+  "experiments": [
+    {
+      "name": "full",
+      "cases": 46908,
+      "variants": 5,
+      "input_sha256": "a02360544362ff7782a59c3691e1233cf39f57f4d41cd99cb5ea83119bddbe67",
+      "results": [
+        {
+          "variant": "catalog",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 41073,
+            "historical:reference_retained": 44005,
+            "historical:without_reference": 0,
+            "historical:automatic_literal_conflict": 0,
+            "historical:choice_literal_conflict": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1314,
+            "correction_hypothesis:reference_retained": 1388,
+            "correction_hypothesis:without_reference": 0,
+            "correction_hypothesis:automatic_literal_conflict": 0,
+            "correction_hypothesis:choice_literal_conflict": 0,
+            "historical:ambiguous": 2941,
+            "correction_hypothesis:not_found": 829,
+            "historical:no_codes": 18,
+            "correction_hypothesis:no_codes_ambiguous": 137,
+            "correction_hypothesis:no_codes": 141,
+            "historical:not_found": 18,
+            "historical:no_codes_ambiguous": 8,
+            "correction_hypothesis:ambiguous": 102,
+            "correction_hypothesis:incomplete_query": 5,
+            "historical:incomplete_query": 25,
+            "reviewed:total": 297,
+            "reviewed:found": 278,
+            "reviewed:reference_retained": 292,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0,
+            "reviewed:no_codes": 2,
+            "reviewed:ambiguous": 14,
+            "reviewed:not_found": 2,
+            "reviewed:no_codes_ambiguous": 1
+          },
+          "p50_ms": 7.998,
+          "p95_ms": 54.649
+        },
+        {
+          "variant": "lexical.analyzer-AUTO-r1.0",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 42712,
+            "historical:reference_retained": 43867,
+            "historical:without_reference": 0,
+            "historical:automatic_literal_conflict": 0,
+            "historical:choice_literal_conflict": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1566,
+            "correction_hypothesis:reference_retained": 1565,
+            "correction_hypothesis:without_reference": 0,
+            "correction_hypothesis:automatic_literal_conflict": 0,
+            "correction_hypothesis:choice_literal_conflict": 0,
+            "historical:ambiguous": 1294,
+            "correction_hypothesis:not_found": 633,
+            "historical:no_codes": 22,
+            "correction_hypothesis:no_codes_ambiguous": 101,
+            "correction_hypothesis:no_codes": 171,
+            "historical:not_found": 18,
+            "historical:no_codes_ambiguous": 9,
+            "correction_hypothesis:ambiguous": 48,
+            "correction_hypothesis:incomplete_query": 9,
+            "historical:incomplete_query": 28,
+            "reviewed:total": 297,
+            "reviewed:found": 283,
+            "reviewed:reference_retained": 292,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0,
+            "reviewed:no_codes": 3,
+            "reviewed:ambiguous": 9,
+            "reviewed:not_found": 2
+          },
+          "p50_ms": 8.862,
+          "p95_ms": 40.711
+        },
+        {
+          "variant": "catalog_exact",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 41606,
+            "historical:reference_retained": 43966,
+            "historical:without_reference": 0,
+            "historical:automatic_literal_conflict": 0,
+            "historical:choice_literal_conflict": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1302,
+            "correction_hypothesis:reference_retained": 1368,
+            "correction_hypothesis:without_reference": 0,
+            "correction_hypothesis:automatic_literal_conflict": 0,
+            "correction_hypothesis:choice_literal_conflict": 0,
+            "correction_hypothesis:not_found": 829,
+            "historical:ambiguous": 2396,
+            "historical:no_codes": 25,
+            "correction_hypothesis:no_codes_ambiguous": 150,
+            "correction_hypothesis:no_codes": 150,
+            "historical:not_found": 18,
+            "historical:no_codes_ambiguous": 13,
+            "correction_hypothesis:ambiguous": 92,
+            "correction_hypothesis:incomplete_query": 5,
+            "historical:incomplete_query": 25,
+            "reviewed:total": 297,
+            "reviewed:found": 280,
+            "reviewed:reference_retained": 292,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0,
+            "reviewed:no_codes": 2,
+            "reviewed:ambiguous": 12,
+            "reviewed:not_found": 2,
+            "reviewed:no_codes_ambiguous": 1
+          },
+          "p50_ms": 8.159,
+          "p95_ms": 54.728
+        },
+        {
+          "variant": "lexical.python_exact-AUTO-r1.0",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 41606,
+            "historical:reference_retained": 43910,
+            "historical:without_reference": 0,
+            "historical:automatic_literal_conflict": 0,
+            "historical:choice_literal_conflict": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1518,
+            "correction_hypothesis:reference_retained": 1544,
+            "correction_hypothesis:without_reference": 0,
+            "correction_hypothesis:automatic_literal_conflict": 0,
+            "correction_hypothesis:choice_literal_conflict": 0,
+            "correction_hypothesis:not_found": 620,
+            "historical:ambiguous": 2341,
+            "historical:no_codes": 60,
+            "correction_hypothesis:no_codes_ambiguous": 145,
+            "correction_hypothesis:no_codes": 171,
+            "historical:not_found": 18,
+            "historical:no_codes_ambiguous": 30,
+            "correction_hypothesis:ambiguous": 65,
+            "correction_hypothesis:incomplete_query": 9,
+            "historical:incomplete_query": 28,
+            "reviewed:total": 297,
+            "reviewed:found": 280,
+            "reviewed:reference_retained": 292,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0,
+            "reviewed:no_codes": 3,
+            "reviewed:ambiguous": 12,
+            "reviewed:not_found": 1,
+            "reviewed:no_codes_ambiguous": 1
+          },
+          "p50_ms": 15.213,
+          "p95_ms": 87.601
+        },
+        {
+          "variant": "lexical.analyzer_exact-AUTO-r1.0",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 41606,
+            "historical:reference_retained": 43910,
+            "historical:without_reference": 0,
+            "historical:automatic_literal_conflict": 0,
+            "historical:choice_literal_conflict": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1523,
+            "correction_hypothesis:reference_retained": 1549,
+            "correction_hypothesis:without_reference": 0,
+            "correction_hypothesis:automatic_literal_conflict": 0,
+            "correction_hypothesis:choice_literal_conflict": 0,
+            "historical:ambiguous": 2341,
+            "correction_hypothesis:not_found": 615,
+            "historical:no_codes": 60,
+            "correction_hypothesis:no_codes_ambiguous": 145,
+            "correction_hypothesis:no_codes": 171,
+            "historical:not_found": 18,
+            "historical:no_codes_ambiguous": 30,
+            "correction_hypothesis:ambiguous": 65,
+            "correction_hypothesis:incomplete_query": 9,
+            "historical:incomplete_query": 28,
+            "reviewed:total": 297,
+            "reviewed:found": 280,
+            "reviewed:reference_retained": 292,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0,
+            "reviewed:no_codes": 3,
+            "reviewed:ambiguous": 12,
+            "reviewed:not_found": 1,
+            "reviewed:no_codes_ambiguous": 1
+          },
+          "p50_ms": 14.354,
+          "p95_ms": 87.815
+        }
+      ]
+    },
+    {
+      "name": "ordinal-matched-v1",
+      "cases": 102,
+      "variants": 6,
+      "input_sha256": "d6d1269487a0090a22d7f1d7db55a72c2c1df36c20147e60a14e0a4a7b913a78",
+      "results": [
+        {
+          "variant": "lexical.analyzer_exact-AUTO-r1.0",
+          "counts": {
+            "reviewed:total": 102,
+            "reviewed:found": 102,
+            "reviewed:reference_retained": 102,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0
+          },
+          "p50_ms": 12.239,
+          "p95_ms": 18.952
+        },
+        {
+          "variant": "lexical.python_unicode-AUTO-r1.0",
+          "counts": {
+            "reviewed:total": 102,
+            "reviewed:found": 74,
+            "reviewed:reference_retained": 74,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0,
+            "reviewed:not_found": 28
+          },
+          "p50_ms": 13.964,
+          "p95_ms": 115.422
+        },
+        {
+          "variant": "lexical.python_expanded-AUTO-r1.0",
+          "counts": {
+            "reviewed:total": 102,
+            "reviewed:found": 102,
+            "reviewed:reference_retained": 102,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0
+          },
+          "p50_ms": 11.652,
+          "p95_ms": 19.219
+        },
+        {
+          "variant": "lexical.analyzer_shared-AUTO-r1.0",
+          "counts": {
+            "reviewed:total": 102,
+            "reviewed:found": 74,
+            "reviewed:reference_retained": 74,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0,
+            "reviewed:not_found": 28
+          },
+          "p50_ms": 14.406,
+          "p95_ms": 110.782
+        },
+        {
+          "variant": "lexical.python_guarded-AUTO-r1.0",
+          "counts": {
+            "reviewed:total": 102,
+            "reviewed:found": 102,
+            "reviewed:reference_retained": 102,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0
+          },
+          "p50_ms": 15.885,
+          "p95_ms": 23.087
+        },
+        {
+          "variant": "lexical.analyzer_guarded-AUTO-r1.0",
+          "counts": {
+            "reviewed:total": 102,
+            "reviewed:found": 102,
+            "reviewed:reference_retained": 102,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0
+          },
+          "p50_ms": 16.512,
+          "p95_ms": 23.049
+        }
+      ]
+    },
+    {
+      "name": "ordinal-traffic-matched-v1",
+      "cases": 3110,
+      "variants": 4,
+      "input_sha256": "b1d5f4a0a21d2ccc70ab55fc6e1579a38fdbf75d7cf538daf5a41076614670b0",
+      "results": [
+        {
+          "variant": "lexical.analyzer_exact-AUTO-r1.0",
+          "counts": {
+            "ordinal_traffic:total": 3110,
+            "ordinal_traffic:no_codes": 206,
+            "ordinal_traffic:reference_retained": 2371,
+            "ordinal_traffic:without_reference": 739,
+            "ordinal_traffic:automatic_literal_conflict": 0,
+            "ordinal_traffic:choice_literal_conflict": 0,
+            "ordinal_traffic:incomplete_query": 63,
+            "ordinal_traffic:not_found": 219,
+            "ordinal_traffic:found": 2551,
+            "ordinal_traffic:no_codes_ambiguous": 24,
+            "ordinal_traffic:ambiguous": 46,
+            "ordinal_traffic:invalid_query": 1
+          },
+          "p50_ms": 10.932,
+          "p95_ms": 75.836
+        },
+        {
+          "variant": "lexical.python_unicode-AUTO-r1.0",
+          "counts": {
+            "ordinal_traffic:total": 3110,
+            "ordinal_traffic:no_codes": 206,
+            "ordinal_traffic:reference_retained": 2371,
+            "ordinal_traffic:without_reference": 739,
+            "ordinal_traffic:automatic_literal_conflict": 0,
+            "ordinal_traffic:choice_literal_conflict": 0,
+            "ordinal_traffic:incomplete_query": 63,
+            "ordinal_traffic:not_found": 219,
+            "ordinal_traffic:found": 2551,
+            "ordinal_traffic:no_codes_ambiguous": 24,
+            "ordinal_traffic:ambiguous": 46,
+            "ordinal_traffic:invalid_query": 1
+          },
+          "p50_ms": 10.388,
+          "p95_ms": 75.043
+        },
+        {
+          "variant": "lexical.python_expanded-AUTO-r1.0",
+          "counts": {
+            "ordinal_traffic:total": 3110,
+            "ordinal_traffic:no_codes": 206,
+            "ordinal_traffic:reference_retained": 2371,
+            "ordinal_traffic:without_reference": 739,
+            "ordinal_traffic:automatic_literal_conflict": 0,
+            "ordinal_traffic:choice_literal_conflict": 0,
+            "ordinal_traffic:incomplete_query": 63,
+            "ordinal_traffic:not_found": 219,
+            "ordinal_traffic:found": 2551,
+            "ordinal_traffic:no_codes_ambiguous": 24,
+            "ordinal_traffic:ambiguous": 46,
+            "ordinal_traffic:invalid_query": 1
+          },
+          "p50_ms": 9.826,
+          "p95_ms": 72.595
+        },
+        {
+          "variant": "lexical.analyzer_shared-AUTO-r1.0",
+          "counts": {
+            "ordinal_traffic:total": 3110,
+            "ordinal_traffic:no_codes": 206,
+            "ordinal_traffic:reference_retained": 2371,
+            "ordinal_traffic:without_reference": 739,
+            "ordinal_traffic:automatic_literal_conflict": 0,
+            "ordinal_traffic:choice_literal_conflict": 0,
+            "ordinal_traffic:incomplete_query": 63,
+            "ordinal_traffic:not_found": 219,
+            "ordinal_traffic:found": 2551,
+            "ordinal_traffic:no_codes_ambiguous": 24,
+            "ordinal_traffic:ambiguous": 46,
+            "ordinal_traffic:invalid_query": 1
+          },
+          "p50_ms": 10.867,
+          "p95_ms": 73.848
+        }
+      ]
+    },
+    {
+      "name": "context-guarded-v1",
+      "cases": 37,
+      "variants": 5,
+      "input_sha256": "4e45adc6dc6d8bb3fe7cc3a303633937cfedd0aff1f0b2ffd412a4c98a5bafa5",
+      "results": [
+        {
+          "variant": "catalog",
+          "counts": {
+            "context_review:total": 37,
+            "context_review:no_codes": 7,
+            "context_review:reference_retained": 7,
+            "context_review:without_reference": 0,
+            "context_review:automatic_literal_conflict": 0,
+            "context_review:choice_literal_conflict": 0,
+            "context_review:ambiguous": 8,
+            "context_review:not_found": 20,
+            "context_review:no_codes_ambiguous": 2
+          },
+          "p50_ms": 17.86,
+          "p95_ms": 77.09
+        },
+        {
+          "variant": "lexical.analyzer_exact-AUTO-r1.0",
+          "counts": {
+            "context_review:total": 37,
+            "context_review:found": 29,
+            "context_review:reference_retained": 32,
+            "context_review:without_reference": 0,
+            "context_review:automatic_literal_conflict": 0,
+            "context_review:choice_literal_conflict": 0,
+            "context_review:ambiguous": 6,
+            "context_review:not_found": 2
+          },
+          "p50_ms": 112.958,
+          "p95_ms": 274.678
+        },
+        {
+          "variant": "lexical.python_expanded-AUTO-r1.0",
+          "counts": {
+            "context_review:total": 37,
+            "context_review:found": 29,
+            "context_review:reference_retained": 32,
+            "context_review:without_reference": 0,
+            "context_review:automatic_literal_conflict": 0,
+            "context_review:choice_literal_conflict": 0,
+            "context_review:ambiguous": 6,
+            "context_review:not_found": 2
+          },
+          "p50_ms": 99.33,
+          "p95_ms": 235.535
+        },
+        {
+          "variant": "lexical.python_guarded-AUTO-r1.0",
+          "counts": {
+            "context_review:total": 37,
+            "context_review:found": 27,
+            "context_review:reference_retained": 31,
+            "context_review:without_reference": 0,
+            "context_review:automatic_literal_conflict": 0,
+            "context_review:choice_literal_conflict": 0,
+            "context_review:ambiguous": 6,
+            "context_review:not_found": 4
+          },
+          "p50_ms": 55.998,
+          "p95_ms": 109.838
+        },
+        {
+          "variant": "lexical.analyzer_guarded-AUTO-r1.0",
+          "counts": {
+            "context_review:total": 37,
+            "context_review:found": 27,
+            "context_review:reference_retained": 31,
+            "context_review:without_reference": 0,
+            "context_review:automatic_literal_conflict": 0,
+            "context_review:choice_literal_conflict": 0,
+            "context_review:ambiguous": 6,
+            "context_review:not_found": 4
+          },
+          "p50_ms": 55.167,
+          "p95_ms": 112.001
+        }
+      ]
+    },
+    {
+      "name": "temporal-guarded-v1",
+      "cases": 147,
+      "variants": 4,
+      "input_sha256": "324a82a74c90e0589f24979d3b73ff57395873ab6de3c2cf535427f91b44a363",
+      "results": [
+        {
+          "variant": "catalog",
+          "counts": {
+            "temporal_holdout:total": 147,
+            "temporal_holdout:found": 118,
+            "temporal_holdout:reference_retained": 123,
+            "temporal_holdout:without_reference": 24,
+            "temporal_holdout:automatic_literal_conflict": 0,
+            "temporal_holdout:choice_literal_conflict": 0,
+            "temporal_holdout:not_found": 4,
+            "temporal_holdout:ambiguous": 13,
+            "temporal_holdout:no_codes": 3,
+            "temporal_holdout:incomplete_query": 4,
+            "temporal_holdout:no_codes_ambiguous": 5
+          },
+          "p50_ms": 4.593,
+          "p95_ms": 56.123
+        },
+        {
+          "variant": "lexical.python_expanded-AUTO-r1.0",
+          "counts": {
+            "temporal_holdout:total": 147,
+            "temporal_holdout:found": 118,
+            "temporal_holdout:reference_retained": 123,
+            "temporal_holdout:without_reference": 24,
+            "temporal_holdout:automatic_literal_conflict": 0,
+            "temporal_holdout:choice_literal_conflict": 0,
+            "temporal_holdout:not_found": 3,
+            "temporal_holdout:ambiguous": 13,
+            "temporal_holdout:no_codes": 3,
+            "temporal_holdout:incomplete_query": 5,
+            "temporal_holdout:no_codes_ambiguous": 5
+          },
+          "p50_ms": 11.307,
+          "p95_ms": 41.127
+        },
+        {
+          "variant": "lexical.python_guarded-AUTO-r1.0",
+          "counts": {
+            "temporal_holdout:total": 147,
+            "temporal_holdout:found": 118,
+            "temporal_holdout:reference_retained": 123,
+            "temporal_holdout:without_reference": 24,
+            "temporal_holdout:automatic_literal_conflict": 0,
+            "temporal_holdout:choice_literal_conflict": 0,
+            "temporal_holdout:not_found": 3,
+            "temporal_holdout:ambiguous": 13,
+            "temporal_holdout:no_codes": 3,
+            "temporal_holdout:incomplete_query": 5,
+            "temporal_holdout:no_codes_ambiguous": 5
+          },
+          "p50_ms": 14.932,
+          "p95_ms": 49.132
+        },
+        {
+          "variant": "lexical.analyzer_guarded-AUTO-r1.0",
+          "counts": {
+            "temporal_holdout:total": 147,
+            "temporal_holdout:found": 118,
+            "temporal_holdout:reference_retained": 123,
+            "temporal_holdout:without_reference": 24,
+            "temporal_holdout:automatic_literal_conflict": 0,
+            "temporal_holdout:choice_literal_conflict": 0,
+            "temporal_holdout:not_found": 3,
+            "temporal_holdout:ambiguous": 13,
+            "temporal_holdout:no_codes": 3,
+            "temporal_holdout:incomplete_query": 5,
+            "temporal_holdout:no_codes_ambiguous": 5
+          },
+          "p50_ms": 17.361,
+          "p95_ms": 51.145
+        }
+      ]
+    },
+    {
+      "name": "full-guarded-v1",
+      "cases": 46908,
+      "variants": 3,
+      "input_sha256": "a02360544362ff7782a59c3691e1233cf39f57f4d41cd99cb5ea83119bddbe67",
+      "results": [
+        {
+          "variant": "catalog",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 41073,
+            "historical:reference_retained": 44005,
+            "historical:without_reference": 0,
+            "historical:automatic_literal_conflict": 0,
+            "historical:choice_literal_conflict": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1314,
+            "correction_hypothesis:reference_retained": 1388,
+            "correction_hypothesis:without_reference": 0,
+            "correction_hypothesis:automatic_literal_conflict": 0,
+            "correction_hypothesis:choice_literal_conflict": 0,
+            "historical:ambiguous": 2941,
+            "correction_hypothesis:not_found": 829,
+            "historical:no_codes": 18,
+            "correction_hypothesis:no_codes_ambiguous": 137,
+            "correction_hypothesis:no_codes": 141,
+            "historical:not_found": 18,
+            "historical:no_codes_ambiguous": 8,
+            "correction_hypothesis:ambiguous": 102,
+            "correction_hypothesis:incomplete_query": 5,
+            "historical:incomplete_query": 25,
+            "reviewed:total": 297,
+            "reviewed:found": 278,
+            "reviewed:reference_retained": 292,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0,
+            "reviewed:no_codes": 2,
+            "reviewed:ambiguous": 14,
+            "reviewed:not_found": 2,
+            "reviewed:no_codes_ambiguous": 1
+          },
+          "p50_ms": 3.737,
+          "p95_ms": 29.083
+        },
+        {
+          "variant": "lexical.python_guarded-AUTO-r1.0",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 41568,
+            "historical:reference_retained": 43890,
+            "historical:without_reference": 0,
+            "historical:automatic_literal_conflict": 0,
+            "historical:choice_literal_conflict": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1413,
+            "correction_hypothesis:reference_retained": 1455,
+            "correction_hypothesis:without_reference": 0,
+            "correction_hypothesis:automatic_literal_conflict": 0,
+            "correction_hypothesis:choice_literal_conflict": 0,
+            "historical:ambiguous": 2359,
+            "correction_hypothesis:not_found": 743,
+            "historical:no_codes": 60,
+            "correction_hypothesis:no_codes_ambiguous": 142,
+            "correction_hypothesis:no_codes": 142,
+            "historical:not_found": 37,
+            "historical:no_codes_ambiguous": 30,
+            "correction_hypothesis:ambiguous": 79,
+            "correction_hypothesis:incomplete_query": 9,
+            "historical:incomplete_query": 28,
+            "historical:invalid_query": 1,
+            "reviewed:total": 297,
+            "reviewed:found": 280,
+            "reviewed:reference_retained": 292,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0,
+            "reviewed:no_codes": 2,
+            "reviewed:ambiguous": 12,
+            "reviewed:not_found": 2,
+            "reviewed:no_codes_ambiguous": 1
+          },
+          "p50_ms": 14.328,
+          "p95_ms": 42.545
+        },
+        {
+          "variant": "lexical.analyzer_guarded-AUTO-r1.0",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 41568,
+            "historical:reference_retained": 43890,
+            "historical:without_reference": 0,
+            "historical:automatic_literal_conflict": 0,
+            "historical:choice_literal_conflict": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1413,
+            "correction_hypothesis:reference_retained": 1455,
+            "correction_hypothesis:without_reference": 0,
+            "correction_hypothesis:automatic_literal_conflict": 0,
+            "correction_hypothesis:choice_literal_conflict": 0,
+            "historical:ambiguous": 2359,
+            "correction_hypothesis:not_found": 743,
+            "historical:no_codes": 60,
+            "correction_hypothesis:no_codes_ambiguous": 142,
+            "correction_hypothesis:no_codes": 142,
+            "historical:not_found": 37,
+            "historical:no_codes_ambiguous": 30,
+            "correction_hypothesis:ambiguous": 79,
+            "correction_hypothesis:incomplete_query": 9,
+            "historical:incomplete_query": 28,
+            "historical:invalid_query": 1,
+            "reviewed:total": 297,
+            "reviewed:found": 280,
+            "reviewed:reference_retained": 292,
+            "reviewed:without_reference": 0,
+            "reviewed:automatic_literal_conflict": 0,
+            "reviewed:choice_literal_conflict": 0,
+            "reviewed:no_codes": 2,
+            "reviewed:ambiguous": 12,
+            "reviewed:not_found": 2,
+            "reviewed:no_codes_ambiguous": 1
+          },
+          "p50_ms": 14.188,
+          "p95_ms": 42.32
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Исторические подсказки и позднейшие исправления не являются достоверным эталоном намерения.",
+    "Буквальные ограничения исходного запроса отделены от наблюдаемой цели последующего уточнения.",
+    "Разбор дома общий для Python-профилей и профилей анализаторов.",
+    "Локальные HTTP-задержки не являются задержками VDS или VK.",
+    "Временная выборка просмотрена после фиксации настроек; повторно использовать её как независимую при настройке нельзя."
+  ],
+  "index_resources": {
+    "index": "domofomka-native-lab-20261107-lexical-shared",
+    "store_bytes": 561247678,
+    "lucene_docs": 1187971,
+    "segments": 9,
+    "note": "Размер одного лабораторного индекса на диске. Процесс обслуживает несколько индексов; это не измерение отдельного VDS."
+  },
+  "candidate_identity_ambiguity": {
+    "total": 1695,
+    "all_same_folded_street": 1239,
+    "all_same_folded_city": 267,
+    "multiple_verified_guids": 291,
+    "any_missing_guid": 1491
+  },
+  "full_guarded_paired_comparison": {
+    "normalization_pair": {
+      "cases": 46908,
+      "different_results": 0,
+      "different_token_sequences": 0
+    },
+    "baseline_comparison": {
+      "lexical.python_guarded-AUTO-r1.0": {
+        "gained_reference": 157,
+        "lost_reference": 205,
+        "backend_errors": 0,
+        "known_street_guard": 388,
+        "term_budget_rejection": 1
+      },
+      "lexical.analyzer_guarded-AUTO-r1.0": {
+        "gained_reference": 157,
+        "lost_reference": 205,
+        "backend_errors": 0,
+        "known_street_guard": 388,
+        "term_budget_rejection": 1
+      }
+    }
+  }
+}
