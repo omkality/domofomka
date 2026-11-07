@@ -94,3 +94,23 @@ OpenSearch остаётся локальным инструментом срав
 
 `59ff7db` — `test(search): audit code coverage alongside address compatibility`: проверка доступности самих кодов относительно v1.
 Файлы: `tools/audit_search_code_coverage.py`, `tests/test_search_code_coverage.py`.
+
+`57bdadc` — сохранение исходных вариантов с кодами и общая проверка перепутанных полей адреса.
+Файлы: `src/search/constraints.py`, `engine.py`, `postgres.py`, `tools/benchmark_native_search.py`,
+`tests/test_exact_search_experiment.py`, `tests/test_postgres_catalog.py`.
+
+`4fb63f1` — сравнение кодовых наборов с замороженным предыдущим v2, а не только с v1.
+Файлы: `tools/audit_search_code_coverage.py`, `tests/test_search_code_coverage.py`.
+
+`6eca1eb` — слово из сохранённого имени нельзя потерять и объявить короткое имя полным.
+Файлы: `src/search/constraints.py`, `tests/test_exact_search_experiment.py`.
+
+- `fix(search): validate each legacy source before v2 fallback` (`483a33a`):
+  `src/api/v2.py`, `src/search/constraints.py`, `src/services/codes.py`,
+  `src/services/legacy_index.py`, `tools/evaluate_search.py`, `tools/benchmark_native_search.py`,
+  `tools/audit_search_code_coverage.py`, `tests/test_api_versions.py`,
+  `tests/test_guarded_search_profiles.py`, `tests/test_house_identity.py`,
+  `tests/test_legacy_index.py`, `tests/test_native_search_experiments.py`, `tests/test_search_code_coverage.py`.
+
+`389700f` — `fix(search): preserve joined source names during fallback validation`.
+Файлы: `src/search/constraints.py`, `tests/test_legacy_index.py`.
