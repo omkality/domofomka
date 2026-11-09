@@ -31,6 +31,10 @@ def published_image(repository: str, revision: str) -> tuple[str, int]:
             "--read-only",
             "--cap-drop",
             "ALL",
+            # Только одноразовый read-only измеритель, не процесс приложения.
+            # Системные каталоги _apt недоступны UID 0 без DAC_READ_SEARCH.
+            "--cap-add",
+            "DAC_READ_SEARCH",
             "--security-opt",
             "no-new-privileges",
             "--entrypoint",
