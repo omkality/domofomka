@@ -283,6 +283,7 @@ class Processor:
                     {
                         "method": "send",
                         "params": dict(base, message="Пришлите улицу и номер дома одним коротким сообщением."),
+                        "hint": True,
                     }
                 )
             elif result.get("status") == "incomplete_query":
@@ -292,6 +293,7 @@ class Processor:
                         "params": dict(
                             base, message="Пришлите адрес целиком одним сообщением: город, улицу и номер дома."
                         ),
+                        "hint": True,
                     }
                 )
             elif result.get("status") == "no_codes_ambiguous":
@@ -327,7 +329,7 @@ class Processor:
                     if result.get("status") == "not_found"
                     else "Нет результатов"
                 )
-                effects.append({"method": "send", "params": dict(base, message=text)})
+                effects.append({"method": "send", "params": dict(base, message=text), "hint": True})
             else:
                 entrances = list(result["data"])
                 for offset in range(0, len(entrances), INLINE_BUTTON_LIMIT):

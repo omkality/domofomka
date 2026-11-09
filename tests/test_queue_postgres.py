@@ -290,6 +290,125 @@ def click(store: QueueStore, name: str, entrance: str = "1", cmid: int = 12, pee
     )
 
 
+def test_message_rate_keeps_latest_correction_without_blocking_other_users(store):
+    from unittest.mock import patch
+
+    limited = QueueStore(store.dsn, store.group_id, message_rate_interval_seconds=5, message_rate_burst=2)
+
+    def incoming(number, peer=10):
+        item = record(limited, peer, number)
+        item["payload"]["message"]["text"] = f"Запрос {number}"
+        return item
+
+    with patch("src.vkbot.queue.time.time", return_value=100) as clock:
+        for i in [1, 2]:
+            limited.ingest([incoming(i)])
+            job = limited.claim("bot_inbox")
+            assert job is not None
+            limited.plan(job, [])
+        limited.ingest([incoming(3), incoming(4), incoming(1, peer=20)])
+        other = limited.claim("bot_inbox")
+        assert other["peer_id"] == 20
+        limited.plan(other, [])
+        assert limited.claim("bot_inbox") is None
+        clock.return_value = 104
+        limited.ingest([incoming(5)])
+        assert limited.claim("bot_inbox") is None
+        clock.return_value = 105
+        latest = limited.claim("bot_inbox")
+        assert latest["payload"]["message"]["id"] == 5
+        limited.plan(latest, [])
+        with limited.connect() as db:
+            rows = db.execute(
+                "SELECT payload->>'_queue_disposition' AS reason FROM bot_inbox WHERE group_id=%s", (store.group_id,)
+            ).fetchall()
+        assert sum(r["reason"] == "message_rate_coalesced" for r in rows) == 2
+
+
+def test_message_budget_survives_restart_without_charging_retries(store):
+    from unittest.mock import patch
+
+    limited = QueueStore(store.dsn, store.group_id, message_rate_interval_seconds=5, message_rate_burst=1)
+    with patch("src.vkbot.queue.time.time", return_value=100) as clock:
+        limited.ingest([record(limited)])
+        first = limited.claim("bot_inbox")
+        limited.fail("bot_inbox", first, "timeout", delay=0)
+        recreated = QueueStore(store.dsn, store.group_id, message_rate_interval_seconds=5, message_rate_burst=1)
+        retry = recreated.claim("bot_inbox")
+        assert retry["id"] == first["id"]
+        assert retry["attempts"] == 2
+        recreated.plan(retry, [])
+        recreated.ingest([record(recreated, cmid=2)])
+        assert recreated.claim("bot_inbox") is None
+        clock.return_value = 105
+        assert recreated.claim("bot_inbox") is not None
+
+
+def test_identical_hints_are_limited_per_user_but_codes_are_not(store):
+    from unittest.mock import patch
+
+    limited = QueueStore(store.dsn, store.group_id, hint_interval_seconds=15)
+    hint = {"method": "send", "params": {"message": "Укажите адрес"}, "hint": True}
+    with patch("src.vkbot.queue.time.time", return_value=100) as clock:
+        limited.ingest([record(limited)])
+        limited.plan(limited.claim("bot_inbox"), [hint])
+        limited.finish(limited.claim("bot_outbox"))
+        clock.return_value = 101
+        limited.ingest([record(limited, cmid=2)])
+        limited.plan(limited.claim("bot_inbox"), [hint])
+        assert limited.claim("bot_outbox") is None
+        limited.ingest([record(limited, peer=20)])
+        limited.plan(limited.claim("bot_inbox"), [hint])
+        assert limited.claim("bot_outbox")["peer_id"] == 20
+        limited.ingest([record(limited, cmid=3)])
+        limited.plan(limited.claim("bot_inbox"), [{"method": "send", "params": {"message": "Адрес и коды"}}])
+        assert limited.claim("bot_outbox")["params"]["message"] == "Адрес и коды"
+
+
+def test_pending_hint_prevents_duplicates_even_after_notice_interval(store):
+    from unittest.mock import patch
+
+    limited = QueueStore(store.dsn, store.group_id, hint_interval_seconds=15)
+    hint = {"method": "send", "params": {"message": "Укажите адрес"}, "hint": True}
+    with patch("src.vkbot.queue.time.time", return_value=100) as clock:
+        limited.ingest([record(limited)])
+        limited.plan(limited.claim("bot_inbox"), [hint])
+        clock.return_value = 200
+        limited.ingest([record(limited, cmid=2)])
+        limited.plan(limited.claim("bot_inbox"), [hint])
+        outgoing = limited.claim("bot_outbox")
+        limited.finish(outgoing)
+        assert limited.claim("bot_outbox") is None
+        clock.return_value = 216
+        limited.ingest([record(limited, cmid=3)])
+        limited.plan(limited.claim("bot_inbox"), [hint])
+        assert limited.claim("bot_outbox") is not None
+
+
+def test_retention_removes_only_inactive_expired_message_gates(store):
+    from psycopg.types.json import Jsonb
+
+    from src.vkbot.maintenance import compact
+
+    store.ingest([record(store, peer=10), record(store, peer=20)])
+    for _ in range(2):
+        store.plan(store.claim("bot_inbox"), [])
+    with store.connect() as db:
+        db.execute("UPDATE bot_inbox SET completed_at=1 WHERE group_id=%s", (store.group_id,))
+        for peer in [10, 20]:
+            for prefix in ["message_rate", "message_hint"]:
+                db.execute(
+                    "INSERT INTO bot_state VALUES(%s,%s,%s)",
+                    (store.group_id, f"{prefix}:{peer}", Jsonb({"updated_at": 1})),
+                )
+    store.ingest([record(store, peer=10, cmid=2)])
+    compact(store, 60, 60, 50)
+    assert store.get_state("message_rate:20") is None
+    assert store.get_state("message_hint:20") is None
+    assert store.get_state("message_rate:10") is not None
+    assert store.get_state("message_hint:10") is not None
+
+
 def test_button_burst_creates_one_job_and_bounded_feedback(store: QueueStore) -> None:
     from unittest.mock import patch
 

@@ -12,7 +12,7 @@ def compact(store: QueueStore, retention_seconds: float, context_seconds: float,
     with store.connect() as db:
         db.execute("SELECT pg_advisory_xact_lock(20261106,%s)", (store.group_id,))
         rows = db.execute(
-            """SELECT i.id,i.event_key FROM bot_inbox i
+            """SELECT i.id,i.event_key,i.peer_id FROM bot_inbox i
             WHERE i.group_id=%s AND i.status='done' AND i.completed_at<%s
             AND NOT EXISTS(SELECT 1 FROM bot_outbox o WHERE o.inbox_id=i.id
                 AND (o.status<>'done' OR o.completed_at IS NULL OR o.completed_at>=%s))
@@ -28,6 +28,14 @@ def compact(store: QueueStore, retention_seconds: float, context_seconds: float,
             "DELETE FROM bot_outbox WHERE group_id=%s AND inbox_id=ANY(%s)", (store.group_id, ids)
         ).rowcount
         db.execute("DELETE FROM bot_inbox WHERE group_id=%s AND id=ANY(%s)", (store.group_id, ids))
+        for peer in {row["peer_id"] for row in rows}:
+            db.execute(
+                """DELETE FROM bot_state s WHERE group_id=%s AND name=ANY(%s)
+                AND coalesce((value->>'updated_at')::double precision,0)<%s
+                AND NOT EXISTS(SELECT 1 FROM bot_inbox WHERE group_id=s.group_id AND peer_id=%s AND status<>'done')
+                AND NOT EXISTS(SELECT 1 FROM bot_outbox WHERE group_id=s.group_id AND peer_id=%s AND status<>'done')""",
+                (store.group_id, [f"message_rate:{peer}", f"message_hint:{peer}"], now - context_seconds, peer, peer),
+            )
         contexts = db.execute(
             """WITH expired AS (
             SELECT c.group_id,c.peer_id,c.conversation_message_id FROM bot_message_context c

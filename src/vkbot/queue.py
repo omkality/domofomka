@@ -1,5 +1,6 @@
 """Durable inbox/outbox. All identifiers are scoped to a VK community."""
 
+import hashlib
 import json
 import logging
 import math
@@ -100,10 +101,15 @@ class QueueStore:
         *,
         max_pending_messages_per_peer: int | None = None,
         reply_interval_seconds: float = 0,
+        message_rate_interval_seconds: float = 0,
+        message_rate_burst: int = 2,
+        hint_interval_seconds: float = 0,
     ):
         if (
-            max_pending_messages_per_peer is not None and max_pending_messages_per_peer < 1
-        ) or reply_interval_seconds < 0:
+            (max_pending_messages_per_peer is not None and max_pending_messages_per_peer < 1)
+            or min(reply_interval_seconds, message_rate_interval_seconds, hint_interval_seconds) < 0
+            or message_rate_burst < 1
+        ):
             raise ValueError("Invalid per-user queue limits")
         self.dsn = dsn
         self.group_id = group_id
@@ -113,6 +119,9 @@ class QueueStore:
         # Runtime supplies the configured limits; maintenance clients need not.
         self.max_pending_messages_per_peer = max_pending_messages_per_peer
         self.reply_interval_seconds = reply_interval_seconds
+        self.message_rate_interval_seconds = message_rate_interval_seconds
+        self.message_rate_burst = message_rate_burst
+        self.hint_interval_seconds = hint_interval_seconds
 
     def _queue_lock(self, conn: psycopg.Connection) -> None:
         conn.execute("SELECT pg_advisory_xact_lock(20261106,%s)", (self.group_id,))
@@ -170,6 +179,79 @@ class QueueStore:
             (self.group_id, name),
         ).fetchone()
         return float(row["value"]) if row else 0
+
+    def _claim_message_budget(self, conn: psycopg.Connection, row: dict, now: float) -> bool:
+        """До внешних вызовов; очередь сериализует бюджет отдельно для каждого peer."""
+        name = f"message_rate:{row['peer_id']}"
+        saved = conn.execute(
+            "SELECT value FROM bot_state WHERE group_id=%s AND name=%s", (self.group_id, name)
+        ).fetchone()
+        state = saved["value"] if saved else {}
+        previous = state.get("updated_at", now)
+        timestamp = max(now, previous)
+        tokens = min(
+            self.message_rate_burst,
+            state.get("tokens", self.message_rate_burst) + (timestamp - previous) / self.message_rate_interval_seconds,
+        )
+        limited = tokens + 1e-9 < 1
+        if limited or row["payload"].get("_message_rate_delayed"):
+            latest = conn.execute(
+                """SELECT id FROM bot_inbox WHERE group_id=%s AND peer_id=%s AND kind='message_new'
+                AND status='pending' AND attempts=0 ORDER BY occurred_at DESC,
+                coalesce((payload#>>'{message,conversation_message_id}')::bigint,
+                         (payload#>>'{message,id}')::bigint,id) DESC,id DESC LIMIT 1""",
+                (self.group_id, row["peer_id"]),
+            ).fetchone()["id"]
+            cancelled = conn.execute(
+                """UPDATE bot_inbox SET status='done',completed_at=%s,
+                payload=jsonb_set(payload,'{_queue_disposition}','"message_rate_coalesced"'::jsonb)
+                WHERE group_id=%s AND peer_id=%s AND kind='message_new' AND status='pending' AND attempts=0 AND id<>%s
+                RETURNING id""",
+                (now, self.group_id, row["peer_id"], latest),
+            ).fetchall()
+            for cancelled_row in cancelled:
+                self._observe(conn, cancelled_row["id"])
+            if limited or latest != row["id"]:
+                eligible = timestamp + (1 - tokens) * self.message_rate_interval_seconds if limited else now
+                conn.execute(
+                    "UPDATE bot_inbox SET next_at=%s,"
+                    "payload=jsonb_set(payload,'{_message_rate_delayed}','true') WHERE id=%s",
+                    (eligible, latest),
+                )
+                return False
+        self._state(conn, name, {"tokens": max(0, tokens - 1), "updated_at": timestamp})
+        return True
+
+    def _allow_hint(self, conn: psycopg.Connection, job: dict, index: int, effect: dict) -> bool:
+        name = f"message_hint:{job['peer_id']}"
+        signature = hashlib.sha256(effect["params"]["message"].encode()).hexdigest()
+        saved = conn.execute(
+            "SELECT value FROM bot_state WHERE group_id=%s AND name=%s", (self.group_id, name)
+        ).fetchone()
+        state = saved["value"] if saved else {}
+        if state.get("signature") == signature:
+            previous = conn.execute(
+                "SELECT status,completed_at FROM bot_outbox WHERE inbox_id=%s AND effect_index=%s AND group_id=%s",
+                (state["inbox_id"], state["effect_index"], self.group_id),
+            ).fetchone()
+            if previous and (
+                previous["status"] in {"pending", "processing"}
+                or (
+                    previous["status"] == "done"
+                    and time.time() < (previous["completed_at"] or 0) + self.hint_interval_seconds
+                )
+            ):
+                conn.execute(
+                    "UPDATE bot_inbox SET payload=jsonb_set(payload,'{_hint_suppressed}','true') WHERE id=%s",
+                    (job["id"],),
+                )
+                return False
+        self._state(
+            conn,
+            name,
+            {"signature": signature, "inbox_id": job["id"], "effect_index": index, "updated_at": time.time()},
+        )
+        return True
 
     def _reserve_reply(self, conn: psycopg.Connection, peer: int, now: float) -> None:
         if self.reply_interval_seconds:
@@ -447,7 +529,11 @@ class QueueStore:
         now = time.time()
         owner = str(uuid.uuid4())
         with self.connect() as conn:
-            if self.max_pending_messages_per_peer is not None or self.reply_interval_seconds:
+            if (
+                self.max_pending_messages_per_peer is not None
+                or self.reply_interval_seconds
+                or self.message_rate_interval_seconds
+            ):
                 self._queue_lock(conn)
             if table == "bot_inbox":
                 conn.execute(
@@ -477,8 +563,18 @@ class QueueStore:
                 if not row:
                     return None
                 removed = self._trim_pending(conn, row["peer_id"])
-                if row["id" if table == "bot_inbox" else "inbox_id"] not in removed:
-                    break
+                if row["id" if table == "bot_inbox" else "inbox_id"] in removed:
+                    continue
+                if (
+                    table == "bot_inbox"
+                    and row["kind"] == "message_new"
+                    and row["attempts"] == 0
+                    and self.message_rate_interval_seconds
+                    and not self._claim_message_budget(conn, row, now)
+                ):
+                    # The delayed user's row is now in the future; immediately try another user.
+                    continue
+                break
             now = time.time()
             if table == "bot_outbox" and self.reply_interval_seconds:
                 eligible = self._reply_gate(conn, row["peer_id"])
@@ -510,12 +606,14 @@ class QueueStore:
     @measured("outbox.persist")
     def plan(self, job: dict, effects: list[dict], callback_at: float | None = None) -> None:
         with self.connect() as conn:
-            if self.max_pending_messages_per_peer is not None:
+            if self.max_pending_messages_per_peer is not None or self.hint_interval_seconds:
                 self._queue_lock(conn)
             self._owned(conn, "bot_inbox", job)
             if job["kind"] == "geo_retry" and self._geo_superseded(conn, job["peer_id"], job["payload"]):
                 effects = []
             for index, effect in enumerate(effects):
+                if effect.get("hint") and self.hint_interval_seconds and not self._allow_hint(conn, job, index, effect):
+                    continue
                 if effect.get("defer_geo"):
                     retry = effect["defer_geo"]
                     payload = dict(

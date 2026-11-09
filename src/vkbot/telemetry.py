@@ -201,6 +201,8 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
         skipped = [e["id"] for e in effects]
     state = {
         "queue_disposition": disposition,
+        "message_rate_delayed": bool(row["payload"].get("_message_rate_delayed")),
+        "hint_suppressed": bool(row["payload"].get("_hint_suppressed")),
         "inbox_status": row["status"],
         "last_error": row["last_error"],
         "outbox_total": len(effects),
@@ -217,13 +219,15 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
                 "outbox_id": e["id"],
                 "method": e["method"],
                 "status": e["status"],
-                "role": "code"
-                if "entrance" in action
-                else "address_choices"
-                if e["result_status"] == "ambiguous"
-                else "entrance_buttons"
-                if e["has_codes"]
-                else "notice",
+                "role": (
+                    "code"
+                    if "entrance" in action
+                    else (
+                        "address_choices"
+                        if e["result_status"] == "ambiguous"
+                        else "entrance_buttons" if e["has_codes"] else "notice"
+                    )
+                ),
             }
             for e in effects[:100]
         ],
@@ -305,9 +309,11 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                             attrs["engine"],
                             result.get("status", row["status"]),
                             attrs.get("query"),
-                            json.dumps(packet["notes"].get("normalized_query"), ensure_ascii=False)
-                            if attrs["engine"] == "v2"
-                            else None,
+                            (
+                                json.dumps(packet["notes"].get("normalized_query"), ensure_ascii=False)
+                                if attrs["engine"] == "v2"
+                                else None
+                            ),
                             result.get("building_id"),
                             result.get("address"),
                             Jsonb(result.get("candidates", [])),
