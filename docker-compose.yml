@@ -5,7 +5,7 @@ x-logging: &id001
     max-file: ${DOCKER_LOG_MAX_FILES:-3}
 services:
   queue:
-    image: postgres:17-alpine
+    image: postgres:17.11-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
     command:
     - postgres
     - -c
@@ -48,6 +48,8 @@ services:
       timeout: ${QUEUE_HEALTH_TIMEOUT:-3s}
       retries: ${QUEUE_HEALTH_RETRIES:-10}
   api:
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     read_only: true
     tmpfs:
     - /tmp:size=16m,mode=1777
@@ -97,6 +99,8 @@ services:
       retries: ${API_HEALTH_RETRIES:-5}
       start_period: ${API_HEALTH_START_PERIOD:-60s}
   vkbot:
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     read_only: true
     tmpfs:
     - /tmp:size=16m,mode=1777

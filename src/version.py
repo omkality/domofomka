@@ -1,6 +1,5 @@
+import tomllib
 from pathlib import Path
-
-import toml
 
 
 def get_app_info() -> dict[str, str]:
@@ -12,8 +11,8 @@ def get_app_info() -> dict[str, str]:
     if not pyproject_path.exists():
         raise FileNotFoundError(f"Файл {pyproject_path} не найден.")
 
-    with open(pyproject_path, encoding="utf-8") as f:
-        info: dict = toml.load(f)
+    with open(pyproject_path, "rb") as f:
+        info: dict = tomllib.load(f)
 
     project: dict[str, str] = info.get("project", {})
     return {

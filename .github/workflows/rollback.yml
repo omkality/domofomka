@@ -18,7 +18,7 @@ permissions:
   contents: read
 jobs:
   policy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - env:
           REF: ${{ github.ref }}
@@ -31,7 +31,7 @@ jobs:
           if [ "$RESTORE" = legacy-v1 ]; then test "$TARGET" = prod; fi
   rollback:
     needs: policy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 8
     environment: ${{ inputs.environment }}
     concurrency:

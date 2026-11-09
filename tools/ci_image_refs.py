@@ -20,7 +20,26 @@ def published_image(repository: str, revision: str) -> tuple[str, int]:
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
         raise ValueError("Registry did not return an immutable digest")
     size = subprocess.check_output(
-        ["docker", "run", "--rm", "--network", "none", "--entrypoint", "du", image, "-sx", "--block-size=1", "/"],
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--user",
+            "0:0",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges",
+            "--entrypoint",
+            "du",
+            image,
+            "-sx",
+            "--block-size=1",
+            "/",
+        ],
         text=True,
     )
     return repository + "@" + digest, int(size.split()[0])

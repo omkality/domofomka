@@ -6,6 +6,8 @@ x-logging: &logging
     max-file: ${DOCKER_LOG_MAX_FILES:-3}
 services:
   api:
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     read_only: true
     tmpfs:
     - /tmp:size=16m,mode=1777
@@ -39,6 +41,8 @@ services:
       retries: ${API_HEALTH_RETRIES:-5}
       start_period: ${API_HEALTH_START_PERIOD:-60s}
   vkbot:
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     read_only: true
     tmpfs:
     - /tmp:size=16m,mode=1777

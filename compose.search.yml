@@ -25,7 +25,7 @@ services:
       driver: json-file
       options: {max-size: '10m', max-file: '3'}
   opensearch:
-    image: opensearchproject/opensearch:3.3.2
+    image: opensearchproject/opensearch:3.3.2@sha256:798cf28e226a32f5c928dd1ed9478dd3a33d2212176aad3679020088ad3afa1a
     restart: unless-stopped
     mem_limit: ${OPENSEARCH_MEM_LIMIT:-3g}
     memswap_limit: ${OPENSEARCH_MEM_LIMIT:-3g}
@@ -41,7 +41,7 @@ services:
       driver: json-file
       options: {max-size: '10m', max-file: '3'}
   dashboards:
-    image: opensearchproject/opensearch-dashboards:3.3.0
+    image: opensearchproject/opensearch-dashboards:3.3.0@sha256:936b7c350c2679f59c6b7fb85856feac2dcd5934e6efc47b7ea26a95978684d3
     profiles: ['ui']
     mem_limit: 1g
     pids_limit: 256
