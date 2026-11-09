@@ -1,0 +1,547 @@
+{
+  "runtime_source_commits": [
+    "57bdadc",
+    "6eca1eb",
+    "483a33a",
+    "389700f"
+  ],
+  "audit_source_commit": "4fb63f1",
+  "catalog_revision": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+  "legacy_revision_unchanged": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
+  "data_modified": false,
+  "source_fingerprints": {
+    "compose.search.yml": "5031b4672bb18668d71cb19488478d5735e7eed6c166ed5022700a0adf6db9c3",
+    "src/api/v2.py": "fb50ebc644fec451eb3a7bd8c1735e8fc3b7cefc1f8a976e782311e4e1898b6e",
+    "src/search/__init__.py": "3babb60c72c06d43967492a96c801d836a4da4576ea26bae72db71297e61f311",
+    "src/search/catalog_update.py": "3922c5bb427860d9e01766164839a7b3972839326604eeaabb710ecf06c0c46b",
+    "src/search/constraints.py": "debab2ed99ed1e3b084cb6b84f33480f71dfec7cfd6c1ac61da5058f78cd3862",
+    "src/search/engine.py": "a24536dfe8a74c5498ef3ed8241cd8b2ed2341ccb6e47da34ff92e9cdc2a58a0",
+    "src/search/localities.py": "d8b46bc27a850ebeef1842ddaca4c7926d8096a34e03eddf627ae40c023612fb",
+    "src/search/normalize.py": "6a44e28664b93af0f4df66679f68ff7f4e7c1ce414cea40b87db9e848db25dbf",
+    "src/search/postgres.py": "59681e6e6db03bdfc1312b8a805a6c84d2b07382557db6674f8a7f97328583ed",
+    "src/services/codes.py": "31f24c771c1dab7b105140674e557079f1cdce566ef4123bff02e2ee3011bdf8",
+    "src/services/legacy_index.py": "44f7aad51651270512b7b297afb7c6119b8ddd534c1ea9f1882257fb33e1aa78",
+    "tools/benchmark_native_search.py": "73f958f962dbebb7f4aebded79181d5f7d85b687e0d5eed12b02c945e5060a56",
+    "tools/compare_postgres_catalog.py": "c29b410805382589de76d34d74e8fbc506a0c1becfe52f9afa5e3c9effb12cd4",
+    "tools/evaluate_search.py": "8dde679ac79b4d289aaed128b1b7407d64e91617dbe93beb9015afb214460f05",
+    "tools/quality_suite.py": "2c62c15bf5547fee9ffaf98b93f259a80513d652072d42cf7d967a4a4665a619",
+    "tools/search_lexical_profiles.py": "5a86c8365afb65c0f35d388ca12197a3baf08e82ad600c5e492da000a1d152f2",
+    "uv.lock": "883c7bd3de81f797f8e2906c388283f6343c0c5caa2896d4e8dd170c1172a880"
+  },
+  "full": {
+    "cases": 46908,
+    "variants": 2,
+    "responses": 93816,
+    "preserved_prefix_cases": 0,
+    "parallel_processes": 8,
+    "all_source_and_index_fingerprints_equal": true,
+    "results": [
+      {
+        "variant": "catalog",
+        "counts": {
+          "historical:total": 44083,
+          "historical:found": 41317,
+          "historical:reference_retained": 43992,
+          "correction_hypothesis:total": 2528,
+          "correction_hypothesis:found": 1324,
+          "correction_hypothesis:reference_retained": 1395,
+          "historical:ambiguous": 2685,
+          "correction_hypothesis:not_found": 819,
+          "historical:no_codes": 20,
+          "correction_hypothesis:no_codes_ambiguous": 159,
+          "correction_hypothesis:no_codes": 121,
+          "historical:not_found": 30,
+          "historical:no_codes_ambiguous": 6,
+          "correction_hypothesis:ambiguous": 98,
+          "correction_hypothesis:incomplete_query": 7,
+          "historical:incomplete_query": 25,
+          "reviewed:total": 297,
+          "reviewed:found": 278,
+          "reviewed:reference_retained": 292,
+          "reviewed:no_codes": 2,
+          "reviewed:ambiguous": 14,
+          "reviewed:not_found": 2,
+          "reviewed:no_codes_ambiguous": 1
+        }
+      },
+      {
+        "variant": "verified.coverage-AUTO-r1.0",
+        "counts": {
+          "historical:total": 44083,
+          "historical:found": 41339,
+          "historical:reference_retained": 43992,
+          "correction_hypothesis:total": 2528,
+          "correction_hypothesis:found": 1559,
+          "correction_hypothesis:reference_retained": 1615,
+          "historical:ambiguous": 2664,
+          "correction_hypothesis:not_found": 631,
+          "historical:no_codes": 20,
+          "correction_hypothesis:no_codes_ambiguous": 113,
+          "correction_hypothesis:no_codes": 109,
+          "historical:not_found": 29,
+          "historical:no_codes_ambiguous": 5,
+          "correction_hypothesis:ambiguous": 107,
+          "correction_hypothesis:incomplete_query": 9,
+          "historical:incomplete_query": 25,
+          "historical:invalid_query": 1,
+          "reviewed:total": 297,
+          "reviewed:found": 278,
+          "reviewed:reference_retained": 292,
+          "reviewed:no_codes": 2,
+          "reviewed:ambiguous": 14,
+          "reviewed:not_found": 2,
+          "reviewed:no_codes_ambiguous": 1
+        }
+      }
+    ],
+    "case_sha256": "87697700d3f7f8cdf55d32b1398ddb25718b59324c30ef46379ac627a0d7d83d"
+  },
+  "case_level_reference_comparison": {
+    "case_hash_matches_baseline": true,
+    "current_source_fingerprints_match": true,
+    "variants": {
+      "catalog": {
+        "reference_lost": 0,
+        "reference_gained": 0,
+        "backend_errors": 0,
+        "literal_conflicts": 0
+      },
+      "verified.coverage-AUTO-r1.0": {
+        "reference_lost": 0,
+        "reference_gained": 220,
+        "backend_errors": 0,
+        "literal_conflicts": 0
+      }
+    }
+  },
+  "pilot": {
+    "cases": 1615,
+    "variants": 2,
+    "input_sha256": "3f3c2920b3909da2ae9c9853644c010ae3e231e664efc0430bed0dd040157576",
+    "results": [
+      {
+        "variant": "catalog",
+        "counts": {
+          "historical:total": 500,
+          "historical:found": 477,
+          "historical:reference_retained": 500,
+          "historical:without_reference": 0,
+          "historical:automatic_literal_conflict": 0,
+          "historical:choice_literal_conflict": 0,
+          "historical:ambiguous": 23,
+          "possible_typo:total": 453,
+          "possible_typo:no_codes": 6,
+          "possible_typo:reference_retained": 381,
+          "possible_typo:without_reference": 0,
+          "possible_typo:automatic_literal_conflict": 0,
+          "possible_typo:choice_literal_conflict": 0,
+          "possible_typo:found": 356,
+          "possible_typo:ambiguous": 25,
+          "possible_typo:not_found": 52,
+          "possible_typo:no_codes_ambiguous": 14,
+          "reviewed:total": 399,
+          "reviewed:found": 352,
+          "reviewed:reference_retained": 366,
+          "reviewed:without_reference": 0,
+          "reviewed:automatic_literal_conflict": 0,
+          "reviewed:choice_literal_conflict": 0,
+          "reviewed:no_codes": 2,
+          "reviewed:ambiguous": 14,
+          "reviewed:not_found": 30,
+          "reviewed:no_codes_ambiguous": 1,
+          "context_review:total": 51,
+          "context_review:no_codes_ambiguous": 9,
+          "context_review:reference_retained": 16,
+          "context_review:without_reference": 7,
+          "context_review:automatic_literal_conflict": 0,
+          "context_review:choice_literal_conflict": 0,
+          "context_review:ambiguous": 11,
+          "context_review:not_found": 18,
+          "context_review:found": 13,
+          "temporal_regression:total": 147,
+          "temporal_regression:found": 118,
+          "temporal_regression:reference_retained": 123,
+          "temporal_regression:without_reference": 24,
+          "temporal_regression:automatic_literal_conflict": 0,
+          "temporal_regression:choice_literal_conflict": 0,
+          "temporal_regression:not_found": 4,
+          "temporal_regression:ambiguous": 13,
+          "temporal_regression:no_codes": 3,
+          "temporal_regression:incomplete_query": 4,
+          "temporal_regression:no_codes_ambiguous": 5,
+          "coverage_regression:total": 65,
+          "coverage_regression:found": 36,
+          "coverage_regression:reference_retained": 65,
+          "coverage_regression:without_reference": 0,
+          "coverage_regression:automatic_literal_conflict": 0,
+          "coverage_regression:choice_literal_conflict": 0,
+          "coverage_regression:ambiguous": 29
+        },
+        "p50_ms": 57.579,
+        "p95_ms": 292.836
+      },
+      {
+        "variant": "verified.coverage-AUTO-r1.0",
+        "counts": {
+          "historical:total": 500,
+          "historical:found": 477,
+          "historical:reference_retained": 500,
+          "historical:without_reference": 0,
+          "historical:automatic_literal_conflict": 0,
+          "historical:choice_literal_conflict": 0,
+          "historical:ambiguous": 23,
+          "possible_typo:total": 453,
+          "possible_typo:found": 429,
+          "possible_typo:reference_retained": 452,
+          "possible_typo:without_reference": 0,
+          "possible_typo:automatic_literal_conflict": 0,
+          "possible_typo:choice_literal_conflict": 0,
+          "possible_typo:ambiguous": 23,
+          "possible_typo:not_found": 1,
+          "reviewed:total": 399,
+          "reviewed:found": 380,
+          "reviewed:reference_retained": 394,
+          "reviewed:without_reference": 0,
+          "reviewed:automatic_literal_conflict": 0,
+          "reviewed:choice_literal_conflict": 0,
+          "reviewed:no_codes": 2,
+          "reviewed:ambiguous": 14,
+          "reviewed:not_found": 2,
+          "reviewed:no_codes_ambiguous": 1,
+          "context_review:total": 51,
+          "context_review:found": 37,
+          "context_review:reference_retained": 39,
+          "context_review:without_reference": 7,
+          "context_review:automatic_literal_conflict": 0,
+          "context_review:choice_literal_conflict": 0,
+          "context_review:ambiguous": 11,
+          "context_review:not_found": 3,
+          "temporal_regression:total": 147,
+          "temporal_regression:found": 118,
+          "temporal_regression:reference_retained": 123,
+          "temporal_regression:without_reference": 24,
+          "temporal_regression:automatic_literal_conflict": 0,
+          "temporal_regression:choice_literal_conflict": 0,
+          "temporal_regression:not_found": 3,
+          "temporal_regression:ambiguous": 13,
+          "temporal_regression:no_codes": 3,
+          "temporal_regression:incomplete_query": 5,
+          "temporal_regression:no_codes_ambiguous": 5,
+          "coverage_regression:total": 65,
+          "coverage_regression:found": 36,
+          "coverage_regression:reference_retained": 65,
+          "coverage_regression:without_reference": 0,
+          "coverage_regression:automatic_literal_conflict": 0,
+          "coverage_regression:choice_literal_conflict": 0,
+          "coverage_regression:ambiguous": 29
+        },
+        "p50_ms": 35.085,
+        "p95_ms": 138.488
+      }
+    ]
+  },
+  "context_review": {
+    "counts": {
+      "catalog": {
+        "labeled": 193,
+        "literal_conflicts": 0,
+        "with_observed_target": 32,
+        "target_offered": 9,
+        "target_code_offered": 9,
+        "other_automatic_target": 0
+      },
+      "verified.coverage-AUTO-r1.0": {
+        "labeled": 193,
+        "literal_conflicts": 0,
+        "with_observed_target": 32,
+        "target_offered": 32,
+        "target_code_offered": 32,
+        "other_automatic_target": 0
+      }
+    },
+    "input_sha256": "3f3c2920b3909da2ae9c9853644c010ae3e231e664efc0430bed0dd040157576",
+    "note": "Цель из последующего уточнения отделена от буквальных ограничений исходного запроса. Другие допустимые варианты в меню не считаются ошибкой.",
+    "review_script_sha256": "7879f6c6af77b2ac3c5d36c56e840e97f2584ec1f4d62ecb76ddb63d24b8dda7"
+  },
+  "code_coverage": {
+    "catalog_sha256": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+    "legacy_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
+    "result_sha256": {
+      "full-all": "7eb1485ea0232e2b02339fef28e5d2a1dd945ddbadfca7483bd35e06c8b6f01b",
+      "full-source-reviewed": "cc1b828b37b68af7c83c0b4711bb83b6e2272e5989150824c4ba6060d5c9ee54"
+    },
+    "auditor_sha256": "1726b3145c0679423ffa25b2ac8870977765861feea3645cdd08cd10e60c2b91",
+    "unique_queries": 41918,
+    "workers": 8,
+    "baseline_variant": "full-all/catalog",
+    "elapsed_seconds": 29.438,
+    "results": {
+      "full-all/catalog": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 0,
+        "baseline_code_gain_cases": 0,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43786,
+        "some_legacy_codes_missing": 183,
+        "code_difference_with_retained_reference": 178,
+        "missing_with_reference_rejected": 5
+      },
+      "full-all/verified.coverage-AUTO-r1.0": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 24,
+        "baseline_code_gain_cases": 187,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43961,
+        "some_legacy_codes_missing": 8,
+        "code_difference_with_retained_reference": 3,
+        "missing_with_reference_rejected": 5
+      },
+      "full-source-reviewed/catalog": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 1,
+        "baseline_code_gain_cases": 183,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43962,
+        "some_legacy_codes_missing": 7,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 5
+      },
+      "full-source-reviewed/verified.coverage-AUTO-r1.0": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 23,
+        "baseline_code_gain_cases": 185,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43962,
+        "some_legacy_codes_missing": 7,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 5
+      }
+    },
+    "interpretation": "Сравниваются уникальные подъезд/источник/код. Варианты меню считаются доступными через выбор, не автоматически выданными. Отличие от v1 или прошлого v2 требует проверки адреса и происхождения."
+  },
+  "code_difference_review": {
+    "catalog_restored_legacy_code_coverage_cases": 176,
+    "catalog_differences_with_retained_reference": 2,
+    "remaining_legacy_difference_cases": 17,
+    "legacy_rejections": {
+      "different_explicit_city": 2,
+      "different_ordinal_and_house": 1,
+      "street_number_house_swapped": 1,
+      "numeric_only_query": 1,
+      "collapsed_range": 1
+    },
+    "unverified_source_kept_separate": {
+      "source_group_still_exists": true,
+      "original_source_query_status": "found",
+      "original_source_query_engine": "v1",
+      "original_source_query_unique_codes": 1,
+      "verified_gar_identity": false
+    },
+    "catalog_baseline_loss_cases": 11,
+    "catalog_baseline_loss_review": "Один набор другой официальной улицы исключён по полному имени; десять исторических запросов с префиксом города теперь отклонены и требуют отдельного решения.",
+    "native_baseline_exclusions": {
+      "cases": 33,
+      "different_official_full_names": 7,
+      "unverified_longer_names": 17,
+      "overlap": 1,
+      "not_all_are_proven_wrong_intent": true,
+      "new_city_prefix_historical_cases": 10,
+      "previous_source_name_cases": 23,
+      "note": "Категории полных названий ниже относятся к прежним 23 случаям; 10 префиксов городов добавлены текущей защитой fallback."
+    },
+    "new_city_prefix_rejections": {
+      "historical": 10,
+      "correction_hypothesis": 1,
+      "unique_queries": 11,
+      "release_gate_open": true
+    }
+  },
+  "earlier_scoped_changes_review": {
+    "changed_answers": 14,
+    "removed_source_groups": 12,
+    "source_queries_offer_all_codes": 12
+  },
+  "storage_parity": {
+    "postgres_implementation": "production",
+    "queries": 400,
+    "fingerprint": "4493be57d4a619480e39b1d3dbf1124d58bab06b6d23d45bf0bcc7d2f2741049",
+    "counts": {
+      "postgres:v2:found": 359,
+      "sqlite:v2:found": 359,
+      "same": 400,
+      "postgres:v2:ambiguous": 34,
+      "sqlite:v2:ambiguous": 34,
+      "sqlite:v1:not_found": 5,
+      "postgres:v1:not_found": 5,
+      "postgres:v2:no_codes": 1,
+      "sqlite:v2:no_codes": 1,
+      "sqlite:v2:no_codes_ambiguous": 1,
+      "postgres:v2:no_codes_ambiguous": 1
+    },
+    "latency": {
+      "sqlite": {
+        "p50_ms": 22.432,
+        "p95_ms": 119.101
+      },
+      "postgres": {
+        "p50_ms": 8.355,
+        "p95_ms": 39.362
+      }
+    },
+    "note": "Парные вызовы того же v2 и v1. Проверяется сохранность поведения, не намерение пользователя. PostgreSQL использует постоянное read-only соединение; кеш результатов выключен."
+  },
+  "local_tests": {
+    "full_passed": 667,
+    "full_skipped": 2,
+    "focused_passed": 235,
+    "focused_skipped": 1
+  },
+  "local_resource_experiment": {
+    "memory_limit_bytes": 201326592,
+    "heap_bytes": 100663296,
+    "swap_bytes": 0,
+    "http_ready": false,
+    "http_error": "RemoteProtocolError",
+    "oom_killed_at_observation": false,
+    "memory_limit_reached": true,
+    "stopped_after_experiment": true,
+    "installed_on_vds": false
+  },
+  "native_release_ready": false,
+  "production_changed": false,
+  "full_reference_comparison": {
+    "same_frozen_cases": true,
+    "historical_reference_losses_per_variant": 10,
+    "correction_reference_losses_per_variant": 1,
+    "unique_loss_texts": 11,
+    "loss_review": "Сокращённые названия населённых пунктов отклонены строгим fallback; это незакрытая регрессия совместимости, не доказанное исправление намерения пользователя."
+  },
+  "code_audit": {
+    "catalog_sha256": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+    "legacy_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
+    "result_sha256": {
+      "full-all": "7eb1485ea0232e2b02339fef28e5d2a1dd945ddbadfca7483bd35e06c8b6f01b",
+      "full-source-spaces-final": "4aad07774c084a856fce769d4c013031d718c4e051ac48c39b6082abbb9d27de"
+    },
+    "auditor_sha256": "d130b0a9e22b8d9aa5c90784eaaa31d89cd1f79e4d9ce93a90b3fc15e33fafe7",
+    "unique_queries": 41918,
+    "workers": 8,
+    "baseline_variant": "full-all/catalog",
+    "elapsed_seconds": 30.266,
+    "results": {
+      "full-all/catalog": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 0,
+        "baseline_code_gain_cases": 0,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43786,
+        "some_legacy_codes_missing": 183,
+        "code_difference_with_retained_reference": 178,
+        "missing_with_reference_rejected": 5
+      },
+      "full-all/verified.coverage-AUTO-r1.0": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 24,
+        "baseline_code_gain_cases": 187,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43961,
+        "some_legacy_codes_missing": 8,
+        "code_difference_with_retained_reference": 3,
+        "missing_with_reference_rejected": 5
+      },
+      "full-source-spaces-final/catalog": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 11,
+        "baseline_code_gain_cases": 183,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43952,
+        "some_legacy_codes_missing": 17,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 15
+      },
+      "full-source-spaces-final/verified.coverage-AUTO-r1.0": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 33,
+        "baseline_code_gain_cases": 185,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43952,
+        "some_legacy_codes_missing": 17,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 15
+      }
+    },
+    "interpretation": "Уникальные подъезд/источник/код; варианты доступны через выбор. Старые наборы не доказывают намерение пользователя. Правила fallback берутся из замороженного результата."
+  },
+  "dev_ci": {
+    "run": 42359517533,
+    "url": "https://github.com/omkality/domofomka/actions/runs/42359517533",
+    "revision": "389700f7c4a5d881a59e39c3602418d9403e151f",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "id": 128364701192,
+        "name": "policy",
+        "conclusion": "success"
+      },
+      {
+        "id": 128364718590,
+        "name": "tests",
+        "conclusion": "success",
+        "pytest_summary": [
+          "668 passed, 1 skipped in 42.05s"
+        ]
+      },
+      {
+        "id": 128365014218,
+        "name": "deploy",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "dev_http": {
+    "revision": "389700f7c4a5d881a59e39c3602418d9403e151f",
+    "queries": 30,
+    "full_response_differences": 2,
+    "candidate_building_responses": 4,
+    "building_response_differences": 0,
+    "statuses": {
+      "found": 19,
+      "no_codes": 3,
+      "ambiguous": 2,
+      "no_codes_ambiguous": 3,
+      "not_found": 3
+    },
+    "mem_available": "129900 kB",
+    "disk_free_bytes": 1216425984,
+    "vk_messages_sent": 0,
+    "address_choices_codes_differences": 0,
+    "different_fallback_reasons": 2,
+    "confirmed_error_type": "QueryCanceled",
+    "complete_http_response_matches": 28
+  },
+  "dev_owner_vk_check": {
+    "synthetic_owner_only_check": true,
+    "request_states": [
+      "recorded",
+      "recorded"
+    ],
+    "delivery_states": [
+      "accepted_by_vk",
+      "accepted_by_vk"
+    ],
+    "search_runs": [
+      {
+        "engine": "v2",
+        "result": "found"
+      }
+    ],
+    "callback_context_hit": true,
+    "parent_linked": true
+  },
+  "remaining_release_gates": [
+    "Безопасно обрабатывать сокращённые названия городов без выбора другого полного города по подстроке.",
+    "Ограничить стоимость широких запросов PostgreSQL; два запроса dev перешли в v1 по QueryCanceled.",
+    "Подтвердить качество и размещение native в существующих ресурсах.",
+    "Отдельно оценить Москву, Подмосковье и Петербург; популярность не заменяет явные ограничения."
+  ]
+}

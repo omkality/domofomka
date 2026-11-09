@@ -1,0 +1,386 @@
+{
+  "cases": 47857,
+  "catalog_sha256": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+  "phases": {
+    "broad": {
+      "cases": 47857,
+      "responses": 143571,
+      "variants": 3,
+      "all_parts_verified": true,
+      "results": [
+        {
+          "variant": "catalog",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 41317,
+            "historical:reference_retained": 44002,
+            "historical:literal_conflict": 0,
+            "backend_errors": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1324,
+            "correction_hypothesis:reference_retained": 1396,
+            "correction_hypothesis:literal_conflict": 0,
+            "historical:ambiguous": 2695,
+            "correction_hypothesis:not_found": 818,
+            "historical:no_codes": 20,
+            "correction_hypothesis:no_codes_ambiguous": 159,
+            "correction_hypothesis:no_codes": 121,
+            "historical:not_found": 20,
+            "historical:no_codes_ambiguous": 6,
+            "correction_hypothesis:ambiguous": 99,
+            "correction_hypothesis:incomplete_query": 7,
+            "historical:incomplete_query": 25,
+            "reviewed:total": 305,
+            "reviewed:found": 280,
+            "reviewed:reference_retained": 293,
+            "reviewed:literal_conflict": 0,
+            "reviewed:no_codes": 3,
+            "reviewed:ambiguous": 14,
+            "reviewed:not_found": 5,
+            "reviewed:no_codes_ambiguous": 2,
+            "observed_unanswered_locality:total": 941,
+            "observed_unanswered_locality:not_found": 262,
+            "observed_unanswered_locality:reference_retained": 5,
+            "observed_unanswered_locality:literal_conflict": 0,
+            "observed_unanswered_locality:found": 57,
+            "observed_unanswered_locality:no_codes": 463,
+            "observed_unanswered_locality:no_codes_ambiguous": 64,
+            "observed_unanswered_locality:incomplete_query": 84,
+            "observed_unanswered_locality:ambiguous": 11,
+            "reviewed:incomplete_query": 1
+          }
+        },
+        {
+          "variant": "locality.structured-AUTO-r1.0",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 41366,
+            "historical:reference_retained": 43970,
+            "historical:literal_conflict": 0,
+            "backend_errors": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1557,
+            "correction_hypothesis:reference_retained": 1614,
+            "correction_hypothesis:literal_conflict": 0,
+            "historical:ambiguous": 2647,
+            "correction_hypothesis:not_found": 631,
+            "historical:no_codes": 20,
+            "correction_hypothesis:no_codes_ambiguous": 114,
+            "correction_hypothesis:no_codes": 109,
+            "historical:not_found": 19,
+            "historical:no_codes_ambiguous": 5,
+            "correction_hypothesis:ambiguous": 108,
+            "correction_hypothesis:incomplete_query": 9,
+            "historical:incomplete_query": 25,
+            "historical:invalid_query": 1,
+            "reviewed:total": 305,
+            "reviewed:found": 280,
+            "reviewed:reference_retained": 293,
+            "reviewed:literal_conflict": 0,
+            "reviewed:no_codes": 3,
+            "reviewed:ambiguous": 14,
+            "reviewed:not_found": 5,
+            "reviewed:no_codes_ambiguous": 2,
+            "observed_unanswered_locality:total": 941,
+            "observed_unanswered_locality:not_found": 256,
+            "observed_unanswered_locality:reference_retained": 5,
+            "observed_unanswered_locality:literal_conflict": 0,
+            "observed_unanswered_locality:found": 61,
+            "observed_unanswered_locality:no_codes": 463,
+            "observed_unanswered_locality:no_codes_ambiguous": 62,
+            "observed_unanswered_locality:incomplete_query": 85,
+            "observed_unanswered_locality:ambiguous": 13,
+            "observed_unanswered_locality:invalid_query": 1,
+            "reviewed:incomplete_query": 1
+          }
+        },
+        {
+          "variant": "verified.coverage-AUTO-r1.0",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 41339,
+            "historical:reference_retained": 44002,
+            "historical:literal_conflict": 0,
+            "backend_errors": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1559,
+            "correction_hypothesis:reference_retained": 1616,
+            "correction_hypothesis:literal_conflict": 0,
+            "historical:ambiguous": 2674,
+            "correction_hypothesis:not_found": 630,
+            "historical:no_codes": 20,
+            "correction_hypothesis:no_codes_ambiguous": 113,
+            "correction_hypothesis:no_codes": 109,
+            "historical:not_found": 19,
+            "historical:no_codes_ambiguous": 5,
+            "correction_hypothesis:ambiguous": 108,
+            "correction_hypothesis:incomplete_query": 9,
+            "historical:incomplete_query": 25,
+            "historical:invalid_query": 1,
+            "reviewed:total": 305,
+            "reviewed:found": 282,
+            "reviewed:reference_retained": 293,
+            "reviewed:literal_conflict": 2,
+            "reviewed:no_codes": 3,
+            "reviewed:ambiguous": 14,
+            "reviewed:not_found": 3,
+            "reviewed:no_codes_ambiguous": 2,
+            "observed_unanswered_locality:total": 941,
+            "observed_unanswered_locality:not_found": 256,
+            "observed_unanswered_locality:reference_retained": 5,
+            "observed_unanswered_locality:literal_conflict": 0,
+            "observed_unanswered_locality:found": 61,
+            "observed_unanswered_locality:no_codes": 463,
+            "observed_unanswered_locality:no_codes_ambiguous": 62,
+            "observed_unanswered_locality:incomplete_query": 85,
+            "observed_unanswered_locality:ambiguous": 13,
+            "observed_unanswered_locality:invalid_query": 1,
+            "reviewed:incomplete_query": 1
+          }
+        }
+      ]
+    },
+    "scoped": {
+      "cases": 47857,
+      "responses": 95714,
+      "variants": 2,
+      "all_parts_verified": true,
+      "results": [
+        {
+          "variant": "locality.scoped-AUTO-r1.0",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 41339,
+            "historical:reference_retained": 44002,
+            "historical:literal_conflict": 0,
+            "backend_errors": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1559,
+            "correction_hypothesis:reference_retained": 1616,
+            "correction_hypothesis:literal_conflict": 0,
+            "historical:ambiguous": 2674,
+            "correction_hypothesis:not_found": 630,
+            "historical:no_codes": 20,
+            "correction_hypothesis:no_codes_ambiguous": 113,
+            "correction_hypothesis:no_codes": 109,
+            "historical:not_found": 19,
+            "historical:no_codes_ambiguous": 5,
+            "correction_hypothesis:ambiguous": 108,
+            "correction_hypothesis:incomplete_query": 9,
+            "historical:incomplete_query": 25,
+            "historical:invalid_query": 1,
+            "reviewed:total": 305,
+            "reviewed:found": 280,
+            "reviewed:reference_retained": 293,
+            "reviewed:literal_conflict": 0,
+            "reviewed:no_codes": 3,
+            "reviewed:ambiguous": 14,
+            "reviewed:not_found": 5,
+            "reviewed:no_codes_ambiguous": 2,
+            "observed_unanswered_locality:total": 941,
+            "observed_unanswered_locality:not_found": 256,
+            "observed_unanswered_locality:reference_retained": 5,
+            "observed_unanswered_locality:literal_conflict": 0,
+            "observed_unanswered_locality:found": 61,
+            "observed_unanswered_locality:no_codes": 463,
+            "observed_unanswered_locality:no_codes_ambiguous": 62,
+            "observed_unanswered_locality:incomplete_query": 85,
+            "observed_unanswered_locality:ambiguous": 13,
+            "observed_unanswered_locality:invalid_query": 1,
+            "reviewed:incomplete_query": 1
+          }
+        },
+        {
+          "variant": "verified.coverage-AUTO-r1.0",
+          "counts": {
+            "historical:total": 44083,
+            "historical:found": 41339,
+            "historical:reference_retained": 44002,
+            "historical:literal_conflict": 0,
+            "backend_errors": 0,
+            "correction_hypothesis:total": 2528,
+            "correction_hypothesis:found": 1559,
+            "correction_hypothesis:reference_retained": 1616,
+            "correction_hypothesis:literal_conflict": 0,
+            "historical:ambiguous": 2674,
+            "correction_hypothesis:not_found": 630,
+            "historical:no_codes": 20,
+            "correction_hypothesis:no_codes_ambiguous": 113,
+            "correction_hypothesis:no_codes": 109,
+            "historical:not_found": 19,
+            "historical:no_codes_ambiguous": 5,
+            "correction_hypothesis:ambiguous": 108,
+            "correction_hypothesis:incomplete_query": 9,
+            "historical:incomplete_query": 25,
+            "historical:invalid_query": 1,
+            "reviewed:total": 305,
+            "reviewed:found": 282,
+            "reviewed:reference_retained": 293,
+            "reviewed:literal_conflict": 2,
+            "reviewed:no_codes": 3,
+            "reviewed:ambiguous": 14,
+            "reviewed:not_found": 3,
+            "reviewed:no_codes_ambiguous": 2,
+            "observed_unanswered_locality:total": 941,
+            "observed_unanswered_locality:not_found": 256,
+            "observed_unanswered_locality:reference_retained": 5,
+            "observed_unanswered_locality:literal_conflict": 0,
+            "observed_unanswered_locality:found": 61,
+            "observed_unanswered_locality:no_codes": 463,
+            "observed_unanswered_locality:no_codes_ambiguous": 62,
+            "observed_unanswered_locality:incomplete_query": 85,
+            "observed_unanswered_locality:ambiguous": 13,
+            "observed_unanswered_locality:invalid_query": 1,
+            "reviewed:incomplete_query": 1
+          }
+        }
+      ]
+    }
+  },
+  "code_audits": {
+    "broad": {
+      "catalog_sha256": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+      "legacy_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
+      "result_sha256": {
+        "full": "e83b2a53f0cea3b47dab29f443552d93c3ac7f63fdb3a2315c150c95546c4730"
+      },
+      "auditor_sha256": "0b7ee7d5a3ba6065ae736acef2f2c163c8d79d7246f56cead83d2d5742859f2b",
+      "unique_queries": 41918,
+      "workers": 4,
+      "baseline_variant": "full/verified.coverage-AUTO-r1.0",
+      "elapsed_seconds": 66.484,
+      "results": {
+        "full/catalog": {
+          "cases": 44083,
+          "baseline_code_loss_cases": 3,
+          "baseline_code_gain_cases": 22,
+          "legacy_has_codes": 43969,
+          "all_legacy_codes_offered": 43962,
+          "some_legacy_codes_missing": 7,
+          "code_difference_with_retained_reference": 2,
+          "missing_with_reference_rejected": 5
+        },
+        "full/locality.structured-AUTO-r1.0": {
+          "cases": 44083,
+          "baseline_code_loss_cases": 35,
+          "baseline_code_gain_cases": 8,
+          "legacy_has_codes": 43969,
+          "all_legacy_codes_offered": 43930,
+          "some_legacy_codes_missing": 39,
+          "code_difference_with_retained_reference": 2,
+          "missing_with_reference_rejected": 37
+        },
+        "full/verified.coverage-AUTO-r1.0": {
+          "cases": 44083,
+          "baseline_code_loss_cases": 0,
+          "baseline_code_gain_cases": 0,
+          "legacy_has_codes": 43969,
+          "all_legacy_codes_offered": 43962,
+          "some_legacy_codes_missing": 7,
+          "code_difference_with_retained_reference": 2,
+          "missing_with_reference_rejected": 5
+        }
+      },
+      "interpretation": "Уникальные тройки подъезд/источник/код. Объединение вариантов меню означает доступность, а не автоматическую отправку. Совместимость со старым ответом не доказывает правильность намерения."
+    },
+    "scoped": {
+      "catalog_sha256": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+      "legacy_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
+      "result_sha256": {
+        "scoped-validated": "e16aa87f27af7b9d36d65d2b89336448a3a3e39bdc81bd4d7e96aadce2d04b48"
+      },
+      "auditor_sha256": "0b7ee7d5a3ba6065ae736acef2f2c163c8d79d7246f56cead83d2d5742859f2b",
+      "unique_queries": 41918,
+      "workers": 4,
+      "baseline_variant": "scoped-validated/verified.coverage-AUTO-r1.0",
+      "elapsed_seconds": 49.407,
+      "results": {
+        "scoped-validated/locality.scoped-AUTO-r1.0": {
+          "cases": 44083,
+          "baseline_code_loss_cases": 0,
+          "baseline_code_gain_cases": 0,
+          "legacy_has_codes": 43969,
+          "all_legacy_codes_offered": 43962,
+          "some_legacy_codes_missing": 7,
+          "code_difference_with_retained_reference": 2,
+          "missing_with_reference_rejected": 5
+        },
+        "scoped-validated/verified.coverage-AUTO-r1.0": {
+          "cases": 44083,
+          "baseline_code_loss_cases": 0,
+          "baseline_code_gain_cases": 0,
+          "legacy_has_codes": 43969,
+          "all_legacy_codes_offered": 43962,
+          "some_legacy_codes_missing": 7,
+          "code_difference_with_retained_reference": 2,
+          "missing_with_reference_rejected": 5
+        }
+      },
+      "interpretation": "Уникальные тройки подъезд/источник/код. Объединение вариантов меню означает доступность, а не автоматическую отправку. Совместимость со старым ответом не доказывает правильность намерения."
+    }
+  },
+  "privacy": "Только агрегаты; построчные результаты остаются закрытыми.",
+  "control_parity": {
+    "compared": {
+      "catalog": 46908,
+      "verified.coverage-AUTO-r1.0": 46908
+    },
+    "changed": 0
+  },
+  "scoped_identity_changes": 2,
+  "scoped_total_payload_changes": 11,
+  "source_code_controls": [
+    {
+      "classification": "street_house_digits_mixed",
+      "expected_code_tuples": 6,
+      "v1_missing": 0,
+      "v1_extra": 4,
+      "v2_exact_source_set": true
+    },
+    {
+      "classification": "unverified_city_suffix",
+      "expected_code_tuples": 62,
+      "v1_missing": 0,
+      "v1_extra": 1,
+      "v2_exact_source_set": true
+    },
+    {
+      "classification": "range_is_not_concatenation",
+      "expected_code_tuples": 17,
+      "v1_missing": 17,
+      "v1_extra": 7,
+      "v2_exact_source_set": true
+    }
+  ],
+  "source_code_dev_parity": {
+    "checks": 3,
+    "matching": 3,
+    "statuses": {
+      "found": 3
+    }
+  },
+  "legacy_difference_review": {
+    "cases": 7,
+    "literal_identity_conflicts": 6,
+    "unverified_city_suffix": 1,
+    "policy": "Не возвращать коды другого адреса ради метрики совместимости."
+  },
+  "private_evidence_sha256": {
+    "artifacts\\private\\locality-guard-20261108\\full-cases.jsonl": "cb50c1cee651fd16359d40f15b0d1321783daf1380a65adecbe8dc1ca33a8c77",
+    "artifacts\\private\\locality-guard-20261108\\full-validated\\frozen-input.json": "3765458c0ca3f91304a2b555fa987c626571110198aa24bb2957bc4c50afedc1",
+    "artifacts\\private\\locality-guard-20261108\\full-validated\\results.jsonl": "e83b2a53f0cea3b47dab29f443552d93c3ac7f63fdb3a2315c150c95546c4730",
+    "artifacts\\private\\locality-guard-20261108\\full-validated\\merge-provenance.json": "7926ddcb3a28686c30b8f58854ac3dc026354ae5f05c08cebe91e1f4921074ef",
+    "artifacts\\private\\locality-guard-20261108\\scoped-validated\\frozen-input.json": "bdaefab6205c02b16d0f23c552e214cd2e647ce2708c922fa7a8bbd31a4e11a3",
+    "artifacts\\private\\locality-guard-20261108\\scoped-validated\\results.jsonl": "e16aa87f27af7b9d36d65d2b89336448a3a3e39bdc81bd4d7e96aadce2d04b48",
+    "artifacts\\private\\locality-guard-20261108\\scoped-validated\\merge-provenance.json": "1db529751455dc372e711d724fd7b75f3170323527f5a84da4b7b6daf6ae7396",
+    "artifacts\\private\\locality-guard-20261108\\source-code-controls.json": "d263a1023c877a2cc47c4667831f556919e1cf2cd75c70a380d2c1973615a83f"
+  },
+  "limitations": [
+    "Снимок переписки получен 6 ноября МСК; это не актуальная переписка на 8 ноября.",
+    "Данные использованы при доработке, поэтому не являются новой слепой проверкой.",
+    "Исторический ответ v1 не доказывает правильность пользовательского намерения.",
+    "Нулевой счётчик относится только к 305 размеченным ограничениям; не ко всем возможным ошибкам.",
+    "Native остаётся лабораторным вариантом, не размещён на VDS и не включён в API.",
+    "Неполные имена и опечатки в самом населённом пункте требуют отдельной проверки."
+  ]
+}

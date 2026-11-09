@@ -1,0 +1,326 @@
+{
+  "date": "2026-11-07",
+  "source_revision": "77edcb1f7242f2ec85d9310e6ea1bf3bc4807f9f",
+  "data_revisions": {
+    "catalog_sha256": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+    "legacy_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f"
+  },
+  "full_comparison": {
+    "cases": 46908,
+    "variants": 2,
+    "responses": 93816,
+    "parallel_processes": 8,
+    "all_source_and_index_fingerprints_equal": true,
+    "results": [
+      {
+        "variant": "catalog",
+        "counts": {
+          "historical:total": 44083,
+          "historical:found": 41317,
+          "historical:reference_retained": 44002,
+          "correction_hypothesis:total": 2528,
+          "correction_hypothesis:found": 1324,
+          "correction_hypothesis:reference_retained": 1396,
+          "historical:ambiguous": 2695,
+          "correction_hypothesis:not_found": 818,
+          "historical:no_codes": 20,
+          "correction_hypothesis:no_codes_ambiguous": 159,
+          "correction_hypothesis:no_codes": 121,
+          "historical:not_found": 20,
+          "historical:no_codes_ambiguous": 6,
+          "correction_hypothesis:ambiguous": 99,
+          "correction_hypothesis:incomplete_query": 7,
+          "historical:incomplete_query": 25,
+          "reviewed:total": 297,
+          "reviewed:found": 278,
+          "reviewed:reference_retained": 292,
+          "reviewed:no_codes": 2,
+          "reviewed:ambiguous": 14,
+          "reviewed:not_found": 2,
+          "reviewed:no_codes_ambiguous": 1
+        }
+      },
+      {
+        "variant": "verified.coverage-AUTO-r1.0",
+        "counts": {
+          "historical:total": 44083,
+          "historical:found": 41339,
+          "historical:reference_retained": 44002,
+          "correction_hypothesis:total": 2528,
+          "correction_hypothesis:found": 1559,
+          "correction_hypothesis:reference_retained": 1616,
+          "historical:ambiguous": 2674,
+          "correction_hypothesis:not_found": 630,
+          "historical:no_codes": 20,
+          "correction_hypothesis:no_codes_ambiguous": 113,
+          "correction_hypothesis:no_codes": 109,
+          "historical:not_found": 19,
+          "historical:no_codes_ambiguous": 5,
+          "correction_hypothesis:ambiguous": 108,
+          "correction_hypothesis:incomplete_query": 9,
+          "historical:incomplete_query": 25,
+          "historical:invalid_query": 1,
+          "reviewed:total": 297,
+          "reviewed:found": 278,
+          "reviewed:reference_retained": 292,
+          "reviewed:no_codes": 2,
+          "reviewed:ambiguous": 14,
+          "reviewed:not_found": 2,
+          "reviewed:no_codes_ambiguous": 1
+        }
+      }
+    ]
+  },
+  "architecture_parity": {
+    "compared_responses": 93816,
+    "different_search_results_after_refactor": 0
+  },
+  "code_coverage": {
+    "unique_queries": 41918,
+    "baseline_variant": "full-all/catalog",
+    "results": {
+      "full-all/catalog": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 0,
+        "baseline_code_gain_cases": 0,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43786,
+        "some_legacy_codes_missing": 183,
+        "code_difference_with_retained_reference": 178,
+        "missing_with_reference_rejected": 5
+      },
+      "full-all/verified.coverage-AUTO-r1.0": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 24,
+        "baseline_code_gain_cases": 187,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43961,
+        "some_legacy_codes_missing": 8,
+        "code_difference_with_retained_reference": 3,
+        "missing_with_reference_rejected": 5
+      },
+      "full-architecture-core/catalog": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 1,
+        "baseline_code_gain_cases": 183,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43962,
+        "some_legacy_codes_missing": 7,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 5
+      },
+      "full-architecture-core/verified.coverage-AUTO-r1.0": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 23,
+        "baseline_code_gain_cases": 185,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43962,
+        "some_legacy_codes_missing": 7,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 5
+      }
+    }
+  },
+  "recovered_locality_prefix_texts": 11,
+  "sql_batching_local": {
+    "trials": {
+      "query_A": {
+        "before": {
+          "milliseconds": [
+            3535.064,
+            3455.181,
+            3791.694
+          ],
+          "sql_calls": [
+            4009
+          ]
+        },
+        "after": {
+          "milliseconds": [
+            494.063,
+            537.445,
+            560.189
+          ],
+          "sql_calls": [
+            11
+          ]
+        }
+      },
+      "query_B": {
+        "before": {
+          "milliseconds": [
+            3276.191,
+            3133.5,
+            3081.405
+          ],
+          "sql_calls": [
+            4008
+          ]
+        },
+        "after": {
+          "milliseconds": [
+            219.328,
+            200.726,
+            219.851
+          ],
+          "sql_calls": [
+            10
+          ]
+        }
+      }
+    },
+    "python_peak_allocated_bytes": 13397757,
+    "timeouts_unchanged": true,
+    "note": "Python allocations are not total RSS. Alternating order, no OS cache flush; not a VDS SLA."
+  },
+  "postgres_parity_400": {
+    "postgres_implementation": "production",
+    "queries": 400,
+    "fingerprint": "4493be57d4a619480e39b1d3dbf1124d58bab06b6d23d45bf0bcc7d2f2741049",
+    "counts": {
+      "postgres:v2:found": 359,
+      "sqlite:v2:found": 359,
+      "same": 400,
+      "postgres:v2:ambiguous": 34,
+      "sqlite:v2:ambiguous": 34,
+      "sqlite:v1:not_found": 5,
+      "postgres:v1:not_found": 5,
+      "postgres:v2:no_codes": 1,
+      "sqlite:v2:no_codes": 1,
+      "sqlite:v2:no_codes_ambiguous": 1,
+      "postgres:v2:no_codes_ambiguous": 1
+    },
+    "latency": {
+      "sqlite": {
+        "p50_ms": 21.852,
+        "p95_ms": 125.425
+      },
+      "postgres": {
+        "p50_ms": 11.617,
+        "p95_ms": 41.027
+      }
+    },
+    "note": "Парные вызовы того же v2 и v1. Проверяется сохранность поведения, не намерение пользователя. PostgreSQL использует постоянное read-only соединение; кеш результатов выключен."
+  },
+  "regional_strata": {
+    "catalog/Москва": {
+      "cases": 37590,
+      "reference_retained": 37543
+    },
+    "verified.coverage-AUTO-r1.0/Москва": {
+      "cases": 37590,
+      "reference_retained": 37543
+    },
+    "catalog/Не установлен": {
+      "cases": 2976,
+      "reference_retained": 2951
+    },
+    "verified.coverage-AUTO-r1.0/Не установлен": {
+      "cases": 2976,
+      "reference_retained": 2951
+    },
+    "catalog/Подмосковье": {
+      "cases": 2776,
+      "reference_retained": 2769
+    },
+    "verified.coverage-AUTO-r1.0/Подмосковье": {
+      "cases": 2776,
+      "reference_retained": 2769
+    },
+    "catalog/Другие регионы": {
+      "cases": 739,
+      "reference_retained": 737
+    },
+    "verified.coverage-AUTO-r1.0/Другие регионы": {
+      "cases": 739,
+      "reference_retained": 737
+    },
+    "catalog/Петербург": {
+      "cases": 2,
+      "reference_retained": 2
+    },
+    "verified.coverage-AUTO-r1.0/Петербург": {
+      "cases": 2,
+      "reference_retained": 2
+    }
+  },
+  "dev_rest_contract": [
+    {
+      "version": "v1",
+      "canonical_equals_compatible": true,
+      "write_http_status": 405
+    },
+    {
+      "version": "v2",
+      "canonical_equals_compatible": true,
+      "write_http_status": 405
+    }
+  ],
+  "dev_geo_quota_simulation": {
+    "captured_geo_replay": [
+      {
+        "status": "found",
+        "same_as_text": true
+      },
+      {
+        "status": "no_codes",
+        "same_as_text": true
+      },
+      {
+        "status": "not_found",
+        "same_as_text": true
+      }
+    ],
+    "simulated_denials": [
+      503,
+      503
+    ],
+    "simulated_transport_calls": 1,
+    "text_after_access_denial": "found",
+    "external_dadata_requests": 0,
+    "live_runtime_modified": false
+  },
+  "owner_only_vk_check": {
+    "synthetic_owner_only_check": true,
+    "initial_result": "ambiguous",
+    "selected_result": "found",
+    "methods": [
+      "send",
+      "edit",
+      "edit"
+    ],
+    "accepted_by_vk": 3,
+    "telemetry_recorded": true,
+    "external_dadata_requests": 0
+  },
+  "ci": {
+    "run": 42374677812,
+    "revision": "77edcb1f7242f2ec85d9310e6ea1bf3bc4807f9f",
+    "url": "https://github.com/omkality/domofomka/actions/runs/42374677812",
+    "status": "completed",
+    "conclusion": "success",
+    "jobs": [
+      {
+        "name": "policy",
+        "conclusion": "success"
+      },
+      {
+        "name": "tests",
+        "conclusion": "success",
+        "pytest_summary": [
+          "712 passed in 38.76s"
+        ]
+      },
+      {
+        "name": "deploy",
+        "conclusion": "success"
+      }
+    ]
+  },
+  "release_gates_open": [
+    "Two broad PostgreSQL candidate queries still reach the VDS statement deadline.",
+    "Native OpenSearch ranking remains local; placement and partial-name policy are unresolved.",
+    "Only two canonical Saint Petersburg historical references; not a representative quality sample.",
+    "Production release is not authorized."
+  ]
+}

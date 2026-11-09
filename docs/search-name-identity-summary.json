@@ -1,0 +1,301 @@
+{
+  "catalog_revision": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+  "source_revision_unchanged": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
+  "full": {
+    "cases": 46908,
+    "variants": 2,
+    "responses": 93816,
+    "preserved_prefix_cases": 0,
+    "parallel_processes": 8,
+    "all_source_and_index_fingerprints_equal": true,
+    "results": [
+      {
+        "variant": "catalog",
+        "counts": {
+          "historical:total": 44083,
+          "historical:found": 41516,
+          "historical:reference_retained": 44002,
+          "correction_hypothesis:total": 2528,
+          "correction_hypothesis:found": 1328,
+          "correction_hypothesis:reference_retained": 1396,
+          "historical:ambiguous": 2496,
+          "correction_hypothesis:not_found": 818,
+          "historical:no_codes": 18,
+          "correction_hypothesis:no_codes_ambiguous": 159,
+          "correction_hypothesis:no_codes": 120,
+          "historical:not_found": 20,
+          "historical:no_codes_ambiguous": 8,
+          "correction_hypothesis:ambiguous": 96,
+          "correction_hypothesis:incomplete_query": 7,
+          "historical:incomplete_query": 25,
+          "reviewed:total": 297,
+          "reviewed:found": 280,
+          "reviewed:reference_retained": 292,
+          "reviewed:no_codes": 2,
+          "reviewed:ambiguous": 12,
+          "reviewed:not_found": 2,
+          "reviewed:no_codes_ambiguous": 1
+        }
+      },
+      {
+        "variant": "verified.names-AUTO-r1.0",
+        "counts": {
+          "historical:total": 44083,
+          "historical:found": 41579,
+          "historical:reference_retained": 43938,
+          "correction_hypothesis:total": 2528,
+          "correction_hypothesis:found": 1534,
+          "correction_hypothesis:reference_retained": 1585,
+          "historical:ambiguous": 2394,
+          "correction_hypothesis:not_found": 630,
+          "historical:no_codes": 59,
+          "correction_hypothesis:no_codes_ambiguous": 131,
+          "correction_hypothesis:no_codes": 132,
+          "historical:not_found": 19,
+          "historical:no_codes_ambiguous": 6,
+          "correction_hypothesis:ambiguous": 92,
+          "correction_hypothesis:incomplete_query": 9,
+          "historical:incomplete_query": 25,
+          "historical:invalid_query": 1,
+          "reviewed:total": 297,
+          "reviewed:found": 280,
+          "reviewed:reference_retained": 292,
+          "reviewed:no_codes": 2,
+          "reviewed:ambiguous": 12,
+          "reviewed:not_found": 2,
+          "reviewed:no_codes_ambiguous": 1
+        }
+      }
+    ]
+  },
+  "pilot": {
+    "cases": 1550,
+    "results": [
+      {
+        "variant": "catalog",
+        "counts": {
+          "historical:total": 500,
+          "historical:found": 480,
+          "historical:reference_retained": 500,
+          "historical:without_reference": 0,
+          "historical:automatic_literal_conflict": 0,
+          "historical:choice_literal_conflict": 0,
+          "historical:ambiguous": 20,
+          "possible_typo:total": 453,
+          "possible_typo:no_codes": 6,
+          "possible_typo:reference_retained": 381,
+          "possible_typo:without_reference": 0,
+          "possible_typo:automatic_literal_conflict": 0,
+          "possible_typo:choice_literal_conflict": 0,
+          "possible_typo:found": 356,
+          "possible_typo:ambiguous": 25,
+          "possible_typo:not_found": 52,
+          "possible_typo:no_codes_ambiguous": 14,
+          "reviewed:total": 399,
+          "reviewed:found": 354,
+          "reviewed:reference_retained": 366,
+          "reviewed:without_reference": 0,
+          "reviewed:automatic_literal_conflict": 0,
+          "reviewed:choice_literal_conflict": 0,
+          "reviewed:no_codes": 2,
+          "reviewed:ambiguous": 12,
+          "reviewed:not_found": 30,
+          "reviewed:no_codes_ambiguous": 1,
+          "context_review:total": 51,
+          "context_review:no_codes_ambiguous": 9,
+          "context_review:reference_retained": 16,
+          "context_review:without_reference": 7,
+          "context_review:automatic_literal_conflict": 0,
+          "context_review:choice_literal_conflict": 0,
+          "context_review:ambiguous": 11,
+          "context_review:not_found": 18,
+          "context_review:found": 13,
+          "temporal_regression:total": 147,
+          "temporal_regression:found": 118,
+          "temporal_regression:reference_retained": 123,
+          "temporal_regression:without_reference": 24,
+          "temporal_regression:automatic_literal_conflict": 0,
+          "temporal_regression:choice_literal_conflict": 0,
+          "temporal_regression:not_found": 4,
+          "temporal_regression:ambiguous": 13,
+          "temporal_regression:no_codes": 3,
+          "temporal_regression:incomplete_query": 4,
+          "temporal_regression:no_codes_ambiguous": 5
+        }
+      },
+      {
+        "variant": "verified.names-AUTO-r1.0",
+        "counts": {
+          "historical:total": 500,
+          "historical:found": 480,
+          "historical:reference_retained": 500,
+          "historical:without_reference": 0,
+          "historical:automatic_literal_conflict": 0,
+          "historical:choice_literal_conflict": 0,
+          "historical:ambiguous": 20,
+          "possible_typo:total": 453,
+          "possible_typo:no_codes": 6,
+          "possible_typo:reference_retained": 439,
+          "possible_typo:without_reference": 0,
+          "possible_typo:automatic_literal_conflict": 0,
+          "possible_typo:choice_literal_conflict": 0,
+          "possible_typo:found": 419,
+          "possible_typo:ambiguous": 20,
+          "possible_typo:no_codes_ambiguous": 7,
+          "possible_typo:not_found": 1,
+          "reviewed:total": 399,
+          "reviewed:found": 382,
+          "reviewed:reference_retained": 394,
+          "reviewed:without_reference": 0,
+          "reviewed:automatic_literal_conflict": 0,
+          "reviewed:choice_literal_conflict": 0,
+          "reviewed:no_codes": 2,
+          "reviewed:ambiguous": 12,
+          "reviewed:not_found": 2,
+          "reviewed:no_codes_ambiguous": 1,
+          "context_review:total": 51,
+          "context_review:found": 37,
+          "context_review:reference_retained": 37,
+          "context_review:without_reference": 7,
+          "context_review:automatic_literal_conflict": 0,
+          "context_review:choice_literal_conflict": 0,
+          "context_review:ambiguous": 9,
+          "context_review:not_found": 3,
+          "temporal_regression:total": 147,
+          "temporal_regression:found": 118,
+          "temporal_regression:reference_retained": 123,
+          "temporal_regression:without_reference": 24,
+          "temporal_regression:automatic_literal_conflict": 0,
+          "temporal_regression:choice_literal_conflict": 0,
+          "temporal_regression:not_found": 3,
+          "temporal_regression:ambiguous": 13,
+          "temporal_regression:no_codes": 3,
+          "temporal_regression:incomplete_query": 5,
+          "temporal_regression:no_codes_ambiguous": 5,
+          "context_review:no_codes": 2
+        }
+      }
+    ]
+  },
+  "context": {
+    "catalog": {
+      "labeled": 193,
+      "literal_conflicts": 0,
+      "with_observed_target": 32,
+      "target_offered": 9,
+      "target_code_offered": 9,
+      "other_automatic_target": 0
+    },
+    "verified.names-AUTO-r1.0": {
+      "labeled": 193,
+      "literal_conflicts": 0,
+      "with_observed_target": 32,
+      "target_offered": 32,
+      "target_code_offered": 32,
+      "other_automatic_target": 0
+    }
+  },
+  "fresh_regression": {
+    "catalog": {
+      "labeled": 9,
+      "literal_conflicts": 0,
+      "with_observed_target": 0,
+      "target_offered": 0,
+      "target_code_offered": 0,
+      "other_automatic_target": 0
+    },
+    "verified.names-AUTO-r1.0": {
+      "labeled": 9,
+      "literal_conflicts": 0,
+      "with_observed_target": 0,
+      "target_offered": 0,
+      "target_code_offered": 0,
+      "other_automatic_target": 0
+    }
+  },
+  "preservation": {
+    "source_rows": 1008682,
+    "missing_provenance": 0,
+    "missing_code_contributions": 0,
+    "source_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
+    "aligned_groups": 23,
+    "aligned_source_rows": 63
+  },
+  "patch": {
+    "enabled": true,
+    "source_revision": "4b5591a46b850ce860051b142fb1133f1f664100da3e45cf01211c35e6cd93d8",
+    "target_revision": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+    "patch_sha256": "ae90c69eb28ba1f3b8dba55a1605463a58cd3f5e7c0da176fc3881e7f16fdd13",
+    "patch_bytes": 2406576,
+    "raw_bytes": 13703611,
+    "changed_rows": {
+      "buildings": 25,
+      "codes": 124,
+      "aliases": 46,
+      "streets": 1,
+      "street_houses": 2,
+      "alias_search": 62613,
+      "metadata": 2,
+      "provenance": 63
+    }
+  },
+  "migration": {
+    "all_tables_forward_reverse_forward_equal": true,
+    "postgres_memory_limit_mib": 192,
+    "client_memory_limit_mib": 384,
+    "client_peak_bytes": 197783552
+  },
+  "storage_parity": {
+    "queries": 400,
+    "counts": {
+      "postgres:v2:found": 364,
+      "sqlite:v2:found": 364,
+      "same": 400,
+      "postgres:v2:ambiguous": 29,
+      "sqlite:v2:ambiguous": 29,
+      "sqlite:v1:not_found": 5,
+      "postgres:v1:not_found": 5,
+      "postgres:v2:no_codes": 1,
+      "sqlite:v2:no_codes": 1,
+      "sqlite:v2:no_codes_ambiguous": 1,
+      "postgres:v2:no_codes_ambiguous": 1
+    }
+  },
+  "limitations": [
+    "Исторические подсказки и гипотезы исправлений не являются разметкой истинного намерения.",
+    "Контекстные ограничения не устанавливают отсутствующий в запросе город.",
+    "Native работает локально; на dev работает PostgreSQL.",
+    "Временная выборка после просмотра считается регрессией."
+  ],
+  "dev": {
+    "revision": "facc9296f9053e061cfe35a8b2104dc2fb9ccf35",
+    "ci_url": "https://github.com/omkality/domofomka/actions/runs/42321291711",
+    "ci_tests_passed": 598,
+    "ci_tests_skipped": 1,
+    "http_queries": 100,
+    "different_full_http_responses": 0,
+    "counts": {
+      "found": 76,
+      "not_found": 5,
+      "ambiguous": 15,
+      "no_codes": 3,
+      "incomplete_query": 1
+    },
+    "old_ids": {
+      "old_ids": 23,
+      "full_http_responses_equal": true
+    },
+    "geo": {
+      "geo_status": "found",
+      "engine": "v2",
+      "has_codes": true,
+      "seconds": 0.953,
+      "catalog_revision": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a"
+    },
+    "disk_free_bytes": 1217826816,
+    "database_restarted": false,
+    "oom": false,
+    "native_opensearch_deployed": false
+  },
+  "native_index_store_bytes": 561597999
+}

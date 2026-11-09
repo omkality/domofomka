@@ -1,0 +1,65 @@
+# Только готовые образы. Исходники, build и latest при развёртывании не используются.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
+    max-file: ${DOCKER_LOG_MAX_FILES:-3}
+services:
+  api:
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs:
+    - /tmp:size=16m,mode=1777
+    image: ${API_IMAGE:?Set immutable API_IMAGE}
+    init: true
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
+    restart: always
+    mem_limit: ${API_MEM_LIMIT:-384m}
+    memswap_limit: ${API_MEMSWAP_LIMIT:-512m}
+    pids_limit: ${API_PIDS_LIMIT:-128}
+    logging: *logging
+    command: uv run --frozen granian --interface asgi src.code_service.app:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8000} --workers ${WORKERS_NUM:-1} --log --access-log
+    env_file: ['${DEPLOY_ENV_FILE:?Set DEPLOY_ENV_FILE}']
+    environment:
+      APP_REVISION: ${APP_REVISION:?Set APP_REVISION}
+      PYTHONDONTWRITEBYTECODE: '1'
+      POSTGRES_PASSWORD: ''
+      QUEUE_DATABASE_URL: ''
+      VK_GROUP_TOKEN: ''
+    ports: ['127.0.0.1:${API_PUBLISH_PORT:-18000}:${API_PORT:-8000}']
+    volumes:
+      - ${APP_ROOT:?Set APP_ROOT}/codes.db:/backend/codes.db:ro
+      - ${APP_ROOT}/artifacts/search:/backend/catalog:ro
+    healthcheck:
+      test: [CMD, python, -c, "import http.client,os; c=http.client.HTTPConnection('127.0.0.1',int(os.environ.get('API_PORT','8000')),timeout=3); c.request('GET','/version'); assert c.getresponse().status==200"]
+      interval: ${API_HEALTH_INTERVAL:-20s}
+      timeout: ${API_HEALTH_TIMEOUT:-5s}
+      retries: ${API_HEALTH_RETRIES:-5}
+      start_period: ${API_HEALTH_START_PERIOD:-60s}
+  vkbot:
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs:
+    - /tmp:size=16m,mode=1777
+    image: ${BOT_IMAGE:?Set immutable BOT_IMAGE}
+    init: true
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
+    restart: always
+    mem_limit: ${BOT_MEM_LIMIT:-128m}
+    memswap_limit: ${BOT_MEMSWAP_LIMIT:-192m}
+    pids_limit: ${BOT_PIDS_LIMIT:-64}
+    logging: *logging
+    command: uv run --frozen python -m src.vkbot.main
+    env_file: ['${DEPLOY_ENV_FILE}']
+    environment:
+      APP_REVISION: ${APP_REVISION}
+      PYTHONDONTWRITEBYTECODE: '1'
+      EXPECTED_VK_GROUP_ID: ${DEPLOY_GROUP_ID:?Set DEPLOY_GROUP_ID}

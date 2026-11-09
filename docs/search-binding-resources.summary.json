@@ -1,0 +1,92 @@
+{
+  "scope": "dev-only investigation; runtime catalog and search unchanged",
+  "immutable_inputs": {
+    "codes.db": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
+    "artifacts/search/serving.source-fields-final.db": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a"
+  },
+  "bindings": {
+    "reviewed_query_groups": 12,
+    "classification": {
+      "legacy_literal_identity_conflicts": 6,
+      "unverified_numeric_city_suffix": 1,
+      "unresolved_fuzzy_street_intent": 1,
+      "source_data_discrepancies": 4
+    },
+    "supported_proposal_groups": 6,
+    "supported_source_rows": 25,
+    "target_buildings": 4,
+    "isolated_subset_all_codes_preserved": true,
+    "isolated_subset_all_source_rows_preserved": true,
+    "isolated_subset_all_old_ids_redirect": true,
+    "automated_repeated_field_groups": 1,
+    "automated_repeated_field_source_rows": 1,
+    "remaining_proposals_need_general_rules": 5,
+    "active_catalog_changed": false,
+    "limitations": [
+      "Subset code preservation is not full-corpus migration acceptance.",
+      "Conflicting locality and numeric suffix are not silently repaired.",
+      "A valid source address does not identify the street omitted in a user query."
+    ]
+  },
+  "germany_baseline": {
+    "read_only": true,
+    "duration_seconds": 295.28,
+    "samples": 60,
+    "mem_total_bytes": 1003823104,
+    "minimum_available_bytes": 347643904,
+    "maximum_available_bytes": 368435200,
+    "swap_total_bytes": 536866816,
+    "swap_used_minimum_bytes": 107663360,
+    "swap_used_maximum_bytes": 107663360,
+    "cpu_count": 1,
+    "cpu_model": "AMD EPYC 7642 48-Core Processor",
+    "disk_free_bytes": 1219698688,
+    "existing_containers_with_oom_flag": 0
+  },
+  "resource_gate": {
+    "reserve_bytes": 201326592,
+    "reserve_is_acceptance_policy_not_vendor_minimum": true,
+    "available_for_new_service_bytes": 146317312,
+    "tested_budget_bytes": 134217728,
+    "tested_budget_ready_within_120_seconds": false,
+    "tested_budget_oom_killed": false,
+    "control_limit_bytes": 536870912,
+    "control_heap_bytes": 134217728,
+    "control_documents": 19300,
+    "unique_frozen_query_cases": 100,
+    "query_passes": 2,
+    "all_frozen_results_equal": true,
+    "control_read_anon_bytes": 386359296,
+    "control_read_cgroup_current_bytes": 396447744,
+    "control_indexing_peak_cgroup_bytes": 537042944,
+    "control_indexing_peak_includes_file_cache": true,
+    "control_read_only_without_indexing_also_exceeds_budget": true,
+    "fits_with_reserve": false,
+    "opensearch_started_on_germany": false,
+    "local_test_containers_stopped": true,
+    "image_size_bytes": 253056565,
+    "image_id": "sha256:9ace9e8e787210e00e6d55f8908650fddebf9f225200d34fe3ad63cf57b4b46e",
+    "limitations": [
+      "Five minutes is a measured slice, not a peak-traffic guarantee.",
+      "No claim that 512 MiB is a universal minimum or sufficient production capacity.",
+      "No trade of VPN or existing application resources for OpenSearch."
+    ]
+  },
+  "evidence_sha256": {
+    "dev-baseline.json": "bdadc52964c4e7326ca3bed185ee7db3566c1ee4bbf77a29c4641e3b3791e0fc",
+    "memory-128-heap-64/summary.json": "85534f374b2676614996c13ba1bd92877f00b8c87bd084f074f85ab5996951d4",
+    "memory-512-heap-128/summary.json": "a1c7239a5dc85ce060d64e778877af4c59a16c5b6c21ebf6e6b435d6a5c32eec",
+    "read-only-memory.json": "3abc713d10062b1f5e92957f543d894ed28bd62077594ecf82be9863cd320f27",
+    "resource-parity.json": "2a0236c112478baa5b469b960d9f842aa911cf31673c9b463f6759cd2d5b4f66",
+    "reviewed-bindings-proof.json": "2423429cfce7602a65474923190616fb6c00faa90862acf2989aaba82e0e07e3",
+    "binding-evidence-validated.json": "820e8025f92e504bf378338beb85247eb6096e7ea3e414f22948f321fb489c22",
+    "repeated-fields-proposal-final.json": "175db97ca3b8bcbcab5ce601da8b592e860e1d342c0da2da827664a8dbe32594"
+  },
+  "local_tests": {
+    "passed": 778,
+    "skipped": 1,
+    "postgres": true,
+    "ruff": true,
+    "black": true
+  }
+}

@@ -1,0 +1,170 @@
+name: CI and deploy
+on:
+  push:
+    branches: [dev, master]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment (prod requires an approved master release)
+        type: choice
+        options: [dev, prod]
+        default: dev
+        required: true
+      optimize_catalog:
+        description: Order dev catalog streets to reduce disk reads (one-time maintenance)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate deployment request
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          TARGET: ${{ inputs.environment }}
+          PROD_ENABLED: ${{ vars.PROD_DEPLOY_ENABLED }}
+          OPTIMIZE_CATALOG: ${{ inputs.optimize_catalog }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            if [ "$OPTIMIZE_CATALOG" = true ]; then test "$TARGET" = dev; fi
+            if [ "$TARGET" = dev ]; then test "$REF" = refs/heads/dev;
+            else test "$REF" = refs/heads/master && test "$PROD_ENABLED" = true; fi
+          fi
+  tests:
+    needs: policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      api: ${{ steps.images.outputs.api }}
+      bot: ${{ steps.images.outputs.bot }}
+      api_bytes: ${{ steps.images.outputs.api_bytes }}
+      bot_bytes: ${{ steps.images.outputs.bot_bytes }}
+    services:
+      postgres:
+        image: postgres:17.11-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
+        env:
+          POSTGRES_DB: domofomka
+          POSTGRES_USER: domofomka
+          POSTGRES_PASSWORD: local-test-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U domofomka"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      TEST_QUEUE_DATABASE_URL: postgresql://domofomka:local-test-only@localhost:5432/domofomka
+      API_HOST: localhost
+      API_PORT: '8000'
+      DB_NAME: unused-test.db
+      DADATA_TOKEN: unused-test-token
+      VK_GROUP_TOKEN: unused-test-token
+      VK_GROUP_ID: '223949627'
+      EXPECTED_VK_GROUP_ID: '223949627'
+      QUEUE_DATABASE_URL: postgresql://unused
+      ANTI_SPAM_TIME: '5'
+      DOMOFOMKA_API_HOST: localhost
+      DOMOFOMKA_API_PORT: '8000'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.13.7'
+          python-version: '3.12.16'
+      - run: uv sync --frozen --all-groups
+      - name: Audit locked runtime dependencies
+        run: |
+          uv export --frozen --no-dev --group api --group vkbot --no-emit-project --output-file "$RUNNER_TEMP/runtime-requirements.txt"
+          uv run --frozen pip-audit --require-hashes --disable-pip -r "$RUNNER_TEMP/runtime-requirements.txt"
+      - run: uv run ruff check --no-cache src tests tools ops
+      - run: uv run python -m pytest -q -p no:cacheprovider
+      - name: Build runtime images without development dependencies
+        run: |
+          docker build --label org.opencontainers.image.source=https://github.com/omkality/domofomka --label org.opencontainers.image.revision="$GITHUB_SHA" -t domofomka-api-check -f Dockerfile.api .
+          docker build --label org.opencontainers.image.source=https://github.com/omkality/domofomka --label org.opencontainers.image.revision="$GITHUB_SHA" -t domofomka-bot-check -f Dockerfile.vkbot .
+      - name: Check runtime imports and least privilege
+        run: |
+          docker run --rm -i --network none --read-only --tmpfs /tmp:size=16m --cap-drop ALL --security-opt no-new-privileges -e API_HOST -e API_PORT -e DB_NAME -e DADATA_TOKEN domofomka-api-check uv run --frozen python - api < tools/operations/check_runtime_image.py
+          docker run --rm -i --network none --read-only --tmpfs /tmp:size=16m --cap-drop ALL --security-opt no-new-privileges -e VK_GROUP_TOKEN -e VK_GROUP_ID -e EXPECTED_VK_GROUP_ID -e QUEUE_DATABASE_URL -e ANTI_SPAM_TIME -e DOMOFOMKA_API_HOST -e DOMOFOMKA_API_PORT domofomka-bot-check uv run --frozen python - vkbot < tools/operations/check_runtime_image.py
+      - name: Publish the tested images
+        id: images
+        if: github.event_name != 'pull_request'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          api="ghcr.io/omkality/domofomka-api:sha-$GITHUB_SHA"
+          bot="ghcr.io/omkality/domofomka-vkbot:sha-$GITHUB_SHA"
+          docker tag domofomka-api-check "$api"
+          docker tag domofomka-bot-check "$bot"
+          # Первое создание пакета и публикация manifest могут временно отказывать.
+          for image in "$api" "$bot"; do
+            for attempt in 1 2 3; do
+              if docker push "$image"; then break; fi
+              test "$attempt" -lt 3
+              sleep "$((attempt * 3))"
+            done
+          done
+          python tools/operations/ci_image_refs.py
+          docker logout ghcr.io
+  deploy:
+    needs: tests
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/dev' ||
+      (github.event_name == 'workflow_dispatch' && inputs.environment == 'prod'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    environment: ${{ github.ref == 'refs/heads/dev' && 'dev' || 'prod' }}
+    concurrency:
+      group: deploy-${{ github.ref == 'refs/heads/dev' && 'dev' || 'prod' }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install environment SSH credentials
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST_KEYS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/deploy-key"
+          printf '%s\n' "$HOST_KEYS" > "$RUNNER_TEMP/deploy-hosts"
+          test -s "$RUNNER_TEMP/deploy-key"
+          test -s "$RUNNER_TEMP/deploy-hosts"
+      - name: Reject superseded branch commits
+        if: github.event_name == 'push'
+        run: test "$(git ls-remote origin "$GITHUB_REF" | cut -f1)" = "$GITHUB_SHA"
+      - name: Deploy exact image digests, check readiness and rollback on failure
+        env:
+          DEPLOY_KEY_FILE: ${{ runner.temp }}/deploy-key
+          DEPLOY_KNOWN_HOSTS_FILE: ${{ runner.temp }}/deploy-hosts
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_ENVIRONMENT: ${{ github.ref == 'refs/heads/dev' && 'dev' || 'prod' }}
+          API_IMAGE: ${{ needs.tests.outputs.api }}
+          BOT_IMAGE: ${{ needs.tests.outputs.bot }}
+          API_IMAGE_BYTES: ${{ needs.tests.outputs.api_bytes }}
+          BOT_IMAGE_BYTES: ${{ needs.tests.outputs.bot_bytes }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CATALOG_LAYOUT: ${{ github.event_name == 'workflow_dispatch' && inputs.optimize_catalog && 'street-key-v1' || '' }}
+        run: python tools/operations/ci_send.py
+      - name: Record release manifest
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ github.sha }}
+          path: release.json
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: Remove temporary credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/deploy-key" "$RUNNER_TEMP/deploy-hosts"

@@ -15,10 +15,12 @@ def test_vk_api_calls_have_connect_and_read_timeouts() -> None:
         TimeoutSession().post("https://api.vk.com/method/test", data={})
     assert request.call_args.kwargs["timeout"] == (5, 20)
 
+
 def test_none_does_not_disable_the_default_timeout() -> None:
     with patch.object(Session, "request") as request:
         TimeoutSession().get("https://api.vk.com/method/test", timeout=None)
     assert request.call_args.kwargs["timeout"] == (5, 20)
+
 
 def test_longpoll_preserves_its_explicit_wait_timeout() -> None:
     with patch.object(Session, "request") as request:

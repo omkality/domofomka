@@ -5,13 +5,12 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pyreqwest.exceptions import ConnectError
-from pyreqwest.request import RequestBuilder
+from httpx import ConnectError
 from requests import Response, Session
 from requests.exceptions import ProxyError, ReadTimeout
 
-from src.services.dadata_client import DadataClient, DadataUnavailable
-from src.services.outbound import ProxyHealth, proxy_health
+from src.code_service.geocoding import DadataClient, DadataUnavailable
+from src.infrastructure.proxy import ProxyHealth, proxy_health
 from src.vkbot.http import TimeoutSession
 
 PROXY = "http://private-proxy:18888"
@@ -74,48 +73,28 @@ def test_invalid_proxy_fails_without_exposing_credentials(proxy: str) -> None:
 
 @pytest.mark.parametrize("fail", [False, True])
 def test_dadata_proxy_uses_dedicated_client_and_closes_it(fail: bool, monkeypatch: pytest.MonkeyPatch) -> None:
-    request = MagicMock(spec=RequestBuilder)
-    request.headers.return_value = request
-    request.body_json.return_value = request
-    request.timeout.return_value = request
-    consumed = MagicMock()
-    consumed.send = AsyncMock(
-        return_value=SimpleNamespace(status=200, json=AsyncMock(return_value={"suggestions": []}))
-    )
-    request.build.return_value = consumed
-    if fail:
-        consumed.send.side_effect = TimeoutError()
+    response = SimpleNamespace(status_code=200, json=MagicMock(return_value={"suggestions": []}))
     client = MagicMock()
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    client.post.return_value = request
-    builder = MagicMock()
-    builder.proxy.return_value = builder
-    builder.connect_timeout.return_value = builder
-    builder.build.return_value = client
-    monkeypatch.setattr("src.services.dadata_client.ClientBuilder", MagicMock(return_value=builder))
-    proxy_builder = MagicMock()
-    monkeypatch.setattr("src.services.dadata_client.ProxyBuilder", proxy_builder)
-    direct = MagicMock()
-    monkeypatch.setattr("src.services.dadata_client.pyreqwest_post", direct)
-    DadataClient._unavailable_until = 0
-    try:
-        if fail:
-            with pytest.raises(DadataUnavailable):
-                asyncio.run(DadataClient("fake-token", proxy_url=PROXY).geolocate(1, 2))
-        else:
-            assert asyncio.run(DadataClient("fake-token", proxy_url=PROXY).geolocate(1, 2)) == {"suggestions": []}
-        proxy_builder.https.assert_called_once_with(PROXY)
-        client.__aexit__.assert_awaited_once()
-        direct.assert_not_called()
-        assert request.timeout.call_args.args[0].total_seconds() == 8
-    finally:
-        DadataClient._unavailable_until = 0
+    client.post = AsyncMock(side_effect=TimeoutError() if fail else None, return_value=response)
+    factory = MagicMock(return_value=client)
+    monkeypatch.setattr("src.code_service.geocoding.httpx.AsyncClient", factory)
+    if fail:
+        with pytest.raises(DadataUnavailable):
+            asyncio.run(DadataClient("fake-token", proxy_url=PROXY).geolocate(1, 2))
+    else:
+        assert asyncio.run(DadataClient("fake-token", proxy_url=PROXY).geolocate(1, 2)) == {"suggestions": []}
+    client.__aexit__.assert_awaited_once()
+    assert factory.call_args.kwargs["proxy"] == PROXY
+    assert factory.call_args.kwargs["trust_env"] is False
+    assert factory.call_args.kwargs["timeout"].connect == 2
+    assert factory.call_args.kwargs["timeout"].read == 8
 
 
 def test_proxy_backoff_and_single_recovery_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     clock = [0.0]
-    monkeypatch.setattr("src.services.outbound.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("src.infrastructure.proxy.time.monotonic", lambda: clock[0])
     health = ProxyHealth()
     assert health.choose("vk", PROXY)
     health.failed("vk", PROXY)
@@ -176,7 +155,7 @@ def test_vk_http_error_does_not_switch_route() -> None:
 
 
 def test_dadata_connection_failure_falls_back_and_new_instance_skips_proxy(monkeypatch: pytest.MonkeyPatch) -> None:
-    request = AsyncMock(side_effect=[ConnectError("connect failed", {}), {"suggestions": []}, {"suggestions": []}])
+    request = AsyncMock(side_effect=[ConnectError("connect failed"), {"suggestions": []}, {"suggestions": []}])
     monkeypatch.setattr(DadataClient, "_request", request)
 
     async def run() -> None:
@@ -199,7 +178,7 @@ def test_dadata_fallback_shares_total_deadline(monkeypatch: pytest.MonkeyPatch) 
     async def request(*args: Any) -> None:
         await asyncio.sleep(0.04)
         if args[-1]:
-            raise ConnectError("connect failed", {})
+            raise ConnectError("connect failed")
         await asyncio.sleep(1)
 
     monkeypatch.setattr(DadataClient, "_request", request)

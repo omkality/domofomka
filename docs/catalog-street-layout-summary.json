@@ -1,0 +1,184 @@
+{
+  "date": "2026-11-07",
+  "source_revision": "c0c2a32c68da7615906a911f697ec6497e6fb921",
+  "catalog_revision": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+  "rows": 1076094,
+  "logical_rows_identical": true,
+  "local_ordered_row_sha256": {
+    "original": "ca29d84186db3353d9339646837458c4d36090eb5916bbe4f0b1cf466dec9c65",
+    "ordered": "ca29d84186db3353d9339646837458c4d36090eb5916bbe4f0b1cf466dec9c65"
+  },
+  "local_candidate_queries_equal": 5,
+  "full_database_rehearsal": {
+    "source_revision": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+    "before_sha256": "ca29d84186db3353d9339646837458c4d36090eb5916bbe4f0b1cf466dec9c65",
+    "after_sha256": "ca29d84186db3353d9339646837458c4d36090eb5916bbe4f0b1cf466dec9c65",
+    "permanent_indexes_identical": true,
+    "temporary_index_removed": true,
+    "elapsed_seconds": 10.09,
+    "relation_bytes_before": 277045248,
+    "relation_bytes_after": 243343360,
+    "sampled_extra_disk_bytes": 277458944,
+    "preflight_extra_disk_bytes": 898244608,
+    "street_correlation": 1.0,
+    "queue_container_memory_limit_bytes": 201326592
+  },
+  "response_parity_400": {
+    "postgres_implementation": "production",
+    "queries": 400,
+    "fingerprint": "4493be57d4a619480e39b1d3dbf1124d58bab06b6d23d45bf0bcc7d2f2741049",
+    "counts": {
+      "postgres:v2:found": 359,
+      "sqlite:v2:found": 359,
+      "same": 400,
+      "postgres:v2:ambiguous": 34,
+      "sqlite:v2:ambiguous": 34,
+      "sqlite:v1:not_found": 5,
+      "postgres:v1:not_found": 5,
+      "postgres:v2:no_codes": 1,
+      "sqlite:v2:no_codes": 1,
+      "sqlite:v2:no_codes_ambiguous": 1,
+      "postgres:v2:no_codes_ambiguous": 1
+    },
+    "latency": {
+      "sqlite": {
+        "p50_ms": 10.53,
+        "p95_ms": 92.353
+      },
+      "postgres": {
+        "p50_ms": 5.851,
+        "p95_ms": 21.808
+      }
+    },
+    "note": "Парные вызовы того же v2 и v1. Проверяется сохранность поведения, не намерение пользователя. PostgreSQL использует постоянное read-only соединение; кеш результатов выключен."
+  },
+  "dev_http": {
+    "revision": "2d3ae97a29ca29c62671ba265f09c9e47e765afe",
+    "queries": 43,
+    "full_response_differences": 0,
+    "candidate_building_responses": 16,
+    "building_response_differences": 0,
+    "focus": [
+      {
+        "label": "broad-1",
+        "milliseconds": 4439.835,
+        "cache_hit": false,
+        "fallback_reason": "not_found",
+        "stage_errors": []
+      },
+      {
+        "label": "broad-2",
+        "milliseconds": 318.272,
+        "cache_hit": false,
+        "fallback_reason": "not_found",
+        "stage_errors": []
+      },
+      {
+        "label": "broad-3",
+        "milliseconds": 1716.783,
+        "cache_hit": false,
+        "fallback_reason": "not_found",
+        "stage_errors": []
+      },
+      {
+        "label": "broad-4",
+        "milliseconds": 1702.413,
+        "cache_hit": false,
+        "fallback_reason": "not_found",
+        "stage_errors": []
+      }
+    ],
+    "containers": {
+      "api": {
+        "id": "cbaea42b17e6",
+        "running": true,
+        "oom": false,
+        "restarts": 0,
+        "source_bind": false
+      },
+      "vkbot": {
+        "id": "e156242d8cbb",
+        "running": true,
+        "oom": false,
+        "restarts": 0,
+        "source_bind": false
+      },
+      "queue": {
+        "id": "09a1b34c2f59",
+        "running": true,
+        "oom": false,
+        "restarts": 0,
+        "source_bind": false
+      }
+    },
+    "metadata": {
+      "source_catalog_sha256": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+      "street_layout": "street-key-v1"
+    },
+    "disk_free_bytes": 1219719168,
+    "mem_available_kib": 353964,
+    "registry_credentials_removed": true,
+    "transaction_pending": false,
+    "vk_messages_sent": 0,
+    "external_dadata_requests": 0,
+    "comparison": "canonical JSON"
+  },
+  "ci": {
+    "source_push": {
+      "jobs": [
+        {
+          "name": "policy",
+          "conclusion": "success"
+        },
+        {
+          "name": "tests",
+          "conclusion": "success"
+        },
+        {
+          "name": "deploy",
+          "conclusion": "success"
+        }
+      ],
+      "run": 42395683852,
+      "pytest_summary": [
+        "729 passed in 39.04s"
+      ],
+      "broad_query_acceptance": []
+    },
+    "maintenance_acceptance": {
+      "id": 42396851135,
+      "head_sha": "c0c2a32c68da7615906a911f697ec6497e6fb921",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "html_url": "https://github.com/omkality/domofomka/actions/runs/42396851135"
+    },
+    "acceptance_jobs": [
+      {
+        "name": "policy",
+        "conclusion": "success"
+      },
+      {
+        "name": "tests",
+        "conclusion": "success"
+      },
+      {
+        "name": "deploy",
+        "conclusion": "success"
+      }
+    ],
+    "broad_queries_checked_in_workflow": 2
+  },
+  "limits_unchanged": {
+    "catalog_statement_timeout_ms": 2000,
+    "catalog_operation_timeout_seconds": 5
+  },
+  "production_changed": false,
+  "vpn_changed": false,
+  "notes": [
+    "Первый широкий HTTP-запрос без кеша результата занял около 4,4 с; это не SLA и не полностью холодный диск.",
+    "Постоянные индексы, ID, коды и ревизия данных не изменены. Добавлена служебная отметка физического расположения.",
+    "Первый запуск остановлен запасом диска. Резерв сохранён; обслуживание переиспользует проверенные активные образы.",
+    "Один повтор этапа потребовался из-за сетевого отказа проверки исходников до изменения каталога."
+  ]
+}

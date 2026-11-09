@@ -1,0 +1,435 @@
+{
+  "scope": "Кандидат первого выпуска v2; изменения только dev, prod v1.5.6 не переключён.",
+  "candidate_version": "2.0.0",
+  "evaluated_source_revision": "57f9657bb190ca821e1f0d382e93907ec5f46a89",
+  "dev_functional_acceptance_revision": "771b104d43f040b6944ce7672789ea240fe9b84b",
+  "catalog": {
+    "catalog_sha256": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+    "dump_sha256": "b37c9b12878b939024d70cdafc97710a7386e570b20c4db3a4a050ffdd375c4e",
+    "dump_bytes": 332907810,
+    "database_bytes": 1075140275,
+    "all_source_tables_match": true,
+    "all_restored_tables_match": true,
+    "fingerprints": {
+      "buildings": {
+        "rows": 105253,
+        "sum256": "650e4e3dc5b14be1111005f08a7864b4830a2cc8f6c1d2d246bb56cd9ca8863e",
+        "xor256": "94929552da785d337bedee5d097382de7291358b609620ebceb69a260bc91352"
+      },
+      "codes": {
+        "rows": 1001685,
+        "sum256": "82598e75e3b723c1d9637497c11169d2bb1682d44dd364433c5e0b1cad73e560",
+        "xor256": "44391b4aada1fb5ac096db547e08915811fdafdd69b08396fff2c471207de592"
+      },
+      "aliases": {
+        "rows": 111876,
+        "sum256": "957e4f7c11482377470fd3e790b4f05527cd4b92412fdb347fc7680284bec010",
+        "xor256": "876101c6ed31dfd0fb991f54aa9cc545aa06da69110cb7cfaebfceea22d12e08"
+      },
+      "streets": {
+        "rows": 1076094,
+        "sum256": "f9d10cfebb8d9fd936c71e71359e5a01ab17b023bcbbffca1a9f3c03d5f59ff2",
+        "xor256": "c0cbbe6f353ef2ba71861c5a4fd821ad92d84f7953061e81b182e9488e670396"
+      },
+      "street_houses": {
+        "rows": 1076094,
+        "sum256": "2189c92aa09c40c2992666be6e045957f7e0e034fc880cebfac2320393723e66",
+        "xor256": "6e6a67aaafe98d2d3aa93df2c71fb98bc66aeca0ffdeafac55c9a3c19df78e8a"
+      },
+      "alias_search": {
+        "rows": 111876,
+        "sum256": "ce924678036cd9895b963c765181d7aa05a0b5993a69e47c381090f04f19b318",
+        "xor256": "888e0a169789d7984f5b4304b23d0df62f45620c63a515e5a38001b3ff9f31f2"
+      },
+      "provenance": {
+        "rows": 1008682,
+        "sum256": "ed8c25b9954e50cb3d99756f56894f0db919883e75858b36e43fa85e2fbeefc3",
+        "xor256": "faaf96dfa2051ad5840d76cd4f0a3e90bdfe806c8ceae0cc447a3fc0e8c760b1"
+      },
+      "metadata": {
+        "rows": 3,
+        "sum256": "3a32b1acd36d860934c4279466346edb7875bd7bfdcefcb8d1c818f1f90f0adf",
+        "xor256": "c1d312adc092918ecd2bda77b98389646f0a428782f3474b75b0e2ce0ecae4d7"
+      },
+      "vocabulary": {
+        "rows": 146962,
+        "sum256": "7ec0c58e98823ab351f80aee383ba69e9f306a66a5120b041e43f844c78e758a",
+        "xor256": "b74bfa623cb82d63bf0e1f9e2078edcbe4f2f1e0e4c4f69d8889a1c5b1758bf4"
+      }
+    },
+    "read_only_role_verified": true,
+    "control_queries_passed": 5,
+    "postgres_memory_limit_mib": 192,
+    "source_commit": "57f9657bb190ca821e1f0d382e93907ec5f46a89",
+    "seconds": 136.59,
+    "temporary_restore_database_and_role_removed": true
+  },
+  "fresh_holdout": {
+    "selected": 100,
+    "literal_house_constraints": 96,
+    "literal_city_constraints": 37,
+    "street_number_constraints": 7,
+    "selection": "Первые 100 уникальных текстов после сортировки по SHA256(диалог+запрос)",
+    "no_ranker_results_seen_before_annotation": true,
+    "labels_sha256": "7348cd45dcb6439c59852e12a9f49555358316f57ed829c56a8bbe54336b095f",
+    "source_texts": 441,
+    "unique_texts": 416,
+    "dialog_count": 85,
+    "notes": [
+      "Это частичная буквальная разметка, а не 100 подтверждённых намерений.",
+      "Город не добавляется, если он не указан в запросе.",
+      "Старый ответ бота — свидетельство совместимости, а не эталон."
+    ],
+    "evaluation": {
+      "queries": 416,
+      "counts": {
+        "sqlite:found:v2": 312,
+        "postgres:found:v2": 312,
+        "same_full_response": 416,
+        "v1_found": 321,
+        "v1_found->found": 298,
+        "labelled": 100,
+        "sqlite:not_found:v1": 46,
+        "postgres:not_found:v1": 46,
+        "sqlite:ambiguous:v2": 27,
+        "postgres:ambiguous:v2": 27,
+        "v1_found->ambiguous": 23,
+        "sqlite:incomplete_query:v2": 5,
+        "postgres:incomplete_query:v2": 5,
+        "sqlite:no_codes:v2": 11,
+        "postgres:no_codes:v2": 11,
+        "sqlite:no_codes_ambiguous:v2": 15,
+        "postgres:no_codes_ambiguous:v2": 15
+      },
+      "literal_conflicts_to_review": 0,
+      "latency_ms": {
+        "sqlite": {
+          "p50": 8.69,
+          "p95": 96.84,
+          "max": 374.61
+        },
+        "postgres": {
+          "p50": 6.04,
+          "p95": 111.94,
+          "max": 702.2
+        }
+      },
+      "labels_sha256": "7348cd45dcb6439c59852e12a9f49555358316f57ed829c56a8bbe54336b095f",
+      "note": "Замороженная выборка; буквальные компоненты размечены частично. Совместимость с v1 не доказывает правильность намерения."
+    },
+    "v1_with_codes": 321,
+    "v1_full_code_sets_retained": 321,
+    "v1_with_codes_auto": 298,
+    "v1_with_codes_choice": 23
+  },
+  "dev_http": {
+    "fresh_queries": 100,
+    "fresh_signatures_match_local": 100,
+    "control_queries": 13,
+    "all_http_queries": 113,
+    "v2_ms": {
+      "p50": 19.159,
+      "p95": 344.206,
+      "max": 2054.194
+    },
+    "routes_successful": 6,
+    "route_cases": 6,
+    "containers_unchanged": true
+  },
+  "routes": {
+    "api:configured": {
+      "outcome": "success",
+      "attempts": [
+        {
+          "stage": "network.dadata",
+          "status": "success",
+          "milliseconds": 726.258,
+          "operation": "geolocate",
+          "route": "ru_proxy",
+          "route_reason": "preferred",
+          "attempt": 1,
+          "http_status": 200
+        }
+      ]
+    },
+    "api:direct": {
+      "outcome": "success",
+      "attempts": [
+        {
+          "stage": "network.dadata",
+          "status": "success",
+          "milliseconds": 288.652,
+          "operation": "geolocate",
+          "route": "direct",
+          "route_reason": "not_configured",
+          "attempt": 1,
+          "http_status": 200
+        }
+      ]
+    },
+    "api:unreachable_proxy_then_direct": {
+      "outcome": "success",
+      "attempts": [
+        {
+          "stage": "network.dadata",
+          "status": "error",
+          "milliseconds": 360.533,
+          "operation": "geolocate",
+          "route": "ru_proxy",
+          "route_reason": "preferred",
+          "attempt": 1
+        },
+        {
+          "stage": "network.dadata",
+          "status": "success",
+          "milliseconds": 77.884,
+          "operation": "geolocate",
+          "route": "direct",
+          "route_reason": "proxy_connect_failed",
+          "attempt": 2,
+          "http_status": 200
+        }
+      ]
+    },
+    "vkbot:configured": {
+      "outcome": "success",
+      "attempts": [
+        {
+          "stage": "network.vk",
+          "status": "success",
+          "milliseconds": 380.64,
+          "operation": "groups.getLongPollServer",
+          "route": "ru_proxy",
+          "route_reason": "preferred",
+          "attempt": 1,
+          "http_status": 200
+        }
+      ]
+    },
+    "vkbot:direct": {
+      "outcome": "success",
+      "attempts": [
+        {
+          "stage": "network.vk",
+          "status": "success",
+          "milliseconds": 308.969,
+          "operation": "groups.getLongPollServer",
+          "route": "direct",
+          "route_reason": "not_managed",
+          "attempt": 1,
+          "http_status": 200
+        }
+      ]
+    },
+    "vkbot:unreachable_proxy_then_direct": {
+      "outcome": "success",
+      "attempts": [
+        {
+          "stage": "network.vk",
+          "status": "error",
+          "milliseconds": 4.852,
+          "operation": "groups.getLongPollServer",
+          "route": "ru_proxy",
+          "route_reason": "preferred",
+          "attempt": 1
+        },
+        {
+          "stage": "network.vk",
+          "status": "success",
+          "milliseconds": 240.021,
+          "operation": "groups.getLongPollServer",
+          "route": "direct",
+          "route_reason": "proxy_connect_failed",
+          "attempt": 2,
+          "http_status": 200
+        }
+      ]
+    }
+  },
+  "queue_limits": {
+    "artificial_messages": 7,
+    "pending_for_first_user": 3,
+    "suppressed_for_first_user": 3,
+    "per_user_spacing_seconds": [
+      5.114,
+      5.122
+    ],
+    "other_user_delay_seconds": 0.236,
+    "restart_preserved_limits": true,
+    "vk_api_calls": 0,
+    "isolated_database": true
+  },
+  "queue_restore": {
+    "dump_bytes": 90273,
+    "dump_sha256": "59c46662efafff8e5ea6bd999c0a0b28d579257e707c300ec480606aaa46ae99",
+    "restored_in_isolated_local_db": true,
+    "rows": {
+      "bot_inbox": 156,
+      "bot_outbox": 93
+    },
+    "vk_process_started": false,
+    "dump_retained_locally": false,
+    "temporary_database_removed": true
+  },
+  "legacy_rollback": {
+    "legacy_api_version": "1.5.6",
+    "legacy_readiness_passed": true,
+    "real_redis_ping": true,
+    "vk_method_mocked_no_external_network": true,
+    "frozen_source_and_env_used_after_current_inputs_changed": true,
+    "internal_network": true,
+    "temporary_containers_removed": true
+  },
+  "prod_baseline": {
+    "legacy_version": "1.5.6",
+    "matching_files": 23,
+    "prod_mutations": 0
+  },
+  "geocoding": {
+    "cases": [
+      {
+        "case": "geo",
+        "status": "found",
+        "engine": "v2",
+        "seconds": 0.673,
+        "address_sha256": "c1ba0cebe9566dc0372063a1ab764f2214b8c9d4655e7a70fd0f090f03760142",
+        "network": [
+          {
+            "route": "ru_proxy",
+            "status": "success"
+          }
+        ]
+      },
+      {
+        "case": "text_after_geo",
+        "status": "found",
+        "engine": "v2",
+        "seconds": 0.01,
+        "address_sha256": "c1ba0cebe9566dc0372063a1ab764f2214b8c9d4655e7a70fd0f090f03760142",
+        "network": []
+      }
+    ],
+    "same_address": true,
+    "vk_messages_sent": 0
+  },
+  "written_ordinals": {
+    "written_ordinal_equals_numeric_full_response": true,
+    "status": "found",
+    "entrances": 3
+  },
+  "ui": {
+    "accepted": true,
+    "source": "Явное подтверждение владельца в этом чате",
+    "cases": [
+      "address_with_entrance",
+      "entrance_callback",
+      "address_choice_rejection",
+      "geolocation",
+      "text_after_geolocation"
+    ],
+    "production_switched": false
+  },
+  "formatting": {
+    "all_python_ast_unchanged": true,
+    "files": 135,
+    "formatter": "11 files reformatted, 124 files left unchanged",
+    "fresh_full_responses_unchanged": 416
+  },
+  "checks": {
+    "local_tests_passed": 778,
+    "local_platform_skips": 1,
+    "linux_tests_passed": 779,
+    "functional_acceptance_ci": "https://github.com/omkality/domofomka/actions/runs/42593803848"
+  },
+  "resources": {
+    "dev": {
+      "available_bytes": 223162368,
+      "disk_free_bytes": 1219076096,
+      "storage_timers": {
+        "logrotate.timer": "active",
+        "domofomka-disk-reserve.timer": "active"
+      }
+    },
+    "prod": {
+      "available_bytes": 491745280,
+      "disk_free_bytes": 32837902336,
+      "storage_timers": {
+        "logrotate.timer": "active",
+        "domofomka-disk-reserve.timer": "active"
+      }
+    },
+    "proxy": {
+      "available_bytes": 275197952,
+      "disk_free_bytes": 2555617280,
+      "storage_timers": {
+        "logrotate.timer": "active",
+        "domofomka-disk-reserve.timer": "active"
+      }
+    }
+  },
+  "deferred": "Шесть предложений привязки не применены; варианты и их коды сохранены отдельно. OpenSearch остаётся локальной лабораторией.",
+  "limitations": [
+    "Разметка сотни — буквальные компоненты, не полное подтверждение намерений.",
+    "Свежий корпус небольшой; исторический v1 не эталон правильности.",
+    "В прежнем корпусе остаются семь отдельно разобранных отличий от v1: шесть буквальных конфликтов и один неподтверждённый суффикс города.",
+    "Память и диск — измеренный снимок, не гарантия будущего свободного места."
+  ],
+  "followup_issue": "https://github.com/omkality/domofomka/issues/12",
+  "security_hotfix": {
+    "audited_runtime_dependencies": 39,
+    "known_vulnerabilities_osv": 0,
+    "known_vulnerabilities_pypi": 0,
+    "local_tests_passed": 784,
+    "local_platform_skips": 1,
+    "frozen_complete_search_records_unchanged": 416,
+    "runtime_uid_gid": 10001,
+    "capabilities": 0,
+    "no_new_privileges": true,
+    "readonly_root": true,
+    "runtime_versions": {
+      "certifi": "2026.10.23",
+      "anyio": "4.14.2",
+      "urllib3": "2.8.0",
+      "granian": "2.7.4",
+      "litestar": "2.22.0",
+      "pydantic-settings": "2.14.2",
+      "requests": "2.33.0",
+      "idna": "3.15",
+      "multidict": "6.9.1",
+      "multipart": "1.3.1",
+      "pygments": "2.20.0",
+      "python-dotenv": "1.2.2"
+    },
+    "image_smoke": {
+      "runtime_security": [
+        {
+          "service": "api",
+          "uid": 10001,
+          "capabilities": 0,
+          "no_new_privileges": true,
+          "root_readonly": true
+        },
+        {
+          "service": "vkbot",
+          "uid": 10001,
+          "capabilities": 0,
+          "no_new_privileges": true,
+          "root_readonly": true
+        }
+      ],
+      "http": {
+        "http_controls": [
+          "found",
+          "not_found",
+          "found"
+        ],
+        "v1_and_catalog_mounts_readable": true
+      },
+      "network": "none",
+      "external_requests": 0,
+      "temporary_container_removed": true
+    },
+    "source_lock_sha256": "0111391924cf710649075e7e1a615d6ddd441a2506099e2000691f6517674ff3",
+    "note": "Проверены рабочие зависимости Python и ограничения контейнеров; это не гарантия отсутствия любых неизвестных или системных уязвимостей. Итоговый Linux CI указан в PR."
+  }
+}

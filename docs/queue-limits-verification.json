@@ -1,0 +1,17 @@
+{
+  "artificial_messages": 7,
+  "pending_for_first_user": 3,
+  "suppressed_for_first_user": 3,
+  "per_user_spacing_seconds": [
+    5.07,
+    5.108
+  ],
+  "other_user_delay_seconds": 0.307,
+  "restart_preserved_limits": true,
+  "vk_api_calls": 0,
+  "isolated_database": true,
+  "ci_url": "https://github.com/omkality/domofomka/actions/runs/42325735697",
+  "ci_tests_passed": 616,
+  "ci_tests_skipped": 1,
+  "source_revision": "c9813fc70c079632bac7ed2ecf48f3f1d5668eba"
+}
