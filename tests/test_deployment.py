@@ -13,7 +13,19 @@ import pytest
 
 from ops.deploy import Deployment, street_layout_sql, validate_manifest
 from ops.receive_release import unpack, verify_source
-from tools.ci_image_refs import published_image
+from tools.operations.ci_image_refs import published_image
+
+
+@pytest.mark.parametrize("modern", [True, False])
+def test_catalog_entrypoint_supports_current_and_previous_release_layouts(monkeypatch, modern):
+    from ops.deploy import CATALOG_ENTRYPOINT
+
+    called = []
+    monkeypatch.setattr(Path, "is_file", lambda path: modern)
+    monkeypatch.setattr(runpy, "run_module", lambda module, **kw: called.append((module, kw)))
+    exec(CATALOG_ENTRYPOINT)
+    expected = "src.code_service.v2.catalog_update" if modern else "src.search.catalog_update"
+    assert called == [(expected, {"run_name": "__main__"})]
 
 
 def manifest():
@@ -165,6 +177,8 @@ def test_legacy_readiness_uses_v1_dependencies_without_starting_another_collecto
     assert "'1.5.6'" in probes[0]
     assert "src.vkbot.runtime" not in probes[1]
     assert "groups.getLongPollServer" in probes[1]
+    assert "from src.network import network_settings" in probes[1]
+    assert "src.infrastructure" not in probes[1]
     assert "await client.ping()" in probes[1]
     assert ".listen(" not in probes[1]
     assert "pg_try_advisory_lock" not in probes[1]
@@ -325,7 +339,7 @@ def test_receiver_scopes_legacy_rollback_to_prod_and_forwards_the_flag(tmp_path,
 
 
 def test_legacy_rollback_sender_needs_no_registry_token_or_release_payload(monkeypatch):
-    sender = runpy.run_path(str(Path(__file__).parents[1] / "tools/ci_send.py"))["main"]
+    sender = runpy.run_path(str(Path(__file__).parents[1] / "tools/operations/ci_send.py"))["main"]
     for key, value in {
         "DEPLOY_ACTION": "rollback-legacy",
         "DEPLOY_KEY_FILE": "unused-key",

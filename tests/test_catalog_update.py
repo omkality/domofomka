@@ -7,8 +7,8 @@ import pytest
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
-from src.search.catalog_update import migrate
-from tools.build_postgres_catalog import INDEXES, SCHEMA
+from src.code_service.v2.catalog_update import migrate
+from tools.catalog.build_postgres_catalog import INDEXES, SCHEMA
 
 
 @pytest.fixture

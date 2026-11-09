@@ -3,10 +3,10 @@ import sqlite3
 
 import pytest
 
-from src.search.normalize import text
-from tools.build_catalog import SCHEMA, index_streets
-from tools.reconcile_source_fields import mappings
-from tools.reconcile_street_order import apply
+from src.code_service.v2.normalize import text
+from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.reconcile_source_fields import mappings
+from tools.catalog.reconcile_street_order import apply
 
 
 @pytest.fixture
@@ -76,7 +76,7 @@ def test_field_moves_preserve_all_code_sources_and_old_building_ids(source_field
     assert summary["source_rows"] == 2
     output = tmp_path / "aligned.db"
     apply(source, output, links, resolution="gar_source_field_alignment", schema_version=8)
-    from tools.repair_house_identity import repair
+    from tools.catalog.repair_house_identity import repair
 
     with pytest.raises(ValueError, match="before source field alignment"):
         repair(output, tmp_path / "not-used.db", tmp_path / "must-not-be-created.db")

@@ -29,6 +29,15 @@ TARGETS = {
     "prod": ("domofomka", ".env", "213361259", "8000"),
 }
 
+# Older immutable release images retain their original module layout. Select
+# inside the image so rollback does not depend on today's source tree.
+CATALOG_ENTRYPOINT = (
+    "import runpy; from pathlib import Path; "
+    "runpy.run_module('src.code_service.v2.catalog_update' "
+    "if Path('/backend/src/code_service/v2/catalog_update.py').is_file() "
+    "else 'src.search.catalog_update', run_name='__main__')"
+)
+
 
 def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
     return subprocess.run(args, check=True, text=True, **kwargs)
@@ -212,8 +221,8 @@ class Deployment:
                     "run",
                     "--frozen",
                     "python",
-                    "-m",
-                    "src.search.catalog_update",
+                    "-c",
+                    CATALOG_ENTRYPOINT,
                     "inspect",
                 ],
                 capture_output=True,
@@ -373,8 +382,8 @@ class Deployment:
                         "run",
                         "--frozen",
                         "python",
-                        "-m",
-                        "src.search.catalog_update",
+                        "-c",
+                        CATALOG_ENTRYPOINT,
                         "reverse" if reverse else "apply",
                         "--patch",
                         "/patch",

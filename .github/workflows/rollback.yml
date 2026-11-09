@@ -54,4 +54,4 @@ jobs:
           trap 'rm -f "$DEPLOY_KEY_FILE" "$DEPLOY_KNOWN_HOSTS_FILE"' EXIT
           printf '%s\n' "$KEY" > "$DEPLOY_KEY_FILE"
           printf '%s\n' "$HOST_KEYS" > "$DEPLOY_KNOWN_HOSTS_FILE"
-          python tools/ci_send.py
+          python tools/operations/ci_send.py

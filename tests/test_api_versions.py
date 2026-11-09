@@ -1,10 +1,10 @@
 import pytest
 from litestar.testing import TestClient
 
-from src.api.app import app
-from src.application import search
-from src.config import settings
-from src.search.engine import Catalog
+from src.code_service.app import app
+from src.code_service.config import settings
+from src.code_service.v2 import search
+from src.code_service.v2.engine import Catalog
 
 
 @pytest.mark.parametrize("path", ["/codes/geo", "/api/v1/codes/geo", "/api/v2/codes/geo"])
@@ -12,8 +12,8 @@ from src.search.engine import Catalog
 def test_geocoding_access_denial_is_typed_service_unavailable(monkeypatch, path, observe):
     from unittest.mock import AsyncMock
 
-    from src.services.dadata_client import DadataClient, DadataUnavailable
-    from src.telemetry import settings as telemetry_settings
+    from src.code_service.geocoding import DadataClient, DadataUnavailable
+    from src.infrastructure.telemetry import settings as telemetry_settings
 
     monkeypatch.setattr(telemetry_settings, "telemetry_enabled", True)
     monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
@@ -28,7 +28,7 @@ def test_geocoding_access_denial_is_typed_service_unavailable(monkeypatch, path,
 def test_geolocation_uses_the_same_v2_and_guarded_fallback_as_text(monkeypatch, status):
     from unittest.mock import AsyncMock
 
-    from src.services.dadata_client import DadataClient
+    from src.code_service.geocoding import DadataClient
 
     address = "Москва Тестовая 4к1с1"
     result = {"status": status, "engine": "v2", "address": "Москва, улица Тестовая, дом 4к1с1", "data": {}}
@@ -89,7 +89,7 @@ def test_v2_collection_endpoint_uses_the_same_application_scenario(monkeypatch):
 def test_nearby_resource_and_compatible_geo_route_share_error_contract(monkeypatch, version):
     from unittest.mock import AsyncMock
 
-    from src.services.dadata_client import DadataClient, DadataUnavailable
+    from src.code_service.geocoding import DadataClient, DadataUnavailable
 
     monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
     monkeypatch.setattr(DadataClient, "get_address_by_geo", AsyncMock(side_effect=DadataUnavailable(retryable=False)))

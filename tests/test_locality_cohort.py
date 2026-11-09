@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from tools.audit_query_localities import LocalityMatcher
-from tools.build_locality_cohort import select_cases, stratify
+from tools.history.audit_query_localities import LocalityMatcher
+from tools.history.build_locality_cohort import select_cases, stratify
 
 
 def event(city, query, dialog="dialog"):

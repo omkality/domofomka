@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from src.search.engine import Catalog, search_body
-from src.search.normalize import parse_query, text
-from tools.build_catalog import SCHEMA
+from src.code_service.v2.engine import Catalog, search_body
+from src.code_service.v2.normalize import parse_query, text
+from tools.catalog.build_catalog import SCHEMA
 
 
 @pytest.mark.parametrize(
@@ -148,8 +148,8 @@ def test_catalog_candidate_budget_changes_retrieval_without_changing_default(cat
 
 
 def test_application_passes_candidate_budget_to_sqlite_reader(catalog, monkeypatch):
-    from src.config import settings
-    from src.services.catalog import get_catalog
+    from src.code_service.config import settings
+    from src.code_service.v2.catalog import get_catalog
 
     monkeypatch.setattr(settings, "search_backend", "sqlite")
     monkeypatch.setattr(settings, "search_catalog_path", catalog.path)
@@ -187,7 +187,7 @@ def test_street_type_can_also_be_part_of_an_official_name(catalog):
 
 
 def test_source_city_alias_retrieves_coded_identity_without_a_primary_street_document(catalog):
-    from tools.refresh_aliases import refresh
+    from tools.catalog.refresh_aliases import refresh
 
     with sqlite3.connect(catalog.path) as db:
         db.execute("UPDATE buildings SET city='Московская',city_key='московская' WHERE id='a'")
@@ -232,7 +232,7 @@ def test_misaligned_legacy_city_and_street_do_not_become_an_automatic_v2_answer(
 
 
 def test_reused_regional_keys_follow_the_updated_normalizer(catalog):
-    from tools.build_catalog import index_streets, normalize_keys
+    from tools.catalog.build_catalog import index_streets, normalize_keys
 
     with sqlite3.connect(catalog.path) as db:
         db.execute(

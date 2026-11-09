@@ -3,11 +3,11 @@ import sqlite3
 
 import pytest
 
-from src.search.engine import Catalog
-from src.search.normalize import address_words, parse_query
-from tools.benchmark_native_search import configurations, mapping, native_body, native_result
-from tools.build_catalog import SCHEMA, index_streets
-from tools.search_lexical_profiles import expanded_ordinals, ordinal_rules
+from src.code_service.v2.engine import Catalog
+from src.code_service.v2.normalize import address_words, parse_query
+from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.experiments.benchmark_native_search import configurations, mapping, native_body, native_result
+from tools.experiments.search_lexical_profiles import expanded_ordinals, ordinal_rules
 
 
 def test_unicode_control_preserves_the_typo_inside_a_word_without_changing_default_cleanup():

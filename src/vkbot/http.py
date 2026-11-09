@@ -6,9 +6,9 @@ from urllib.parse import urlsplit
 from requests import Response, Session
 from requests.exceptions import ConnectionError, ConnectTimeout, ProxyError, Timeout
 
-from src.network import network_settings
-from src.services.outbound import proxy_health
-from src.telemetry import active, span
+from src.infrastructure.network import network_settings
+from src.infrastructure.proxy import proxy_health
+from src.infrastructure.telemetry import active, span
 
 
 class TimeoutSession(Session):

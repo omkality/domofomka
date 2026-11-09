@@ -2,9 +2,9 @@ import sqlite3
 
 import pytest
 
-from src.config import settings
-from src.services.codes import get_data_from_db
-from tools import evaluate_search as replay
+from src.code_service.config import settings
+from src.code_service.v1.codes import get_data_from_db
+from tools.evaluation import evaluate_search as replay
 
 
 @pytest.mark.asyncio

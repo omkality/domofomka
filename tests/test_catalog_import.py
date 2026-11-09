@@ -2,8 +2,8 @@ import sqlite3
 
 import pytest
 
-from src.search.engine import Catalog
-from tools.build_catalog import build, relink, source_street
+from src.code_service.v2.engine import Catalog
+from tools.catalog.build_catalog import build, relink, source_street
 
 
 @pytest.mark.parametrize(("long_kind", "short_kind"), [("проспект", "пр-кт"), ("аллея", "ал."), ("тупик", "туп.")])
@@ -59,7 +59,7 @@ def test_street_types_never_merge_code_rows(tmp_path, long_kind, short_kind):
         assert db.execute("SELECT resolution FROM provenance WHERE source_id=3").fetchone()[0] == "gar_exact"
     assert source_street("Мира (Подольск)", "Москва") == "мира подольск"
 
-    from tools.compact_catalog import compact
+    from tools.catalog.compact_catalog import compact
 
     serving = tmp_path / "serving.db"
     compact(output, serving)
@@ -73,7 +73,7 @@ def test_street_types_never_merge_code_rows(tmp_path, long_kind, short_kind):
     assert empty["fias_id"] is None
     assert small.building(empty["building_id"])["display"] == empty["address"]
 
-    from src.search.engine import documents
+    from src.code_service.v2.engine import documents
 
     assert list(documents(str(serving))) == list(documents(str(output)))
     # Known code-bearing identities do not depend on unpacking the full GAR house list.

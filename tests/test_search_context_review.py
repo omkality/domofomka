@@ -1,4 +1,4 @@
-from tools.review_search_differences import context_score
+from tools.evaluation.review_search_differences import context_score
 
 
 def building(city, street, house):

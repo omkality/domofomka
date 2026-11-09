@@ -3,11 +3,11 @@ from functools import partial
 
 import pytest
 
-from src.config import settings
-from src.search.constraints import legacy_source_matches
-from src.services.codes import get_data_from_db, scan_data_from_db
-from src.services.source_index import lookup
-from tools.build_legacy_index import build
+from src.code_service.config import settings
+from src.code_service.v1.codes import get_data_from_db, scan_data_from_db
+from src.code_service.v1.index import lookup
+from src.code_service.v2.constraints import legacy_source_matches
+from tools.catalog.build_legacy_index import build
 
 
 @pytest.mark.asyncio
@@ -122,7 +122,7 @@ def test_source_guard_preserves_spaces_and_numeric_compatibility_without_accepti
 @pytest.mark.asyncio
 @pytest.mark.parametrize("with_index", [False, True])
 async def test_v2_catalog_failure_does_not_mix_another_house_into_a_valid_fallback(tmp_path, monkeypatch, with_index):
-    from src.application import search
+    from src.code_service.v2 import search
 
     source, index = tmp_path / "source.db", tmp_path / "index.db"
     with sqlite3.connect(source) as db:

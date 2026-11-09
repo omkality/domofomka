@@ -2,10 +2,10 @@ import hashlib
 import json
 import sqlite3
 
-from src.search.localities import clean_structured_prefix, match, urban_city
-from src.search.normalize import parse_query
-from tools.build_catalog import SCHEMA, link_codes, relink
-from tools.build_locality_facts import build_region
+from src.code_service.v2.localities import clean_structured_prefix, match, urban_city
+from src.code_service.v2.normalize import parse_query
+from tools.catalog.build_catalog import SCHEMA, link_codes, relink
+from tools.catalog.build_locality_facts import build_region
 
 FACT = {
     "region": "50",

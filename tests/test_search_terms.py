@@ -3,10 +3,10 @@ import sqlite3
 
 import pytest
 
-from src.search.engine import Catalog
-from src.search.normalize import address_words, parse_query
-from tools.build_catalog import SCHEMA, index_streets
-from tools.refresh_search_terms import rebuild
+from src.code_service.v2.engine import Catalog
+from src.code_service.v2.normalize import address_words, parse_query
+from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.refresh_search_terms import rebuild
 
 
 @pytest.mark.parametrize("prefix", ["", "Российская Федерация, ", "Российская Федерация "])

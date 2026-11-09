@@ -2,10 +2,10 @@ import sqlite3
 
 import pytest
 
-from src.search.engine import Catalog
-from src.search.normalize import text
-from tools.build_catalog import SCHEMA, index_streets
-from tools.compact_catalog import compact
+from src.code_service.v2.engine import Catalog
+from src.code_service.v2.normalize import text
+from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.compact_catalog import compact
 
 
 @pytest.fixture(params=[False, True])

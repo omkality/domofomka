@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 
-from src.telemetry import settings as telemetry_settings
+from src.infrastructure.telemetry import settings as telemetry_settings
 from src.vkbot.config import settings
 from src.vkbot.queue import QueueStore
 from src.vkbot.runtime import validate_environment

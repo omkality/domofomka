@@ -10,8 +10,8 @@ from typing import Any
 import httpx
 from vk_api import VkApi
 
-from src.network import network_settings, tls_context
-from src.telemetry import active, measured, merge, note, search_result, span
+from src.infrastructure.network import network_settings, tls_context
+from src.infrastructure.telemetry import active, measured, merge, note, search_result, span
 from src.vkbot.http import TimeoutSession
 from src.vkbot.keyboard import INLINE_BUTTON_LIMIT, build_many_buttons, get_location_keyboard, serialize_inline_keyboard
 from src.vkbot.queue import QueueStore

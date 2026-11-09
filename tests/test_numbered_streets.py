@@ -2,9 +2,9 @@ import sqlite3
 
 import pytest
 
-from src.search.engine import Catalog
-from src.search.normalize import parse_query, text
-from tools.build_catalog import SCHEMA, index_streets
+from src.code_service.v2.engine import Catalog
+from src.code_service.v2.normalize import parse_query, text
+from tools.catalog.build_catalog import SCHEMA, index_streets
 
 ORDINALS = [
     ("первая", "1"),

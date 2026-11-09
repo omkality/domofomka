@@ -22,7 +22,7 @@ services:
     memswap_limit: ${API_MEMSWAP_LIMIT:-512m}
     pids_limit: ${API_PIDS_LIMIT:-128}
     logging: *logging
-    command: uv run --frozen granian --interface asgi src.api.app:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8000} --workers ${WORKERS_NUM:-1} --log --access-log
+    command: uv run --frozen granian --interface asgi src.code_service.app:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8000} --workers ${WORKERS_NUM:-1} --log --access-log
     env_file: ['${DEPLOY_ENV_FILE:?Set DEPLOY_ENV_FILE}']
     environment:
       APP_REVISION: ${APP_REVISION:?Set APP_REVISION}

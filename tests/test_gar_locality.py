@@ -1,4 +1,4 @@
-from tools.import_gar import locality
+from tools.catalog.import_gar import locality
 
 
 def test_regional_city_is_a_settlement_but_a_district_is_not():

@@ -11,14 +11,14 @@ from litestar.testing import TestClient
 from requests import Response, Session
 from requests.exceptions import ProxyError
 
-from src.api.app import app
-from src.application import search
-from src.config import settings as api_settings
-from src.network import network_settings
-from src.search.engine import Catalog
-from src.services.dadata_client import DadataClient
-from src.services.outbound import proxy_health
-from src.telemetry import Capture, merge, note, search_result, settings, span
+from src.code_service.app import app
+from src.code_service.config import settings as api_settings
+from src.code_service.geocoding import DadataClient
+from src.code_service.v2 import search
+from src.code_service.v2.engine import Catalog
+from src.infrastructure.network import network_settings
+from src.infrastructure.proxy import proxy_health
+from src.infrastructure.telemetry import Capture, merge, note, search_result, settings, span
 from src.vkbot import telemetry as database
 from src.vkbot.http import TimeoutSession
 from src.vkbot.maintenance import compact
@@ -121,7 +121,7 @@ def test_api_cache_does_not_fake_new_search_or_reuse_old_measurements(observed_a
 
 
 def test_api_records_v2_error_and_actual_v1_result(observed_api, monkeypatch):
-    from src.services import codes
+    from src.code_service.v1 import codes
 
     monkeypatch.setattr(Catalog, "resolve", MagicMock(side_effect=RuntimeError("offline")))
     monkeypatch.setattr(
@@ -141,11 +141,11 @@ def test_api_records_v2_error_and_actual_v1_result(observed_api, monkeypatch):
 
 
 def test_api_failed_geo_keeps_diagnostic_packet(observed_api, monkeypatch):
-    from src.services.dadata_client import DadataUnavailable
+    from src.code_service.geocoding import DadataUnavailable
 
     geocoder = MagicMock()
     geocoder.get_address_by_geo = AsyncMock(side_effect=DadataUnavailable("offline"))
-    monkeypatch.setattr("src.services.dadata_client.DadataClient.get_address_by_geo", geocoder.get_address_by_geo)
+    monkeypatch.setattr("src.code_service.geocoding.DadataClient.get_address_by_geo", geocoder.get_address_by_geo)
     with TestClient(app) as client:
         response = client.get("/api/v2/codes/geo", params={"lat": 1, "lon": 2, "observe": "true"})
     assert response.status_code == 503

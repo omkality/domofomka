@@ -8,15 +8,15 @@ from litestar.testing import TestClient
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
-from src.api.app import app
-from src.application import search
-from src.config import settings
-from src.search.engine import Catalog
-from src.search.normalize import legacy_house_matches, parse_query
-from src.search.postgres import PostgresCatalog
-from tools import build_postgres_catalog as importer
-from tools.build_catalog import SCHEMA, index_streets
-from tools.compact_catalog import compact
+from src.code_service.app import app
+from src.code_service.config import settings
+from src.code_service.v2 import search
+from src.code_service.v2.engine import Catalog
+from src.code_service.v2.normalize import legacy_house_matches, parse_query
+from src.code_service.v2.postgres import PostgresCatalog
+from tools.catalog import build_postgres_catalog as importer
+from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.compact_catalog import compact
 
 # Explicit expectations: using the parser to generate these would hide its mistakes.
 HOUSE_FORMS = [

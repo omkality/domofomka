@@ -9,8 +9,8 @@ from httpx import ConnectError
 from requests import Response, Session
 from requests.exceptions import ProxyError, ReadTimeout
 
-from src.services.dadata_client import DadataClient, DadataUnavailable
-from src.services.outbound import ProxyHealth, proxy_health
+from src.code_service.geocoding import DadataClient, DadataUnavailable
+from src.infrastructure.proxy import ProxyHealth, proxy_health
 from src.vkbot.http import TimeoutSession
 
 PROXY = "http://private-proxy:18888"
@@ -79,7 +79,7 @@ def test_dadata_proxy_uses_dedicated_client_and_closes_it(fail: bool, monkeypatc
     client.__aexit__ = AsyncMock(return_value=False)
     client.post = AsyncMock(side_effect=TimeoutError() if fail else None, return_value=response)
     factory = MagicMock(return_value=client)
-    monkeypatch.setattr("src.services.dadata_client.httpx.AsyncClient", factory)
+    monkeypatch.setattr("src.code_service.geocoding.httpx.AsyncClient", factory)
     if fail:
         with pytest.raises(DadataUnavailable):
             asyncio.run(DadataClient("fake-token", proxy_url=PROXY).geolocate(1, 2))
@@ -94,7 +94,7 @@ def test_dadata_proxy_uses_dedicated_client_and_closes_it(fail: bool, monkeypatc
 
 def test_proxy_backoff_and_single_recovery_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     clock = [0.0]
-    monkeypatch.setattr("src.services.outbound.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("src.infrastructure.proxy.time.monotonic", lambda: clock[0])
     health = ProxyHealth()
     assert health.choose("vk", PROXY)
     health.failed("vk", PROXY)

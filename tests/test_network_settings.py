@@ -6,8 +6,8 @@ from pydantic import ValidationError
 from requests import Response, Session
 from requests.exceptions import ReadTimeout
 
-from src.network import NetworkSettings
-from src.services.outbound import ProxyHealth
+from src.infrastructure.network import NetworkSettings
+from src.infrastructure.proxy import ProxyHealth
 from src.vkbot.http import TimeoutSession
 
 
@@ -87,9 +87,9 @@ def test_longpoll_uses_configured_wait_and_margin(monkeypatch: pytest.MonkeyPatc
 
 def test_proxy_health_obeys_configured_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     config = NetworkSettings(_env_file=None, proxy_retry_initial_seconds=2, proxy_retry_max_seconds=3)
-    monkeypatch.setattr("src.services.outbound.network_settings", config)
+    monkeypatch.setattr("src.infrastructure.proxy.network_settings", config)
     clock = [0.0]
-    monkeypatch.setattr("src.services.outbound.time.monotonic", lambda: clock[0])
+    monkeypatch.setattr("src.infrastructure.proxy.time.monotonic", lambda: clock[0])
     health = ProxyHealth()
     health.failed("vk", "proxy")
     assert not health.choose("vk", "proxy")

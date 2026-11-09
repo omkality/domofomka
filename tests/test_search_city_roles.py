@@ -1,11 +1,12 @@
 import copy
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 
 import pytest
 
-from tools.benchmark_native_search import mapping, reviewed_conflict
-from tools.search_city_roles import (
+from tools.experiments.benchmark_native_search import mapping, reviewed_conflict
+from tools.experiments.search_city_roles import (
     city_field,
     city_probe,
     confirmation,
@@ -89,7 +90,7 @@ def test_city_token_removal_preserves_a_repeated_street_word_and_numeric_name():
 
 
 def test_numbered_street_with_a_separate_city_does_not_need_a_city_word_inside_the_street():
-    from tools.benchmark_native_search import configurations, native_body
+    from tools.experiments.benchmark_native_search import configurations, native_body
 
     variant = next(v for v in configurations("lexical") if v["name"] == "locality.roles-sources-AUTO-r1.0")
     body = native_body(
@@ -143,7 +144,7 @@ def test_catalog_fallback_cannot_reintroduce_a_different_city_after_the_probe():
             return {"id": key, "city": "Тестоград" if key == "right" else "Другой", "lineage": "", "street": "Учебная"}
 
         @contextmanager
-        def connect(self):
+        def connect(self) -> Generator[sqlite3.Connection, None, None]:
             with sqlite3.connect(":memory:") as db:
                 db.execute("CREATE TABLE aliases(building_id TEXT,city_key TEXT,street_key TEXT)")
                 yield db

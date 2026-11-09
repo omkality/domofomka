@@ -3,14 +3,14 @@ import sqlite3
 
 import pytest
 
-from src.search.constraints import complete_name_match
-from src.search.engine import Catalog
-from src.search.normalize import parse_query
-from tools.benchmark_native_search import configurations, native_result, search_variant
-from tools.build_catalog import SCHEMA, index_streets
-from tools.compact_catalog import compact
-from tools.refresh_aliases import refresh
-from tools.search_lexical_profiles import ExactCatalog
+from src.code_service.v2.constraints import complete_name_match
+from src.code_service.v2.engine import Catalog
+from src.code_service.v2.normalize import parse_query
+from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.compact_catalog import compact
+from tools.catalog.refresh_aliases import refresh
+from tools.experiments.benchmark_native_search import configurations, native_result, search_variant
+from tools.experiments.search_lexical_profiles import ExactCatalog
 
 
 @pytest.fixture

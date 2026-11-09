@@ -1,6 +1,6 @@
 import pytest
 
-from tools.benchmark_native_search import configurations, mapping, search_variant
+from tools.experiments.benchmark_native_search import configurations, mapping, search_variant
 
 
 def test_scoring_comparison_keeps_documents_analyzers_and_filters_identical():

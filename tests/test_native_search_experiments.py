@@ -7,10 +7,10 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from src.search.engine import Catalog
-from tools import benchmark_native_search as experiment
-from tools.benchmark_native_search import configurations, mapping, native_body, native_result
-from tools.build_catalog import SCHEMA, index_streets
+from src.code_service.v2.engine import Catalog
+from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.experiments import benchmark_native_search as experiment
+from tools.experiments.benchmark_native_search import configurations, mapping, native_body, native_result
 
 
 def test_alias_experiment_keeps_house_filter_inside_the_nested_record():
@@ -140,8 +140,8 @@ def test_search_http_failure_is_recorded_without_becoming_not_found_or_aborting_
 def test_resume_rejects_changed_inputs_dependencies_and_incomplete_prefixes(tmp_path):
     source = Path(experiment.__file__).read_bytes()
     sources = {
-        "tools/benchmark_native_search.py": hashlib.sha256(source).hexdigest(),
-        "src/search/normalize.py": "fixed",
+        "tools/experiments/benchmark_native_search.py": hashlib.sha256(source).hexdigest(),
+        "src/code_service/v2/normalize.py": "fixed",
     }
     variants = [{"name": "catalog"}, {"name": "native"}]
     cases = [{"query": "Тестовая 10"}]
@@ -171,7 +171,7 @@ def test_resume_rejects_changed_inputs_dependencies_and_incomplete_prefixes(tmp_
             cases,
             variants,
             "input",
-            dict(sources, **{"src/search/normalize.py": "changed"}),
+            dict(sources, **{"src/code_service/v2/normalize.py": "changed"}),
             "catalog",
             "lab",
             {},

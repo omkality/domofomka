@@ -1,7 +1,7 @@
 import json
 from datetime import UTC, datetime
 
-from tools.audit_retention import audit
+from tools.history.audit_retention import audit
 
 
 def test_history_volume_deduplicates_overlapping_exports_and_counts_empty_days(tmp_path):

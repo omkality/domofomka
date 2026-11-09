@@ -12,8 +12,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
-from src.network import network_settings
-from src.telemetry import active, measured
+from src.infrastructure.network import network_settings
+from src.infrastructure.telemetry import active, measured
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bot_inbox (

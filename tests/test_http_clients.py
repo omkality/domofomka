@@ -8,9 +8,9 @@ import time
 import httpx
 import pytest
 
-from src.network import tls_context
-from src.services.dadata_client import DadataClient, DadataUnavailable
-from src.services.outbound import proxy_health
+from src.code_service.geocoding import DadataClient, DadataUnavailable
+from src.infrastructure.network import tls_context
+from src.infrastructure.proxy import proxy_health
 from src.vkbot.processor import Processor
 
 
@@ -107,7 +107,7 @@ def test_dadata_response_error_keeps_route_and_closes_client(clients):
 def test_dadata_access_error_stops_retries_without_switching_routes(clients, monkeypatch, status):
     from types import SimpleNamespace
 
-    from src.services import dadata_client
+    from src.code_service import geocoding as dadata_client
 
     now = [100.0]
     monkeypatch.setattr(dadata_client, "time", SimpleNamespace(monotonic=lambda: now[0]))
@@ -142,8 +142,8 @@ def test_geocoding_process_exits_cleanly_after_repeated_event_loops():
     script = r"""
 import asyncio, json, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from src.network import tls_context
-from src.services.dadata_client import DadataClient
+from src.infrastructure.network import tls_context
+from src.code_service.geocoding import DadataClient
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):

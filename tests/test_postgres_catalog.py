@@ -14,13 +14,13 @@ from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from ops.deploy import street_layout_sql
-from src.search.engine import Catalog
-from src.search.normalize import text
-from src.search.postgres import PostgresCatalog
-from tools import build_postgres_catalog as importer
-from tools.build_catalog import SCHEMA, index_streets
-from tools.compact_catalog import compact
-from tools.postgres_search_experiment import PostgresExperiment
+from src.code_service.v2.engine import Catalog
+from src.code_service.v2.normalize import text
+from src.code_service.v2.postgres import PostgresCatalog
+from tools.catalog import build_postgres_catalog as importer
+from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.compact_catalog import compact
+from tools.experiments.postgres_search_experiment import PostgresExperiment
 
 
 @pytest.fixture
@@ -203,7 +203,7 @@ def test_bounded_reader_preserves_results_and_compact_building_ids(local_experim
 
 
 def test_compact_expansion_batches_street_reads_and_preserves_empty_houses(local_experiment, monkeypatch):
-    from src.search.postgres import SharedReader
+    from src.code_service.v2.postgres import SharedReader
 
     reader = production_reader()
     statements = []
@@ -362,9 +362,9 @@ def test_http_postgres_cache_without_sqlite_catalog_and_building_endpoint(local_
     from litestar.testing import TestClient
     from pydantic import SecretStr
 
-    from src.api.app import app
-    from src.application import search
-    from src.config import settings
+    from src.code_service.app import app
+    from src.code_service.config import settings
+    from src.code_service.v2 import search
 
     monkeypatch.setattr(settings, "search_backend", "postgres")
     monkeypatch.setattr(settings, "catalog_database_url", SecretStr(os.environ["CATALOG_BENCHMARK_DSN"]))
@@ -402,8 +402,8 @@ def test_http_postgres_cache_without_sqlite_catalog_and_building_endpoint(local_
 def test_runtime_postgres_reader_reloads_configured_candidate_budget(local_experiment, monkeypatch):
     from pydantic import SecretStr
 
-    from src.config import settings
-    from src.services.catalog import close_catalog, get_catalog
+    from src.code_service.config import settings
+    from src.code_service.v2.catalog import close_catalog, get_catalog
 
     monkeypatch.setattr(settings, "search_backend", "postgres")
     monkeypatch.setattr(settings, "catalog_database_url", SecretStr(os.environ["CATALOG_BENCHMARK_DSN"]))

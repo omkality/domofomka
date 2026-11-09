@@ -9,7 +9,7 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
-from src.telemetry import settings
+from src.infrastructure.telemetry import settings
 
 logger = logging.getLogger(__name__)
 SCHEMA = """

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from tools.audit_query_localities import LocalityMatcher, audit, extract_region, query_key
+from tools.history.audit_query_localities import LocalityMatcher, audit, extract_region, query_key
 
 
 def facts():

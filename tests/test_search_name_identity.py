@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from src.search.constraints import legacy_result_matches
-from src.search.engine import Catalog
-from src.search.normalize import parse_query, text
-from tools.build_catalog import SCHEMA, index_streets
+from src.code_service.v2.constraints import legacy_result_matches
+from src.code_service.v2.engine import Catalog
+from src.code_service.v2.normalize import parse_query, text
+from tools.catalog.build_catalog import SCHEMA, index_streets
 
 
 @pytest.fixture
@@ -100,7 +100,7 @@ def test_short_name_cannot_automatically_choose_a_large_street_via_its_abbreviat
 
 
 def test_repair_preserves_addresses_codes_and_bundles(names, tmp_path):
-    from tools.repair_search_words import repair
+    from tools.catalog.repair_search_words import repair
 
     with sqlite3.connect(names.path) as db:
         db.execute("CREATE TABLE street_houses(id TEXT PRIMARY KEY,data BLOB)")
@@ -145,7 +145,7 @@ def test_area_label_cannot_swallow_an_independent_house(message, words, house):
 def test_native_does_not_confidently_name_a_fuzzy_empty_house(names, exact):
     import hashlib
 
-    from tools.benchmark_native_search import native_result
+    from tools.experiments.benchmark_native_search import native_result
 
     with sqlite3.connect(names.path) as db:
         db.execute("DELETE FROM codes WHERE building_id='other-town'")

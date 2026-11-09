@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.services.dadata_client import DadataClient, DadataUnavailable
+from src.code_service.geocoding import DadataClient, DadataUnavailable
 
 
 @pytest.fixture(autouse=True)
@@ -21,7 +21,7 @@ def builder(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     client.post = AsyncMock()
     client.__aenter__ = AsyncMock(return_value=client)
     client.__aexit__ = AsyncMock(return_value=False)
-    monkeypatch.setattr("src.services.dadata_client.httpx.AsyncClient", MagicMock(return_value=client))
+    monkeypatch.setattr("src.code_service.geocoding.httpx.AsyncClient", MagicMock(return_value=client))
     return client.post
 
 

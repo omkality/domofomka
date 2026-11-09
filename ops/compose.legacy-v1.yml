@@ -1,6 +1,7 @@
 # Только замороженный откат первого выпуска v2. Redis сохраняется до его приёмки.
 services:
   api:
+    command: uv run --frozen granian --interface asgi src.api.app:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8000} --workers ${WORKERS_NUM:-1} --log --access-log
     environment:
       UV_NO_SYNC: '1'
       UV_NO_CACHE: '1'

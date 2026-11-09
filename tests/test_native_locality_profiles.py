@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.benchmark_native_search import native_result, reviewed_conflict
-from tools.search_locality_profiles import known_locality, locality_hint, locality_matches
+from tools.experiments.benchmark_native_search import native_result, reviewed_conflict
+from tools.experiments.search_locality_profiles import known_locality, locality_hint, locality_matches
 
 
 @pytest.mark.parametrize(

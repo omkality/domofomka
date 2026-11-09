@@ -4,9 +4,9 @@ import sqlite3
 
 import pytest
 
-from src.search.engine import Catalog
-from tools.build_catalog import SCHEMA, index_streets
-from tools.repair_house_identity import repair
+from src.code_service.v2.engine import Catalog
+from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.repair_house_identity import repair
 
 
 @pytest.mark.parametrize(

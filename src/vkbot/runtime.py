@@ -8,8 +8,8 @@ from typing import Any
 from vk_api import VkApi
 from vk_api.bot_longpoll import VkBotLongPoll
 
-from src.network import network_settings
-from src.telemetry import (
+from src.infrastructure.network import network_settings
+from src.infrastructure.telemetry import (
     Capture,
     note,
     settings as telemetry_settings,

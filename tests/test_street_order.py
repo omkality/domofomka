@@ -3,9 +3,9 @@ import json
 import sqlite3
 from contextlib import closing
 
-from src.search.engine import Catalog
-from tools.build_catalog import SCHEMA, index_streets
-from tools.reconcile_street_order import apply, mappings
+from src.code_service.v2.engine import Catalog
+from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.reconcile_street_order import apply, mappings
 
 
 def catalog(path, rows):

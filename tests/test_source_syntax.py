@@ -2,12 +2,12 @@ import hashlib
 import json
 import sqlite3
 
-from src.search.engine import Catalog
-from src.search.normalize import text
-from tools.build_catalog import SCHEMA, index_streets
-from tools.build_region_facts import region_facts
-from tools.reconcile_source_syntax import explicit_region_city, mappings, region_forms
-from tools.reconcile_street_order import apply
+from src.code_service.v2.engine import Catalog
+from src.code_service.v2.normalize import text
+from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.build_region_facts import region_facts
+from tools.catalog.reconcile_source_syntax import explicit_region_city, mappings, region_forms
+from tools.catalog.reconcile_street_order import apply
 
 FACTS = [{"region": "16", "name": "Татарстан", "kind": "респ."}]
 

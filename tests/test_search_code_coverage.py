@@ -1,7 +1,7 @@
 import pytest
 
-from tools import audit_search_code_coverage as audit
-from tools.audit_search_code_coverage import code_values, offered_codes
+from tools.evaluation import audit_search_code_coverage as audit
+from tools.evaluation.audit_search_code_coverage import code_values, offered_codes
 
 
 def test_retained_address_can_still_lose_a_code():

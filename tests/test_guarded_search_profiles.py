@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from tools import benchmark_native_search as experiment
-from tools.benchmark_native_search import configurations, native_body, search_variant
+from tools.experiments import benchmark_native_search as experiment
+from tools.experiments.benchmark_native_search import configurations, native_body, search_variant
 
 
 def guarded():

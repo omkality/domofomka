@@ -89,8 +89,8 @@ jobs:
           docker build --label org.opencontainers.image.source=https://github.com/omkality/domofomka --label org.opencontainers.image.revision="$GITHUB_SHA" -t domofomka-bot-check -f Dockerfile.vkbot .
       - name: Check runtime imports and least privilege
         run: |
-          docker run --rm -i --network none --read-only --tmpfs /tmp:size=16m --cap-drop ALL --security-opt no-new-privileges -e API_HOST -e API_PORT -e DB_NAME -e DADATA_TOKEN domofomka-api-check uv run --frozen python - api < tools/check_runtime_image.py
-          docker run --rm -i --network none --read-only --tmpfs /tmp:size=16m --cap-drop ALL --security-opt no-new-privileges -e VK_GROUP_TOKEN -e VK_GROUP_ID -e EXPECTED_VK_GROUP_ID -e QUEUE_DATABASE_URL -e ANTI_SPAM_TIME -e DOMOFOMKA_API_HOST -e DOMOFOMKA_API_PORT domofomka-bot-check uv run --frozen python - vkbot < tools/check_runtime_image.py
+          docker run --rm -i --network none --read-only --tmpfs /tmp:size=16m --cap-drop ALL --security-opt no-new-privileges -e API_HOST -e API_PORT -e DB_NAME -e DADATA_TOKEN domofomka-api-check uv run --frozen python - api < tools/operations/check_runtime_image.py
+          docker run --rm -i --network none --read-only --tmpfs /tmp:size=16m --cap-drop ALL --security-opt no-new-privileges -e VK_GROUP_TOKEN -e VK_GROUP_ID -e EXPECTED_VK_GROUP_ID -e QUEUE_DATABASE_URL -e ANTI_SPAM_TIME -e DOMOFOMKA_API_HOST -e DOMOFOMKA_API_PORT domofomka-bot-check uv run --frozen python - vkbot < tools/operations/check_runtime_image.py
       - name: Publish the tested images
         id: images
         if: github.event_name != 'pull_request'
@@ -110,7 +110,7 @@ jobs:
               sleep "$((attempt * 3))"
             done
           done
-          python tools/ci_image_refs.py
+          python tools/operations/ci_image_refs.py
           docker logout ghcr.io
   deploy:
     needs: tests
@@ -156,7 +156,7 @@ jobs:
           BOT_IMAGE_BYTES: ${{ needs.tests.outputs.bot_bytes }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CATALOG_LAYOUT: ${{ github.event_name == 'workflow_dispatch' && inputs.optimize_catalog && 'street-key-v1' || '' }}
-        run: python tools/ci_send.py
+        run: python tools/operations/ci_send.py
       - name: Record release manifest
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
