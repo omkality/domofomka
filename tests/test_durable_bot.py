@@ -383,8 +383,11 @@ def test_geo_access_failure_finishes_with_notice_instead_of_enqueuing_retries(pr
     processor._get = MagicMock()
     processor._get.return_value.status_code = 503
     processor._get.return_value.json.return_value = {"extra": {"geocoding_retryable": False}}
-    job = {"kind": kind, "peer_id": 100,
-           "payload": {"message": {"id": 42, "text": "", "geo": {"coordinates": {"latitude": 1, "longitude": 2}}}}}
+    job = {
+        "kind": kind,
+        "peer_id": 100,
+        "payload": {"message": {"id": 42, "text": "", "geo": {"coordinates": {"latitude": 1, "longitude": 2}}}},
+    }
     processor.plan(job)
     effects = processor.store.plan.call_args.args[1]
     assert len(effects) == 1

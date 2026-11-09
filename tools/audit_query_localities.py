@@ -108,7 +108,9 @@ class LocalityMatcher:
             category = (
                 "city"
                 if item["kinds"] & {"г", "город"}
-                else "urban_place" if item["kinds"] & URBAN_KINDS else "other_settlement"
+                else "urban_place"
+                if item["kinds"] & URBAN_KINDS
+                else "other_settlement"
             )
             prefix = tokens[start - 1] if start else ""
             # В ГАР есть числовые названия посёлков; «д. 3» обычно номер дома.

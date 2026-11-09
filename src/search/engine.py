@@ -211,11 +211,14 @@ class Catalog:
 
     def has_exact_locality_word(self, word: str) -> bool:
         with self.connect() as db:
-            return db.execute(
-                "SELECT 1 FROM search s JOIN streets t ON t.id=s.id WHERE search MATCH ? "
-                "AND instr(' '||t.city_key||' ',' '||?||' ')>0 LIMIT 1",
-                ('"' + word.replace('"', '""') + '"', word),
-            ).fetchone() is not None
+            return (
+                db.execute(
+                    "SELECT 1 FROM search s JOIN streets t ON t.id=s.id WHERE search MATCH ? "
+                    "AND instr(' '||t.city_key||' ',' '||?||' ')>0 LIMIT 1",
+                    ('"' + word.replace('"', '""') + '"', word),
+                ).fetchone()
+                is not None
+            )
 
     def locality_prefix_choices(self, query: Query, candidates: list[dict]) -> dict | None:
         options = []
@@ -237,19 +240,26 @@ class Catalog:
             return None
         with self.connect() as db:
             coded = {
-                row[0] for row in db.execute(
+                row[0]
+                for row in db.execute(
                     "SELECT DISTINCT building_id FROM codes WHERE building_id IN ("
-                    + ",".join("?" for _ in options) + ")", [row["id"] for row in options]
+                    + ",".join("?" for _ in options)
+                    + ")",
+                    [row["id"] for row in options],
                 )
             }
         options = sorted((row for row in options if row["id"] in coded), key=lambda row: row["id"])
         if not options:
             return None
         return {
-            "status": "ambiguous", "engine": "v2", "data": {},
+            "status": "ambiguous",
+            "engine": "v2",
+            "data": {},
             "clarification_reason": "locality_prefix",
-            "candidates": [{"building_id": row["id"], "address": row["display"], "locality_context": row["lineage"]}
-                           for row in options[:100]],
+            "candidates": [
+                {"building_id": row["id"], "address": row["display"], "locality_context": row["lineage"]}
+                for row in options[:100]
+            ],
             "candidate_count": len(options),
         }
 
@@ -391,11 +401,7 @@ class Catalog:
             if fast["status"] == "found"
             else [r["building_id"] for r in fast.get("candidates", [])]
         )
-        if selected and all(
-            (row := cheap_by_id.get(bid))
-            and complete_name_match(query, row)
-            for bid in selected
-        ):
+        if selected and all((row := cheap_by_id.get(bid)) and complete_name_match(query, row) for bid in selected):
             # Only a complete canonical name permits this shortcut. A source
             # alias may explain split words; joined candidates must be read too.
             return fast
@@ -461,8 +467,7 @@ class Catalog:
         locations = [
             row
             for row in close
-            if whole_location_match(query, row["city"], row["street"])
-            and complete_name_match(query, row)
+            if whole_location_match(query, row["city"], row["street"]) and complete_name_match(query, row)
         ]
         if locations:
             # A complete city/street must be respected before code availability.
@@ -505,8 +510,7 @@ class Catalog:
                 row
                 for row in close
                 if any(
-                    full_name_match(variant, row)
-                    or complete_name_match(variant, row, row.get("_alias_names", []))
+                    full_name_match(variant, row) or complete_name_match(variant, row, row.get("_alias_names", []))
                     for variant in variants
                 )
             ]

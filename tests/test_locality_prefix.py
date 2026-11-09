@@ -24,10 +24,21 @@ def prefixes(tmp_path, request):
             ("wrong-city", "Дзержинский", "Тестовая", "10", True),
             ("wrong-city-house", "Дзержинский", "Тестовая", "11", True),
         ]:
-            db.execute("INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)", (
-                bid, bid, f"{city}, улица {street}, дом {house}", city, street, house,
-                text(street), text(city), "test", text(city),
-            ))
+            db.execute(
+                "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (
+                    bid,
+                    bid,
+                    f"{city}, улица {street}, дом {house}",
+                    city,
+                    street,
+                    house,
+                    text(street),
+                    text(city),
+                    "test",
+                    text(city),
+                ),
+            )
             if coded:
                 db.execute("INSERT INTO codes VALUES(?,?,?,?)", (bid, "1", "test", "ONLY-" + bid))
         index_streets(db)

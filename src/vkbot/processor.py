@@ -154,8 +154,11 @@ class Processor:
                     note(api_measurements="missing")
             if response.status_code != 200:
                 extra = result.get("extra")
-                if geo and response.status_code == 503 and isinstance(extra, dict) and (
-                    extra.get("geocoding_retryable") is False
+                if (
+                    geo
+                    and response.status_code == 503
+                    and isinstance(extra, dict)
+                    and (extra.get("geocoding_retryable") is False)
                 ):
                     return {"status": "geocoding_unavailable", "data": {}, "engine": version}
                 raise LookupUnavailable("Lookup API returned an unsuccessful response")
@@ -242,9 +245,15 @@ class Processor:
                 return
             if result.get("status") == "geocoding_unavailable":
                 note(decision="geo_access_unavailable")
-                effects.append({"method": "send", "params": dict(
-                    base, message="Определение адреса по геолокации временно недоступно. Отправьте адрес текстом."
-                )})
+                effects.append(
+                    {
+                        "method": "send",
+                        "params": dict(
+                            base,
+                            message="Определение адреса по геолокации временно недоступно. Отправьте адрес текстом.",
+                        ),
+                    }
+                )
             elif result.get("status") == "invalid_query":
                 effects.append(
                     {

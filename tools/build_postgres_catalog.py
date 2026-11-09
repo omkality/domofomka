@@ -48,7 +48,9 @@ INDEXES = [
 def connect():
     dsn = os.environ.get("CATALOG_BUILD_DSN") or os.environ["CATALOG_BENCHMARK_DSN"]
     info = conninfo_to_dict(dsn)
-    if not info.get("dbname", "").startswith(("domofomka_catalog_build_", "domofomka_catalog_bench")) or info.get("host") not in {
+    if not info.get("dbname", "").startswith(("domofomka_catalog_build_", "domofomka_catalog_bench")) or info.get(
+        "host"
+    ) not in {
         "localhost",
         "127.0.0.1",
         "::1",
@@ -82,8 +84,11 @@ def load(catalog: Path, full_catalog: Path, output: Path):
                 ("buildings", "SELECT * FROM buildings", ["text"] * 10),
                 ("codes", "SELECT * FROM codes", ["text"] * 4),
                 ("aliases", "SELECT * FROM aliases", ["text"] * 4),
-                ("streets", 'SELECT * FROM streets ORDER BY street_key COLLATE BINARY,city_key COLLATE BINARY,id',
-                 ["text"] * 4 + ["int4"]),
+                (
+                    "streets",
+                    "SELECT * FROM streets ORDER BY street_key COLLATE BINARY,city_key COLLATE BINARY,id",
+                    ["text"] * 4 + ["int4"],
+                ),
                 ("street_houses", "SELECT * FROM street_houses", ["text", "bytea"]),
                 (
                     "alias_search",

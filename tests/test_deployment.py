@@ -179,11 +179,13 @@ def test_v2_readiness_uses_http_and_rejects_a_masked_catalog_failure(tmp_path, m
     monkeypatch.setattr(deployment, "compose", lambda release, *args, **kwargs: probes.append(args[-1]))
     deployment.check(release)
     monkeypatch.setenv("SEARCH_BACKEND", "postgres")
-    responses = iter([
-        {"name": "domofomka", "version": "2.0.0"},
-        {"status": "found", "engine": engine, "building_id": "gar:test"},
-        {"status": "found", "engine": "v2"},
-    ])
+    responses = iter(
+        [
+            {"name": "domofomka", "version": "2.0.0"},
+            {"status": "found", "engine": engine, "building_id": "gar:test"},
+            {"status": "found", "engine": "v2"},
+        ]
+    )
     requested = []
 
     class Connection:
@@ -426,8 +428,9 @@ def test_repeated_layout_maintenance_does_not_restart_apps(tmp_path, monkeypatch
     deployment.deploy(new)
 
 
-@pytest.mark.parametrize(("status", "reason", "fails"), [(200, "unavailable", True), (200, "not_found", False),
-                                                           (503, None, True)])
+@pytest.mark.parametrize(
+    ("status", "reason", "fails"), [(200, "unavailable", True), (200, "not_found", False), (503, None, True)]
+)
 def test_layout_acceptance_rejects_hidden_catalog_failure(tmp_path, monkeypatch, status, reason, fails):
     deployment, _, _, _ = prepare(tmp_path)
     body = {

@@ -86,7 +86,8 @@ class DadataClient:
             # circuit breaker at process level to avoid repeated long waits.
             retryable = not isinstance(exc, DadataUnavailable) or exc.retryable
             cooldown = (
-                network_settings.dadata_failure_cooldown_seconds if retryable
+                network_settings.dadata_failure_cooldown_seconds
+                if retryable
                 else network_settings.dadata_access_cooldown_seconds
             )
             type(self)._unavailable_until = time.monotonic() + cooldown

@@ -26,9 +26,7 @@ def has_misaligned_source_fields(row: dict) -> bool:
         not row["guid"]
         and not row.get("id", "").startswith("address:")
         and bool(
-            re.search(
-                r"\b(?:ул|улица|проспект|пр-кт|шоссе|бульвар|набережная|переулок|проезд)\b", row["city"], re.I
-            )
+            re.search(r"\b(?:ул|улица|проспект|пр-кт|шоссе|бульвар|набережная|переулок|проезд)\b", row["city"], re.I)
         )
     )
 
@@ -69,9 +67,7 @@ def complete_name_match(query: Query, row: dict, aliases: Iterable[dict] = ()) -
                 for word in text(street).split()
                 if word in LITERAL_NAME_NOISE and word not in {"им", "имени"}
             }
-            if not required or required <= {
-                street_kind(word) for word in text(query.search_text or query.raw).split()
-            }:
+            if not required or required <= {street_kind(word) for word in text(query.search_text or query.raw).split()}:
                 return True
     return False
 
@@ -162,6 +158,7 @@ def legacy_result_matches(message: str, address: str, *, whole_location: bool = 
         and building_kind_matches(query, row)
         and (not whole_location or whole_location_match(query, row["city"], row["street"]))
     )
+
 
 def legacy_source_matches(
     message: str, city: str, kind: str, street: str, house: str, *, whole_location: bool = False
