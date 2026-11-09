@@ -216,15 +216,17 @@ def profiles() -> list[dict]:
     coverage = values[-1]
     for policy in ("marked", "structured", "scoped"):
         values.append(dict(coverage, name=f"locality.{policy}-AUTO-r1.0", locality_policy=policy))
+    values.append(dict(coverage, name="locality.roles-AUTO-r1.0", city_roles=True))
+    values.append(dict(values[-1], name="locality.roles-sources-AUTO-r1.0", source_choices=True))
     return values
 
 
-def guard_street_roles(body, tokens):
+def guard_street_roles(body, tokens, street_tokens=None):
     """Покрытие всего запроса — фильтр; числовой номер не заменяет слово улицы."""
     alphabetic = [token for token in tokens if not token.isdigit()]
-    if not alphabetic:
+    if not alphabetic and street_tokens is None:
         return body
-    text = " ".join(alphabetic)
+    text = " ".join(alphabetic if street_tokens is None else street_tokens)
 
     def branch(value, nested=False):
         block = value["bool"]
@@ -234,9 +236,11 @@ def guard_street_roles(body, tokens):
             full_options["_name"] = "alias_exact" if nested else "exact"
         field, options = next(iter(street["match"].items()))
         options.update(query=text, analyzer="whitespace")
+        if street_tokens is not None:
+            options["minimum_should_match"] = "100%"
         block["filter"].append(full)
-        alternatives = [street]
-        if any(token.isdigit() for token in tokens):
+        alternatives = [{"match_none": {}}] if street_tokens == [] else [street]
+        if street_tokens is None and any(token.isdigit() for token in tokens):
             city = "aliases.words.plain" if nested else "city.plain"
             alternatives.append(
                 {"match": {city: {"query": text, "operator": "and", "fuzziness": 0, "analyzer": "whitespace"}}}

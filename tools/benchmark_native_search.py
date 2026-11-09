@@ -32,6 +32,7 @@ from src.search.engine import MAPPING, Catalog, documents, search_body
 from src.search.normalize import STOP, address_words, building_kind_matches, parse_query
 from tools import (
     evaluate_search as replay,
+    search_city_roles,
     search_lexical_profiles,
     search_locality_profiles,
 )
@@ -39,7 +40,7 @@ from tools.compare_postgres_catalog import select
 from tools.quality_suite import address_fields, literal_words
 
 
-def mapping(*, aliases=False, lexical=False, similarity=None, bm25_b=0.75):
+def mapping(*, aliases=False, lexical=False, similarity=None, bm25_b=0.75, city_roles=False):
     value = copy.deepcopy(MAPPING)
     if similarity not in {None, "BM25", "boolean"}:
         raise ValueError("Unknown lab similarity")
@@ -121,6 +122,10 @@ def mapping(*, aliases=False, lexical=False, similarity=None, bm25_b=0.75):
         }
     if lexical:
         search_lexical_profiles.extend_analysis(value)
+    if city_roles:
+        if not aliases or not lexical:
+            raise ValueError("City roles require the lexical alias schema")
+        search_city_roles.extend_mapping(value)
     return value
 
 
@@ -211,7 +216,7 @@ def query_text(message, variant):
     return query, lexical_text
 
 
-def native_body(message, variant, *, analyzed_tokens=None):
+def native_body(message, variant, *, analyzed_tokens=None, street_tokens=None):
     query, lexical_text = query_text(message, variant)
     match = {
         "query": lexical_text,
@@ -281,26 +286,46 @@ def native_body(message, variant, *, analyzed_tokens=None):
     if variant.get("role_policy"):
         if analyzed_tokens is None:
             raise ValueError("Street role policy needs analyzer tokens")
-        body = search_lexical_profiles.guard_street_roles(body, analyzed_tokens)
+        body = search_lexical_profiles.guard_street_roles(body, analyzed_tokens, street_tokens)
     return body
 
 
-def build_index(catalog, url, index, *, aliases=False, lexical=False, source_index=None, similarity=None, bm25_b=0.75):
+def build_index(
+    catalog,
+    url,
+    index,
+    *,
+    aliases=False,
+    lexical=False,
+    source_index=None,
+    similarity=None,
+    bm25_b=0.75,
+    city_roles=False,
+):
     if not index.startswith("domofomka-native-lab-"):
         raise ValueError("Only isolated experiment indexes are allowed")
     with httpx.Client(base_url=url, trust_env=False, timeout=120) as client:
         if client.head("/" + index).status_code != 404:
             raise FileExistsError("Preserve the previous experiment index")
-        index_mapping = mapping(aliases=aliases, lexical=lexical, similarity=similarity, bm25_b=bm25_b)
+        index_mapping = mapping(
+            aliases=aliases, lexical=lexical, similarity=similarity, bm25_b=bm25_b, city_roles=city_roles
+        )
         with catalog.open("rb") as stream:
             revision = hashlib.file_digest(stream, "sha256").hexdigest()
         index_mapping["mappings"]["_meta"] = {"catalog_sha256": revision, "aliases": aliases}
+        if city_roles:
+            index_mapping["mappings"]["_meta"]["city_roles"] = 1
         client.put("/" + index, json=index_mapping).raise_for_status()
         if aliases and not all(probe["passed"] for probe in analysis_probes(client, index)):
             raise ValueError("Analyzer probes failed before bulk indexing")
         if lexical and not all(probe["passed"] for probe in search_lexical_profiles.probes(client, index)):
             raise ValueError("Ordinal graph probes failed before bulk indexing")
         if source_index:
+            if city_roles:
+                facts = search_city_roles.clone_documents(
+                    client, source_index, index, index_mapping, index_mapping["mappings"]["_meta"]
+                )
+                return dict(facts, index=index, source_index=source_index)
             total = search_lexical_profiles.clone_documents(
                 client, source_index, index, index_mapping, index_mapping["mappings"]["_meta"]
             )
@@ -321,6 +346,8 @@ def build_index(catalog, url, index, *, aliases=False, lexical=False, source_ind
                             "street": row["street_key"],
                         }
                     )
+                    if city_roles:
+                        by_street[row["canonical_city"], row["canonical_street"]][-1]["city"] = row["city_key"]
 
         def flush():
             payload = "".join(
@@ -378,6 +405,8 @@ def native_result(
     require_exact=False,
     literal_coverage=False,
     locality_hint=None,
+    locality_places=None,
+    city_roles=False,
 ):
     query = parse_query(message)
     if not query.words and query.name_words:
@@ -409,7 +438,12 @@ def native_result(
         hit = hit_by_id.get(sid, {})
         alias_hits = hit.get("inner_hits", {}).get("aliases", {}).get("hits", {})
         matching = [a["_source"] for a in alias_hits.get("hits", []) if a["_source"]["building_id"] == row["id"]]
-        if not search_locality_profiles.locality_matches(locality_hint, row, matching):
+        match_locality = (
+            search_city_roles.role_locality_matches if city_roles else search_locality_profiles.locality_matches
+        )
+        if not match_locality(locality_hint, row, matching):
+            continue
+        if locality_places is not None and not any(match_locality(place, row, matching) for place in locality_places):
             continue
         if not name_constraints_match(query, row, [alias["street"] for alias in matching]):
             continue
@@ -553,7 +587,13 @@ def sample(corpus, reviewed, limit, full=False):
 def reviewed_conflict(case, result, catalog):
     if case.get("expected_status") and result["status"] != case["expected_status"]:
         return True
+    if case.get("allowed_statuses") and result["status"] not in case["allowed_statuses"]:
+        return True
     options = [result] if result["status"] in {"found", "no_codes"} else result.get("candidates", [])
+    if case.get("expected_building_id") and not any(
+        option.get("building_id") == case["expected_building_id"] for option in options
+    ):
+        return True
     for option in options:
         if option.get("building_id"):
             building = catalog.building(option["building_id"])
@@ -574,6 +614,10 @@ def reviewed_conflict(case, result, catalog):
             building["city"] + " " + building.get("lineage", "")
         ):
             return True
+        if case.get("forbidden_city") and literal_words(case["forbidden_city"]) <= literal_words(
+            building["city"] + " " + building.get("lineage", "")
+        ):
+            return True
         if (
             case.get("expected_street_type")
             and address_fields(option["address"])["kind"] != case["expected_street_type"]
@@ -582,7 +626,7 @@ def reviewed_conflict(case, result, catalog):
     return False
 
 
-def search_variant(catalog, message, variant, search, analyze=None):
+def search_variant(catalog, message, variant, search, analyze=None, city_query=None):
     parsed = parse_query(message)
     locality = (
         search_locality_profiles.locality_hint(
@@ -622,15 +666,34 @@ def search_variant(catalog, message, variant, search, analyze=None):
             "max_expansions": variant["expansions"],
             "clause_budget": variant["clause_budget"],
         }
+    places, locality_probe, city_confirmation, street_tokens = None, None, False, None
+    if variant.get("city_roles"):
+        field = search_city_roles.city_field(message, partial(search_locality_profiles.known_locality, catalog))
+        if field:
+            street_tokens = search_city_roles.street_terms(tokens, analyze(field, variant["analyzer"]))
+            if search_locality_profiles.known_locality(catalog, field):
+                locality = field
+            else:
+                if city_query is None:
+                    raise ValueError("City-role profile requires city aggregation")
+                places, truncated = search_city_roles.probe_places(city_query(search_city_roles.city_probe(field)))
+                city_confirmation = True
+                locality_probe = {"places": len(places), "truncated": truncated}
     body = (
-        search_body(message) if variant["mode"] == "hybrid" else native_body(message, variant, analyzed_tokens=tokens)
+        search_body(message)
+        if variant["mode"] == "hybrid"
+        else native_body(message, variant, analyzed_tokens=tokens, street_tokens=street_tokens)
     )
+    if places is not None:
+        body["query"]["bool"]["filter"].append(search_city_roles.city_filter(places))
     known = False
     literal_hits = False
     scoped = bool(variant.get("scoped_street_guard") and catalog.has_exact_location(parsed))
     if variant["mode"] in {"structured", "aliases", "lexical"}:
         exact_variant = dict(variant, fuzziness="0", minimum="100%")
-        exact_body = native_body(message, exact_variant, analyzed_tokens=tokens)
+        exact_body = native_body(message, exact_variant, analyzed_tokens=tokens, street_tokens=street_tokens)
+        if places is not None:
+            exact_body["query"]["bool"]["filter"].append(search_city_roles.city_filter(places))
         if guarded and variant.get("known_street_guard", True):
             probe = search_lexical_profiles.street_probe_body(copy.deepcopy(exact_body))
             known = search_lexical_profiles.known_street(search(probe), tokens)
@@ -664,6 +727,8 @@ def search_variant(catalog, message, variant, search, analyze=None):
         require_exact=known or scoped,
         literal_coverage=bool(variant.get("literal_coverage") and literal_hits),
         locality_hint=locality,
+        locality_places=places,
+        city_roles=bool(variant.get("city_roles")),
     )
     if guarded:
         result["query_budget"] = budget
@@ -676,6 +741,14 @@ def search_variant(catalog, message, variant, search, analyze=None):
     ):
         # Catalog applies the same exact-house, name and scoped-location checks.
         result = catalog.resolve(message)
+    if variant.get("source_choices") and result["status"] in {"found", "ambiguous"}:
+        result = search_city_roles.source_choices(result, catalog.resolve(message))
+    if variant.get("city_roles") and locality:
+        result = search_city_roles.constrain_result(result, catalog, {locality})
+    if city_confirmation:
+        result = search_city_roles.constrain_result(result, catalog, places)
+        result = search_city_roles.confirmation(result)
+        result["locality_probe"] = locality_probe
     return result
 
 
@@ -767,7 +840,11 @@ def run(args):
         engine_response.raise_for_status()
         engine_version = engine_response.json().get("version", {}).get("number")
         metadata = index_info.json()[args.index]["mappings"].get("_meta", {})
-        if args.stage in {"aliases", "lexical"} and metadata != {"catalog_sha256": catalog_revision, "aliases": True}:
+        expected_metadata = {"catalog_sha256": catalog_revision, "aliases": True}
+        if args.stage in {"aliases", "lexical"} and metadata not in [
+            expected_metadata,
+            dict(expected_metadata, city_roles=1),
+        ]:
             raise ValueError("Experiment index does not match the frozen catalog / alias schema")
         probes = analysis_probes(client, args.index) if args.stage in {"aliases", "lexical"} else []
         if args.stage == "lexical":
@@ -783,6 +860,10 @@ def run(args):
         variants = [variant for variant in variants if variant["name"] in chosen]
         if chosen != {variant["name"] for variant in variants}:
             raise ValueError("Unknown experiment variant")
+    elif metadata.get("city_roles") != 1:
+        variants = [variant for variant in variants if not variant.get("city_roles")]
+    if any(variant.get("city_roles") for variant in variants) and metadata.get("city_roles") != 1:
+        raise ValueError("City-role profile requires the city-role index schema")
     replay.initialize(str(args.legacy), str(args.catalog))
     catalog = Catalog(str(args.catalog))
     exact_catalog = search_lexical_profiles.ExactCatalog(str(args.catalog))
@@ -899,8 +980,13 @@ def run(args):
                     response.raise_for_status()
                     return response.json()["hits"]["hits"]
 
+                def city_query(body):
+                    response = local.client.post("/" + args.index + "/_search", json=body)
+                    response.raise_for_status()
+                    return response.json()
+
                 try:
-                    result = search_variant(catalog, case["query"], variant, search, analyze)
+                    result = search_variant(catalog, case["query"], variant, search, analyze, city_query)
                 except httpx.HTTPError as exc:
                     backend_error = {"type": type(exc).__name__}
                     if isinstance(exc, httpx.HTTPStatusError):
@@ -911,7 +997,12 @@ def run(args):
                             backend_error["response"] = exc.response.text[:2000]
                     result = {"status": "backend_error", "data": {}}
             recoverable = result["status"] == "incomplete_query" and bool(parse_query(case["query"]).house)
-            if (result["status"] == "not_found" or recoverable) and old and legacy_result_matches(case["query"], old):
+            if (
+                (result["status"] == "not_found" or recoverable)
+                and not result.get("locality_confirmation_required")
+                and old
+                and legacy_result_matches(case["query"], old)
+            ):
                 allowed = True
                 whole_location = False
                 if result.get("fallback_rejected") == "known_street_without_requested_house":
@@ -978,6 +1069,9 @@ def run(args):
                                     "fallback_code_scope",
                                     "clarification_reason",
                                     "query_budget",
+                                    "locality_confirmation_required",
+                                    "locality_probe",
+                                    "candidate_truncated",
                                 )
                                 if key in result
                             },
@@ -1078,6 +1172,7 @@ if __name__ == "__main__":
     p.add_argument("--workers", type=int, default=4)
     p.add_argument("--stage", choices=["initial", "structured", "aliases", "lexical"], default="initial")
     p.add_argument("--source-index")
+    p.add_argument("--city-roles", action="store_true")
     p.add_argument("--similarity", choices=["BM25", "boolean"])
     p.add_argument("--bm25-b", type=float, default=0.75)
     p.add_argument("--case-file", type=Path)
@@ -1099,6 +1194,7 @@ if __name__ == "__main__":
                     source_index=args.source_index,
                     similarity=args.similarity,
                     bm25_b=args.bm25_b,
+                    city_roles=args.city_roles,
                 )
             ),
             flush=True,
