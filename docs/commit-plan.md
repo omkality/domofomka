@@ -178,3 +178,8 @@ OpenSearch остаётся локальным инструментом срав
 отдельных исходных вариантов и расширенные проверки идентичности. Рабочий API не переключается.
 Файлы: `tools/search_city_roles.py`, `tools/search_lexical_profiles.py`,
 `tools/benchmark_native_search.py`, `tools/evaluate_search.py`, `tests/test_search_city_roles.py`.
+
+`4e2bd1f` — `fix(catalog): verify repeated source fields against exact GAR houses`.
+Восстановление повторённых города и типа улицы в исходном поле только с точным домом ГАР,
+проверкой каждой сырой строки и приоритетом буквального официального названия.
+Файлы: `tools/reconcile_source_fields.py`, `tests/test_source_field_alignment.py`.
