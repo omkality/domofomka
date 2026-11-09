@@ -172,3 +172,9 @@ OpenSearch остаётся локальным инструментом срав
 Файлы: `tools/search_locality_profiles.py`, `tools/search_lexical_profiles.py`,
 `tools/benchmark_native_search.py`, `tools/evaluate_search.py`,
 `tests/test_native_locality_profiles.py`.
+
+`36358d4` — `test(search): verify city spelling and preserve source choices`.
+Лабораторные поля города, исправление его опечаток с подтверждением, сохранение
+отдельных исходных вариантов и расширенные проверки идентичности. Рабочий API не переключается.
+Файлы: `tools/search_city_roles.py`, `tools/search_lexical_profiles.py`,
+`tools/benchmark_native_search.py`, `tools/evaluate_search.py`, `tests/test_search_city_roles.py`.

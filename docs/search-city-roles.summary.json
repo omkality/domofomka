@@ -1,0 +1,353 @@
+{
+  "cases": 48115,
+  "responses": 96230,
+  "cohorts": {
+    "historical": 44083,
+    "correction_hypothesis": 2528,
+    "reviewed": 563,
+    "observed_unanswered_locality": 941
+  },
+  "catalog_sha256": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+  "case_sha256": "6390035c3d6163593809c62492784ae6f1cc2fb4e59178b4157f3b08226c4c4a",
+  "baseline_previous_cases": 47857,
+  "baseline_changed_results": 0,
+  "groups": {
+    "observed_city_edit_hypotheses": {
+      "cases": 7,
+      "locality.roles-sources-AUTO-r1.0": {
+        "reference_retained": 7,
+        "statuses": {
+          "ambiguous": 3,
+          "found": 4
+        }
+      },
+      "locality.scoped-AUTO-r1.0": {
+        "reference_retained": 7,
+        "statuses": {
+          "found": 6,
+          "ambiguous": 1
+        }
+      }
+    },
+    "partial_source_names": {
+      "cases": 22,
+      "locality.roles-sources-AUTO-r1.0": {
+        "reference_retained": 22,
+        "statuses": {
+          "ambiguous": 22
+        }
+      },
+      "locality.scoped-AUTO-r1.0": {
+        "reference_retained": 22,
+        "statuses": {
+          "ambiguous": 4,
+          "found": 18
+        }
+      }
+    },
+    "synthetic_city_spelling": {
+      "cases": 228,
+      "locality.roles-sources-AUTO-r1.0": {
+        "reference_retained": 228,
+        "policy_conflicts": 0,
+        "statuses": {
+          "ambiguous": 228
+        }
+      },
+      "locality.scoped-AUTO-r1.0": {
+        "reference_retained": 225,
+        "policy_conflicts": 228,
+        "statuses": {
+          "found": 227,
+          "not_found": 1
+        }
+      },
+      "cities": 121
+    },
+    "wrong_locality_negatives": {
+      "cases": 4,
+      "locality.roles-sources-AUTO-r1.0": {
+        "reference_retained": 0,
+        "policy_conflicts": 0,
+        "statuses": {
+          "not_found": 4
+        }
+      },
+      "locality.scoped-AUTO-r1.0": {
+        "reference_retained": 0,
+        "policy_conflicts": 4,
+        "statuses": {
+          "no_codes": 4
+        }
+      }
+    },
+    "literal_building_compatibility": {
+      "cases": 8,
+      "locality.roles-sources-AUTO-r1.0": {
+        "reference_retained": 1,
+        "policy_conflicts": 0,
+        "statuses": {
+          "found": 1,
+          "no_codes": 7
+        }
+      },
+      "locality.scoped-AUTO-r1.0": {
+        "reference_retained": 1,
+        "policy_conflicts": 0,
+        "statuses": {
+          "found": 1,
+          "no_codes": 7
+        }
+      }
+    }
+  },
+  "transitions": {
+    "historical:found->found": 331,
+    "correction_hypothesis:found->found": 17,
+    "correction_hypothesis:found->ambiguous": 57,
+    "historical:found->ambiguous": 25,
+    "historical:ambiguous->ambiguous": 13,
+    "correction_hypothesis:not_found->not_found": 15,
+    "correction_hypothesis:no_codes->no_codes": 2,
+    "correction_hypothesis:no_codes->not_found": 1,
+    "correction_hypothesis:no_codes_ambiguous->no_codes_ambiguous": 1,
+    "reviewed:found->found": 3,
+    "reviewed:found->ambiguous": 1,
+    "observed_unanswered_locality:ambiguous->ambiguous": 3,
+    "observed_unanswered_locality:not_found->not_found": 9,
+    "observed_unanswered_locality:found->found": 3,
+    "observed_unanswered_locality:found->not_found": 1,
+    "observed_unanswered_locality:no_codes->no_codes": 2,
+    "observed_unanswered_locality:no_codes->not_found": 3
+  },
+  "reference_losses_by_cohort": {},
+  "reference_gains_by_cohort": {},
+  "full_comparison": {
+    "cases": 48115,
+    "responses": 96230,
+    "variants": 2,
+    "all_parts_verified": true,
+    "results": [
+      {
+        "variant": "locality.roles-sources-AUTO-r1.0",
+        "counts": {
+          "historical:total": 44083,
+          "historical:found": 41314,
+          "historical:reference_retained": 44002,
+          "historical:literal_conflict": 0,
+          "backend_errors": 0,
+          "correction_hypothesis:total": 2528,
+          "correction_hypothesis:found": 1502,
+          "correction_hypothesis:reference_retained": 1616,
+          "correction_hypothesis:literal_conflict": 0,
+          "historical:ambiguous": 2699,
+          "correction_hypothesis:not_found": 631,
+          "historical:no_codes": 20,
+          "correction_hypothesis:no_codes_ambiguous": 113,
+          "correction_hypothesis:no_codes": 108,
+          "historical:not_found": 19,
+          "correction_hypothesis:ambiguous": 165,
+          "historical:no_codes_ambiguous": 5,
+          "correction_hypothesis:incomplete_query": 9,
+          "historical:incomplete_query": 25,
+          "historical:invalid_query": 1,
+          "reviewed:total": 563,
+          "reviewed:found": 286,
+          "reviewed:reference_retained": 536,
+          "reviewed:literal_conflict": 0,
+          "reviewed:no_codes": 11,
+          "reviewed:ambiguous": 252,
+          "reviewed:not_found": 11,
+          "reviewed:no_codes_ambiguous": 2,
+          "observed_unanswered_locality:total": 941,
+          "observed_unanswered_locality:not_found": 260,
+          "observed_unanswered_locality:reference_retained": 5,
+          "observed_unanswered_locality:literal_conflict": 0,
+          "observed_unanswered_locality:found": 60,
+          "observed_unanswered_locality:no_codes": 460,
+          "observed_unanswered_locality:no_codes_ambiguous": 62,
+          "observed_unanswered_locality:incomplete_query": 85,
+          "observed_unanswered_locality:ambiguous": 13,
+          "observed_unanswered_locality:invalid_query": 1,
+          "reviewed:incomplete_query": 1
+        }
+      },
+      {
+        "variant": "locality.scoped-AUTO-r1.0",
+        "counts": {
+          "historical:total": 44083,
+          "historical:found": 41339,
+          "historical:reference_retained": 44002,
+          "historical:literal_conflict": 0,
+          "backend_errors": 0,
+          "correction_hypothesis:total": 2528,
+          "correction_hypothesis:found": 1559,
+          "correction_hypothesis:reference_retained": 1616,
+          "correction_hypothesis:literal_conflict": 0,
+          "historical:ambiguous": 2674,
+          "correction_hypothesis:not_found": 630,
+          "historical:no_codes": 20,
+          "correction_hypothesis:no_codes_ambiguous": 113,
+          "correction_hypothesis:no_codes": 109,
+          "historical:not_found": 19,
+          "historical:no_codes_ambiguous": 5,
+          "correction_hypothesis:ambiguous": 108,
+          "correction_hypothesis:incomplete_query": 9,
+          "historical:incomplete_query": 25,
+          "historical:invalid_query": 1,
+          "reviewed:total": 563,
+          "reviewed:found": 522,
+          "reviewed:reference_retained": 533,
+          "reviewed:literal_conflict": 240,
+          "reviewed:no_codes": 15,
+          "reviewed:ambiguous": 16,
+          "reviewed:not_found": 7,
+          "reviewed:no_codes_ambiguous": 2,
+          "observed_unanswered_locality:total": 941,
+          "observed_unanswered_locality:not_found": 256,
+          "observed_unanswered_locality:reference_retained": 5,
+          "observed_unanswered_locality:literal_conflict": 0,
+          "observed_unanswered_locality:found": 61,
+          "observed_unanswered_locality:no_codes": 463,
+          "observed_unanswered_locality:no_codes_ambiguous": 62,
+          "observed_unanswered_locality:incomplete_query": 85,
+          "observed_unanswered_locality:ambiguous": 13,
+          "observed_unanswered_locality:invalid_query": 1,
+          "reviewed:incomplete_query": 1
+        }
+      }
+    ]
+  },
+  "index": {
+    "engine_version": "3.3.2",
+    "source": "domofomka-native-lab-20261107-coded-b02",
+    "target": "domofomka-native-lab-20261109-city-roles-b02",
+    "preserved_core_documents": true,
+    "core_sha256": "f369a4956fccb1104d4ef419b65c49b417b927d2efd1a02f39085aaed4f4bc1f",
+    "stats": {
+      "domofomka-native-lab-20261107-coded-b02": {
+        "root_documents": 19300,
+        "documents_including_nested": 131176,
+        "store_bytes": 38918196
+      },
+      "domofomka-native-lab-20261109-city-roles-b02": {
+        "root_documents": 19300,
+        "documents_including_nested": 131176,
+        "store_bytes": 41327886
+      }
+    }
+  },
+  "result_sha256": "d18cd82094f17645f5c3bf0820c9b1532135f39e3e44c923367e5b3f53cd88f3",
+  "limitations": [
+    "Historical answer retention measures compatibility, not verified user intent.",
+    "Constructed cases were used during development; they are not a blind test.",
+    "The new city-role candidate is laboratory-only; no runtime activation."
+  ],
+  "code_coverage_vs_catalog": {
+    "catalog_sha256": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+    "legacy_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
+    "result_sha256": {
+      "full-validated": "e83b2a53f0cea3b47dab29f443552d93c3ac7f63fdb3a2315c150c95546c4730",
+      "roles-v3-validated": "d18cd82094f17645f5c3bf0820c9b1532135f39e3e44c923367e5b3f53cd88f3"
+    },
+    "auditor_sha256": "0b7ee7d5a3ba6065ae736acef2f2c163c8d79d7246f56cead83d2d5742859f2b",
+    "unique_queries": 41918,
+    "workers": 4,
+    "baseline_variant": "full-validated/catalog",
+    "elapsed_seconds": 49.485,
+    "results": {
+      "full-validated/catalog": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 0,
+        "baseline_code_gain_cases": 0,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43962,
+        "some_legacy_codes_missing": 7,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 5
+      },
+      "full-validated/locality.structured-AUTO-r1.0": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 49,
+        "baseline_code_gain_cases": 3,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43930,
+        "some_legacy_codes_missing": 39,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 37
+      },
+      "full-validated/verified.coverage-AUTO-r1.0": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 22,
+        "baseline_code_gain_cases": 3,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43962,
+        "some_legacy_codes_missing": 7,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 5
+      },
+      "roles-v3-validated/locality.roles-sources-AUTO-r1.0": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 1,
+        "baseline_code_gain_cases": 3,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43962,
+        "some_legacy_codes_missing": 7,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 5
+      },
+      "roles-v3-validated/locality.scoped-AUTO-r1.0": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 22,
+        "baseline_code_gain_cases": 3,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43962,
+        "some_legacy_codes_missing": 7,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 5
+      }
+    },
+    "interpretation": "Unique entrance/kind/code tuples; choice union counts as offered, not automatically sent. Old code coverage is compatibility evidence, not proof of correct user intent."
+  },
+  "local_tests": {
+    "passed": 772,
+    "skipped": 1,
+    "postgres": true,
+    "ruff": true
+  },
+  "code_coverage_vs_previous_native": {
+    "catalog_sha256": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+    "legacy_sha256": "939ddde2876df839a4acf24c6a5b09a98d2acdcdbaf5234308d93188263aa78f",
+    "result_sha256": {
+      "roles-v3-validated": "d18cd82094f17645f5c3bf0820c9b1532135f39e3e44c923367e5b3f53cd88f3"
+    },
+    "auditor_sha256": "0b7ee7d5a3ba6065ae736acef2f2c163c8d79d7246f56cead83d2d5742859f2b",
+    "unique_queries": 41918,
+    "workers": 4,
+    "baseline_variant": "roles-v3-validated/locality.scoped-AUTO-r1.0",
+    "elapsed_seconds": 49.296,
+    "results": {
+      "roles-v3-validated/locality.roles-sources-AUTO-r1.0": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 1,
+        "baseline_code_gain_cases": 22,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43962,
+        "some_legacy_codes_missing": 7,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 5
+      },
+      "roles-v3-validated/locality.scoped-AUTO-r1.0": {
+        "cases": 44083,
+        "baseline_code_loss_cases": 0,
+        "baseline_code_gain_cases": 0,
+        "legacy_has_codes": 43969,
+        "all_legacy_codes_offered": 43962,
+        "some_legacy_codes_missing": 7,
+        "code_difference_with_retained_reference": 2,
+        "missing_with_reference_rejected": 5
+      }
+    },
+    "interpretation": "Unique entrance/kind/code tuples; choice union counts as offered, not automatically sent. Old code coverage is compatibility evidence, not proof of correct user intent."
+  }
+}
