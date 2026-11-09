@@ -47,21 +47,25 @@ def lookup(query, version):
 
 
 def probe(service, variable, route, code):
-    # Переменная меняется только у отдельного процесса docker exec, не у runtime.
+    # None оставляет рабочую настройку; переопределение действует лишь у docker exec.
     start = time.monotonic()
     wrapped = (
-        "try:\n exec("
+        "import json\nfrom src.telemetry import Capture\nwith Capture() as capture:\n try:\n  exec("
         + repr(code)
-        + ")\nexcept Exception as error:\n print(type(error).__name__)\n raise SystemExit(1)"
+        + ")\n except Exception as error:\n  print(type(error).__name__)\n  raise SystemExit(1)\n"
+        "print(json.dumps({'attempts': [dict(stage=r['stage'], status=r['status'], "
+        "milliseconds=r['duration_ms'], **{k:v for k,v in r['attributes'].items() "
+        "if k in {'route','route_reason','attempt','http_status','operation'}}) "
+        "for r in capture.rows if r['kind']=='network']}))"
     )
     error_type = None
+    attempts = []
     try:
-        subprocess.run(
+        result = subprocess.run(
             [
                 "docker",
                 "exec",
-                "-e",
-                variable + "=" + route,
+                *(["-e", variable + "=" + route] if route is not None else []),
                 f"domofomka-dev-{service}-1",
                 "uv",
                 "run",
@@ -76,6 +80,7 @@ def probe(service, variable, route, code):
             stderr=subprocess.DEVNULL,
             text=True,
         )
+        attempts = json.loads(result.stdout.splitlines()[-1])["attempts"]
         outcome = "success"
     except subprocess.CalledProcessError as error:
         outcome = "failed"
@@ -83,7 +88,12 @@ def probe(service, variable, route, code):
     except subprocess.TimeoutExpired:
         outcome = "failed_or_timed_out"
         error_type = "TimeoutExpired"
-    return {"outcome": outcome, "error_type": error_type, "milliseconds": round((time.monotonic() - start) * 1000, 3)}
+    return {
+        "outcome": outcome,
+        "error_type": error_type,
+        "milliseconds": round((time.monotonic() - start) * 1000, 3),
+        "attempts": attempts,
+    }
 
 
 def main():
@@ -141,7 +151,11 @@ def main():
     )
     routes = {}
     for service, variable, code in [("api", "DADATA_PROXY_URL", dadata), ("vkbot", "VK_PROXY_URL", vk)]:
-        for label, value in [("direct", ""), ("unreachable_proxy_then_direct", "http://127.0.0.1:9")]:
+        for label, value in [
+            ("configured", None),
+            ("direct", ""),
+            ("unreachable_proxy_then_direct", "http://127.0.0.1:9"),
+        ]:
             routes[service + ":" + label] = probe(service, variable, value, code)
     after = inspect()
     assert before == after
