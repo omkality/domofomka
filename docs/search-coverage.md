@@ -63,7 +63,7 @@ Native сохранил 65 из 65 таких подсказок, прежняя
 
 ## Проверка самих кодов
 
-`tools/audit_search_code_coverage.py` сравнивает фактические коды v1 с кодами сохранённых результатов.
+`tools/evaluation/audit_search_code_coverage.py` сравнивает фактические коды v1 с кодами сохранённых результатов.
 Используется настоящий индекс совместимости, а не первый адрес облегчённого воспроизведения.
 Единица — уникальный кортеж «подъезд, источник, код». Для меню учитывается объединение доступных
 через отдельные кнопки наборов; это не означает автоматическую отправку или идентичность домов.
@@ -88,7 +88,7 @@ v1 добавлял к запросу 13-й улицы и дома 4 коды 3-
 Локальный запуск без VK:
 
 ```powershell
-python -m tools.audit_search_code_coverage `
+python -m tools.evaluation.audit_search_code_coverage `
   --results artifacts/private/<run> `
   --catalog artifacts/search/<frozen-catalog.db> `
   --output artifacts/private/<new-code-audit> --workers 8

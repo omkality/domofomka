@@ -114,8 +114,8 @@ HTTP-отказов нет. В таблице ниже для native выбра�
 не заменяет устранение ошибки. Рабочий OpenSearch на маленьких VDS не устанавливается ради этой матрицы.
 
 Сырые запросы, пояснения оценок и построчные ответы хранятся только в игнорируемой `artifacts/private`.
-Источник профилей — `tools/search_lexical_profiles.py`, построитель и фиксация similarity —
-`tools/benchmark_native_search.py`, оценка ограничений — `tools/review_search_differences.py`.
+Источник профилей — `tools/experiments/search_lexical_profiles.py`, построитель и фиксация similarity —
+`tools/experiments/benchmark_native_search.py`, оценка ограничений — `tools/evaluation/review_search_differences.py`.
 
 [Агрегаты матрицы](search-scoring-summary.json) не содержат переписок и кодов домофонов.
 

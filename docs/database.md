@@ -125,7 +125,7 @@ API создаёт устойчивый ключ `address:...`, не выдум�
 - GIN по `to_tsvector('simple', words)` в `streets` и `alias_search`;
 - отдельный частичный GIN для `streets WHERE has_codes=1` — быстрый первый поиск по адресам с кодами.
 
-DDL и загрузка находятся в [`tools/build_postgres_catalog.py`](../tools/build_postgres_catalog.py).
+DDL и загрузка находятся в [`tools/catalog/build_postgres_catalog.py`](../tools/catalog/build_postgres_catalog.py).
 При загрузке одинаковые названия улиц располагаются рядом: это уменьшает чтение страниц
 для широкого запроса без изменения ранжирования. Для существующего dev предусмотрено
 [однократное обслуживание через Actions](catalog-street-layout.md), без новой постоянной таблицы или индекса.

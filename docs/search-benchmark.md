@@ -45,13 +45,13 @@
 
 ## Где посмотреть настройки и повторить
 
-- `src/search/engine.py`: `MAPPING` задаёт анализатор и поля; `search_body` строит запрос.
+- `src/code_service/v2/engine.py`: `MAPPING` задаёт анализатор и поля; `search_body` строит запрос.
 - `.env`: `OPENSEARCH_FUZZINESS`, `OPENSEARCH_PREFIX_LENGTH`, `SEARCH_CANDIDATE_LIMIT` управляют запросом API.
   После изменения нужен перезапуск API. Порог сходства и допустимая разница оценок задаются отдельно.
-- `tools/benchmark_search.py`: фиксированная матрица, детерминированная выборка и проверка неизменности исходников между прогонами.
+- `tools/evaluation/benchmark_search.py`: фиксированная матрица, детерминированная выборка и проверка неизменности исходников между прогонами.
 
 ```bash
-python -m tools.benchmark_search --workers 6
+python -m tools.evaluation.benchmark_search --workers 6
 ```
 
 Нужны закрытый корпус `artifacts/private/audit`, каталог, исходная `codes.db` и работающий локальный OpenSearch.

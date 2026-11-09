@@ -81,7 +81,7 @@ native OpenSearch остаётся локальным кандидатом.
 это не автоматическая отправка всех этих кодов пользователю.
 
 ```powershell
-python -m tools.audit_search_code_coverage `
+python -m tools.evaluation.audit_search_code_coverage `
   --results artifacts/private/before artifacts/private/after `
   --baseline before/catalog `
   --catalog artifacts/search/frozen-serving.db `

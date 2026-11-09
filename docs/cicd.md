@@ -112,9 +112,9 @@ GHCR использует краткоживущий `GITHUB_TOKEN`: он пер
 
 ## Обратимое обновление каталога dev
 
-Полные копии ГАР не передаются на VDS. `tools/reconcile_street_order.py` и
-`tools/reconcile_source_syntax.py` строят отдельных локальных кандидатов,
-а `tools/build_catalog_patch.py` — закрытый сжатый патч с прежними и новыми
+Полные копии ГАР не передаются на VDS. `tools/catalog/reconcile_street_order.py` и
+`tools/catalog/reconcile_source_syntax.py` строят отдельных локальных кандидатов,
+а `tools/catalog/build_catalog_patch.py` — закрытый сжатый патч с прежними и новыми
 строками. Патч содержит коды и хранится вне Git; в образ входит только манифест с SHA-256,
 ревизиями и размерами. Артефакт заранее помещается в закрытый каталог сервера.
 

@@ -97,9 +97,9 @@ VK и DaData в этой проверке не вызываются. PostgreSQL 
 агрегаты и контрольные суммы. Каталог: `9d79c9fe…c8ec0a`.
 
 ```powershell
-python -m tools.audit_query_localities --output artifacts/private/locality-audit-new
-python -m tools.build_locality_cohort --audit artifacts/private/locality-audit-new --frozen artifacts/private/prefix-performance-20261107/full-architecture-core --output artifacts/private/locality-cohort-new
-python -m tools.benchmark_native_search run --catalog artifacts/search/serving.source-fields-final.db --stage lexical --index domofomka-native-lab-20261107-coded-b02 --variants catalog,verified.coverage-AUTO-r1.0 --case-file artifacts/private/locality-cohort-new/cases.jsonl --output artifacts/private/locality-cohort-new/replay --details --workers 4
+python -m tools.history.audit_query_localities --output artifacts/private/locality-audit-new
+python -m tools.history.build_locality_cohort --audit artifacts/private/locality-audit-new --frozen artifacts/private/prefix-performance-20261107/full-architecture-core --output artifacts/private/locality-cohort-new
+python -m tools.experiments.benchmark_native_search run --catalog artifacts/search/serving.source-fields-final.db --stage lexical --index domofomka-native-lab-20261107-coded-b02 --variants catalog,verified.coverage-AUTO-r1.0 --case-file artifacts/private/locality-cohort-new/cases.jsonl --output artifacts/private/locality-cohort-new/replay --details --workers 4
 ```
 
 [Продолжение эксперимента](search-locality-guard.md) сравнивает варианты защиты

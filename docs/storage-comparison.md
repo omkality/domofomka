@@ -75,13 +75,13 @@ inbox/outbox с включённой диагностикой. Внешние AP
 
 ## Воспроизведение
 
-Инструменты `tools/postgres_catalog_experiment.py`, `tools/postgres_search_experiment.py`
-и `tools/compare_postgres_catalog.py` не подключены к рабочему API.
+Инструменты `tools/experiments/postgres_catalog_experiment.py`, `tools/experiments/postgres_search_experiment.py`
+и `tools/evaluation/compare_postgres_catalog.py` не подключены к рабочему API.
 Загрузчик допускает только локальную БД с именем, начинающимся на `domofomka_catalog_bench`,
 через `CATALOG_BENCHMARK_DSN` и отказывается перезаписывать уже загруженные данные.
 
-Для загрузки используется `python -m tools.postgres_catalog_experiment`.
-Для полного сравнения — `python -m tools.compare_postgres_catalog --limit 0 --output <новая-папка>`.
+Для загрузки используется `python -m tools.experiments.postgres_catalog_experiment`.
+Для полного сравнения — `python -m tools.evaluation.compare_postgres_catalog --limit 0 --output <новая-папка>`.
 Пути к каталогу, исходной базе, индексу v1 и закрытому корпусу задаются аргументами этих инструментов.
 Выгрузки сообщений и подробные ответы остаются в игнорируемой папке `artifacts/private`.
 Отпечаток полного корпуса сравнения:
