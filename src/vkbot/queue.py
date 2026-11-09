@@ -346,6 +346,10 @@ class QueueStore:
             target = "building:" + str(int(action["select_building"]))
         elif action.get("dismiss_choices") is True:
             target = "dismiss"
+        elif action.get("return_to_choices") is True:
+            target = "return_to_choices"
+        elif "entrance_page" in action:
+            target = "entrances:" + str(int(action["entrance_page"]))
         else:
             target = "page:" + str(int(action["choice_page"]))
         signature = f"{int(obj['conversation_message_id'])}:{target}"
@@ -628,6 +632,11 @@ class QueueStore:
             self._owned(conn, "bot_outbox", job)
             if context:
                 cmid, result = context
+                if result.get("_reopen_choices") is True:
+                    result = dict(result)
+                    result.pop("_reopen_choices")
+                    if result.get("status") == "ambiguous" and result.get("candidates"):
+                        self._state(conn, f"choices_closed:{job['peer_id']}:{cmid}", False)
                 conn.execute(
                     """INSERT INTO bot_message_context(group_id,peer_id,conversation_message_id,result,updated_at)
                     VALUES (%s,%s,%s,%s,%s)

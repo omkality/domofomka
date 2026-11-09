@@ -465,8 +465,10 @@ def test_ambiguous_choice_edits_the_same_message(processor: Processor, entrance_
         for row in json.loads(effect["params"]["keyboard"])["buttons"]
         for button in row
     }
-    assert labels == {str(i) for i in range(1, entrance_count + 1)}
-    assert all(effect["method"] == "send" for effect in effects[1:])
+    assert labels >= {str(i) for i in range(1, min(entrance_count, 7) + 1)}
+    assert "Назад к адресам" in labels
+    assert ("Следующие подъезды" in labels) is (entrance_count > 7)
+    assert len(effects) == 1
 
 
 def test_address_choices_can_be_paged_without_repeating_lookup(processor: Processor) -> None:

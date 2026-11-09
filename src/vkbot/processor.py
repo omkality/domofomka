@@ -13,8 +13,18 @@ from vk_api import VkApi
 from src.infrastructure.network import network_settings, tls_context
 from src.infrastructure.telemetry import active, measured, merge, note, search_result, span
 from src.vkbot.http import TimeoutSession
-from src.vkbot.keyboard import INLINE_BUTTON_LIMIT, build_many_buttons, get_location_keyboard, serialize_inline_keyboard
+from src.vkbot.keyboard import (
+    INLINE_BUTTON_LIMIT,
+    build_many_buttons,
+    callback_button,
+    get_location_keyboard,
+    serialize_inline_keyboard,
+)
 from src.vkbot.queue import QueueStore
+
+ADDRESS_PAGE_SIZE = 5
+# Reserve previous/next page and return-to-addresses buttons within the same budget.
+SELECTED_ENTRANCES_PER_PAGE = INLINE_BUTTON_LIMIT - 3
 
 
 class RateGate:
@@ -62,31 +72,45 @@ def code_answer(result: dict, entrance: str) -> str:
 
 def address_choices(result: dict, page: int = 0) -> tuple[str, str]:
     choices = result["candidates"]
-    size = 5
+    size = ADDRESS_PAGE_SIZE
     start = page * size
     if page < 0 or start >= len(choices):
         raise ValueError("Invalid address page")
     subset = choices[start : start + size]
-    labels = [c["address"] + (" (" + c["locality_context"] + ")" if c.get("locality_context") else "") for c in subset]
+    labels = [c["address"] for c in subset]
     message = "Уточните адрес:\n" + "\n".join(f"{start + i + 1}. {label}" for i, label in enumerate(labels))
     message += "\nЕсли нужного варианта нет, пришлите адрес целиком одним сообщением: город, улицу и номер дома."
 
-    def button(label: str, payload: dict) -> dict:
-        return {
-            "action": {"type": "callback", "label": label, "payload": json.dumps(payload)},
-            "color": "secondary",
-        }
-
-    rows = [[button(str(start + i + 1), {"select_building": start + i}) for i in range(len(subset))]]
+    rows = [[callback_button(str(start + i + 1), {"select_building": start + i}) for i in range(len(subset))]]
     navigation = []
     if page > 0:
-        navigation.append(button("Назад", {"choice_page": page - 1}))
+        navigation.append(callback_button("Назад", {"choice_page": page - 1}))
     if start + size < len(choices):
-        navigation.append(button("Далее", {"choice_page": page + 1}))
+        navigation.append(callback_button("Далее", {"choice_page": page + 1}))
     if navigation:
         rows.append(navigation)
-    rows.append([button("Ни один не подходит", {"dismiss_choices": True})])
+    rows.append([callback_button("Ни один не подходит", {"dismiss_choices": True})])
     return message, serialize_inline_keyboard(rows)
+
+
+def selected_keyboard(result: dict) -> str:
+    """Подъезды выбранного адреса и возврат к сохранённому списку в одном сообщении."""
+    entrances = list(result.get("data", {}))
+    page = result["_address_choice"].get("entrance_page", 0)
+    start = page * SELECTED_ENTRANCES_PER_PAGE
+    if page < 0 or (start >= len(entrances) and (page or entrances)):
+        raise ValueError("Invalid entrance page")
+    subset = entrances[start : start + SELECTED_ENTRANCES_PER_PAGE]
+    rows = build_many_buttons(subset) if subset else []
+    navigation = []
+    if page:
+        navigation.append(callback_button("Предыдущие подъезды", {"entrance_page": page - 1}))
+    if start + SELECTED_ENTRANCES_PER_PAGE < len(entrances):
+        navigation.append(callback_button("Следующие подъезды", {"entrance_page": page + 1}))
+    if navigation:
+        rows.append(navigation)
+    rows.append([callback_button("Назад к адресам", {"return_to_choices": True})])
+    return serialize_inline_keyboard(rows)
 
 
 class LookupUnavailable(RuntimeError):
@@ -330,17 +354,19 @@ class Processor:
             note(context_hit=True, result=search_result(result))
         if result and result.get("_request_id"):
             note(parent_request_id=result["_request_id"])
+        actions = {
+            "dismiss_choices": "dismiss",
+            "select_building": "select_building",
+            "choice_page": "page",
+            "return_to_choices": "return_to_choices",
+            "entrance_page": "entrance_page",
+        }
+        action = next((name for key, name in actions.items() if key in payload), "entrance")
         note(
-            callback_action="dismiss"
-            if payload.get("dismiss_choices")
-            else "select_building"
-            if "select_building" in payload
-            else "page"
-            if "choice_page" in payload
-            else "entrance",
+            callback_action=action,
             selected_entrance=str(payload.get("entrance", ""))[:40],
         )
-        choice_action = any(key in payload for key in ("dismiss_choices", "select_building", "choice_page"))
+        choice_action = action != "entrance"
         if choice_action and result is None:
             note(decision="choices_expired")
             self.store.plan(
@@ -359,6 +385,36 @@ class Processor:
                         },
                         "context": {"status": "dismissed", "data": {}},
                         "close_choices": True,
+                    }
+                ],
+            )
+            return
+        if payload.get("return_to_choices") is True or "entrance_page" in payload:
+            navigation = result.get("_address_choice") if result else None
+            if not navigation or result.get("status") == "dismissed":
+                self.store.plan(job, [])
+                return
+            if payload.get("return_to_choices") is True:
+                note(decision="return_to_address_choices")
+                message, keyboard = address_choices(navigation["result"], navigation["page"])
+                # Reopen only when VK confirms this edit; the flag travels with the durable outbox.
+                context = dict(navigation["result"], _reopen_choices=True)
+            else:
+                note(decision="entrances_page")
+                context = dict(result, _address_choice=dict(navigation, entrance_page=int(payload["entrance_page"])))
+                message, keyboard = context["address"], selected_keyboard(context)
+            self.store.plan(
+                job,
+                [
+                    {
+                        "method": "edit",
+                        "params": {
+                            "peer_id": peer,
+                            "conversation_message_id": cmid,
+                            "message": message,
+                            "keyboard": keyboard,
+                        },
+                        "context": context,
                     }
                 ],
             )
@@ -421,12 +477,18 @@ class Processor:
             if not result or not 0 <= index < len(result.get("candidates", [])):
                 raise ValueError("Selection is not part of the saved search result")
             building = result["candidates"][index]["building_id"]
+            navigation = {
+                "result": dict(result, status="ambiguous"),
+                "page": index // ADDRESS_PAGE_SIZE,
+                "entrance_page": 0,
+            }
             note(selected_building_id=building, selected_candidate_index=index)
             base_url = f"http://{self.settings.domofomka_api_host}:{self.settings.domofomka_api_port}"
             url = base_url + "/api/v2/buildings/" + quote(building, safe="")
             with span("api.building_lookup"):
                 response = self._get(url, {"observe": "true"} if active() else None)
             if response.status_code == 404:
+                context = {"status": "not_found", "data": {}, "_address_choice": navigation}
                 self.store.plan(
                     job,
                     [
@@ -435,9 +497,13 @@ class Processor:
                             "params": {
                                 "peer_id": peer,
                                 "conversation_message_id": cmid,
-                                "message": "Адрес в базе обновился. Пришлите его заново.",
-                                "keyboard": json.dumps({"inline": True, "buttons": []}),
+                                "message": (
+                                    "Этот адрес больше недоступен. Вернитесь к списку и выберите другой вариант."
+                                ),
+                                "keyboard": selected_keyboard(context),
                             },
+                            "context": context,
+                            "close_choices": True,
                         }
                     ],
                 )
@@ -445,6 +511,7 @@ class Processor:
             if response.status_code != 200:
                 raise LookupUnavailable("Building lookup unavailable")
             answer = response.json()
+            answer = dict(answer, _address_choice=navigation)
             if active():
                 packet = answer.pop("_diagnostics", None)
                 if packet:
@@ -456,11 +523,7 @@ class Processor:
                 from src.vkbot.telemetry import identity
 
                 answer = dict(answer, _request_id=identity(self.store.group_id, job["id"]))
-            keyboard = (
-                inline_keyboard(list(answer["data"])[:INLINE_BUTTON_LIMIT])
-                if answer.get("data")
-                else json.dumps({"inline": True, "buttons": []})
-            )
+            keyboard = selected_keyboard(answer)
             message = (
                 answer["address"]
                 if answer.get("data")
@@ -479,19 +542,6 @@ class Processor:
                     "close_choices": True,
                 }
             ]
-            entrances = list(answer.get("data", {}))
-            for offset in range(INLINE_BUTTON_LIMIT, len(entrances), INLINE_BUTTON_LIMIT):
-                effects.append(
-                    {
-                        "method": "send",
-                        "params": {
-                            "peer_id": peer,
-                            "message": answer["address"],
-                            "keyboard": inline_keyboard(entrances[offset : offset + INLINE_BUTTON_LIMIT]),
-                        },
-                        "context": answer,
-                    }
-                )
             self.store.plan(job, effects)
             return
         if result is None:
@@ -511,7 +561,7 @@ class Processor:
                 "peer_id": peer,
                 "conversation_message_id": cmid,
                 "message": code_answer(result, entrance),
-                "keyboard": inline_keyboard(subset),
+                "keyboard": selected_keyboard(result) if result.get("_address_choice") else inline_keyboard(subset),
             },
             "context": result,
         }

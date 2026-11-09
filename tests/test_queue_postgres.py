@@ -507,6 +507,73 @@ def test_late_page_cannot_restore_a_rejected_menu_before_delivery(store):
     processor._get.assert_not_called()
 
 
+def test_back_reopens_choices_only_after_confirmed_edit_and_survives_retry(store):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from src.vkbot.processor import Processor, address_choices
+
+    choices = {
+        "status": "ambiguous",
+        "candidates": [{"building_id": str(i), "address": f"Город {i}, дом 18"} for i in range(8)],
+    }
+    store.ingest([record(store)])
+    store.plan(store.claim("bot_inbox"), [{"method": "send", "params": {}, "context": choices}])
+    store.finish(store.claim("bot_outbox"), (42, choices))
+    processor = object.__new__(Processor)
+    processor.store = store
+    processor.settings = SimpleNamespace(domofomka_api_host="api", domofomka_api_port=8000, dev_faults_enabled=False)
+    processor.vk = MagicMock()
+    processor._get = MagicMock()
+    processor._get.return_value.status_code = 200
+    processor._get.return_value.json.return_value = {"address": "Город 6, дом 18", "data": {"1": [["TEST", "test"]]}}
+
+    def plan(action, name):
+        item = click(store, name, cmid=42)
+        item["payload"]["payload"] = action
+        store.ingest([item], callback_window=0)
+        processor.plan(store.claim("bot_inbox"))
+        return store.claim("bot_outbox")
+
+    selected = plan({"select_building": 6}, "select-six")
+    processor.deliver(selected)
+    assert store.choices_closed(10, 42)
+    assert store.message_context(10, 42)["address"] == "Город 6, дом 18"
+    back = plan({"return_to_choices": True}, "back")
+    assert back["params"]["message"] == address_choices(choices, 1)[0]
+    assert store.choices_closed(10, 42)
+    processor.vk.messages.edit.side_effect = [TimeoutError(), 1]
+    with pytest.raises(TimeoutError):
+        processor.deliver(back)
+    store.fail("bot_outbox", back, "timeout", delay=0)
+    recreated = QueueStore(store.dsn, store.group_id, lease_seconds=3)
+    processor.store = recreated
+    assert recreated.choices_closed(10, 42)
+    assert "_address_choice" in recreated.message_context(10, 42)
+    retry = recreated.claim("bot_outbox")
+    assert retry["params"] == back["params"]
+    processor.deliver(retry)
+    assert recreated.message_context(10, 42) == choices
+    assert recreated.choices_closed(10, 42) is False
+    assert processor._get.call_count == 1
+    processor.vk.messages.edit.side_effect = None
+    plan({"select_building": 3}, "select-three")
+    assert processor._get.call_args.args[0].endswith("/api/v2/buildings/3")
+
+
+@pytest.mark.parametrize("action", [{"return_to_choices": True}, {"entrance_page": 1}])
+def test_new_navigation_callbacks_share_existing_cooldown(store, action):
+    records = []
+    for i in range(3):
+        item = click(store, f"navigation-{i}")
+        item["payload"]["payload"] = action
+        records.append(item)
+    store.ingest(records)
+    assert store.claim("bot_inbox") is not None
+    assert store.claim("bot_inbox") is None
+    assert store.callback_feedback("callback:10:navigation-1")["throttled"]
+
+
 def test_cooldown_starts_after_delivery_not_before_a_slow_request(store):
     from unittest.mock import patch
 

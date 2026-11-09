@@ -6,6 +6,13 @@ INLINE_BUTTON_LIMIT = 10
 BUTTONS_PER_ROW = 5
 
 
+def callback_button(label: str, payload: dict) -> dict:
+    return {
+        "action": {"type": "callback", "label": label, "payload": json.dumps(payload)},
+        "color": "secondary",
+    }
+
+
 def serialize_inline_keyboard(rows: list[list[dict]]) -> str:
     if sum(len(row) for row in rows) > INLINE_BUTTON_LIMIT or any(
         not row or len(row) > BUTTONS_PER_ROW for row in rows
