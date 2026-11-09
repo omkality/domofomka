@@ -339,6 +339,36 @@ def test_callback_feedback_only_shows_text_when_needed(
         assert json.loads(params["event_data"])["text"] == text
 
 
+@pytest.mark.parametrize("error_code", [6, 9, 29])
+def test_vk_limit_on_callback_ack_pauses_all_requests_without_immediate_retry(settings, monkeypatch, error_code):
+    class Limited(Exception):
+        code = error_code
+
+    settings.vk_error_pause_seconds = 30
+    runtime = object.__new__(Runtime)
+    runtime.settings = settings
+    runtime.gate = RateGate(0)
+    runtime.store = MagicMock()
+    runtime.store.get_state.return_value = 0
+    runtime.store.callback_feedback.return_value = {"feedback": "silent"}
+    client = MagicMock()
+    client.get_api.return_value.messages.sendMessageEventAnswer.side_effect = Limited()
+    monkeypatch.setattr("src.vkbot.runtime.VkApi", MagicMock(return_value=client))
+    monkeypatch.setattr("src.vkbot.runtime.time.time", lambda: 100)
+    runtime._acknowledge(
+        [
+            {
+                "kind": "message_event",
+                "event_key": "callback:100:" + event,
+                "payload": {"event_id": event, "user_id": 100, "peer_id": 100},
+            }
+            for event in ["a", "b"]
+        ]
+    )
+    client.get_api.return_value.messages.sendMessageEventAnswer.assert_called_once()
+    runtime.store.set_state.assert_called_once_with("vk_paused_until", 130)
+
+
 def test_callback_feedback_rate_limit_does_not_call_vk(
     settings: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:

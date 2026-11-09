@@ -43,7 +43,7 @@ class Runtime:
             settings.queue_lease_seconds,
             telemetry=telemetry_settings.telemetry_enabled,
             max_pending_messages_per_peer=getattr(settings, "queue_max_pending_messages_per_peer", 3),
-            reply_interval_seconds=getattr(settings, "outbox_peer_min_interval_seconds", 5),
+            reply_interval_seconds=getattr(settings, "outbox_peer_min_interval_seconds", 2),
             message_rate_interval_seconds=getattr(settings, "message_rate_interval_seconds", 5),
             message_rate_burst=getattr(settings, "message_rate_burst", 2),
             hint_interval_seconds=getattr(settings, "message_hint_interval_seconds", 15),
