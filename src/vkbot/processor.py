@@ -70,6 +70,15 @@ def code_answer(result: dict, entrance: str) -> str:
     return f"{result['address']}\nПодъезд {entrance}\n" + "\n".join(lines)
 
 
+def building_answer(result: dict) -> str:
+    data = result.get("data", {})
+    if len(data) == 1:
+        return code_answer(result, next(iter(data)))
+    if not data:
+        return result["address"] + "\nПо этому адресу кодов в нашей базе пока нет."
+    return result["address"]
+
+
 def address_choices(result: dict, page: int = 0) -> tuple[str, str]:
     choices = result["candidates"]
     size = ADDRESS_PAGE_SIZE
@@ -100,7 +109,7 @@ def selected_keyboard(result: dict) -> str:
     start = page * SELECTED_ENTRANCES_PER_PAGE
     if page < 0 or (start >= len(entrances) and (page or entrances)):
         raise ValueError("Invalid entrance page")
-    subset = entrances[start : start + SELECTED_ENTRANCES_PER_PAGE]
+    subset = entrances[start : start + SELECTED_ENTRANCES_PER_PAGE] if len(entrances) > 1 else []
     rows = build_many_buttons(subset) if subset else []
     navigation = []
     if page:
@@ -337,8 +346,13 @@ class Processor:
                     effects.append(
                         {
                             "method": "send",
-                            "params": dict(base, message=result["address"], keyboard=inline_keyboard(subset)),
-                            "context": result,
+                            "params": dict(
+                                base,
+                                message=building_answer(result),
+                                keyboard=inline_keyboard(subset if len(entrances) > 1 else []),
+                            ),
+                            "context": result if len(entrances) > 1 else None,
+                            "automatic_code": len(entrances) == 1,
                         }
                     )
         self.store.plan(job, effects)
@@ -404,7 +418,7 @@ class Processor:
             else:
                 note(decision="entrances_page")
                 context = dict(result, _address_choice=dict(navigation, entrance_page=int(payload["entrance_page"])))
-                message, keyboard = context["address"], selected_keyboard(context)
+                message, keyboard = building_answer(context), selected_keyboard(context)
             self.store.plan(
                 job,
                 [
@@ -526,11 +540,7 @@ class Processor:
 
                 answer = dict(answer, _request_id=identity(self.store.group_id, job["id"]))
             keyboard = selected_keyboard(answer)
-            message = (
-                answer["address"]
-                if answer.get("data")
-                else answer["address"] + "\nПо этому адресу кодов в нашей базе пока нет."
-            )
+            message = building_answer(answer)
             effects = [
                 {
                     "method": "edit",
@@ -542,6 +552,7 @@ class Processor:
                     },
                     "context": answer,
                     "close_choices": True,
+                    "automatic_code": len(answer.get("data", {})) == 1,
                 }
             ]
             self.store.plan(job, effects)
@@ -563,7 +574,11 @@ class Processor:
                 "peer_id": peer,
                 "conversation_message_id": cmid,
                 "message": code_answer(result, entrance),
-                "keyboard": selected_keyboard(result) if result.get("_address_choice") else inline_keyboard(subset),
+                "keyboard": (
+                    selected_keyboard(result)
+                    if result.get("_address_choice")
+                    else inline_keyboard(subset if len(result["data"]) > 1 else [])
+                ),
             },
             "context": result,
         }

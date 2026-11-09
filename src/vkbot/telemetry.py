@@ -203,6 +203,7 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
         "queue_disposition": disposition,
         "message_rate_delayed": bool(row["payload"].get("_message_rate_delayed")),
         "hint_suppressed": bool(row["payload"].get("_hint_suppressed")),
+        "automatic_code": bool(row["payload"].get("_automatic_code")),
         "inbox_status": row["status"],
         "last_error": row["last_error"],
         "outbox_total": len(effects),
@@ -221,7 +222,7 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
                 "status": e["status"],
                 "role": (
                     "code"
-                    if "entrance" in action
+                    if "entrance" in action or row["payload"].get("_automatic_code")
                     else (
                         "address_choices"
                         if e["result_status"] == "ambiguous"

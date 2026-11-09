@@ -614,6 +614,11 @@ class QueueStore:
             self._owned(conn, "bot_inbox", job)
             if job["kind"] == "geo_retry" and self._geo_superseded(conn, job["peer_id"], job["payload"]):
                 effects = []
+            if any(effect.get("automatic_code") for effect in effects):
+                conn.execute(
+                    "UPDATE bot_inbox SET payload=jsonb_set(payload,'{_automatic_code}','true') WHERE id=%s",
+                    (job["id"],),
+                )
             for index, effect in enumerate(effects):
                 if effect.get("hint") and self.hint_interval_seconds and not self._allow_hint(conn, job, index, effect):
                     continue

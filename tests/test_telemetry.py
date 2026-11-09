@@ -206,6 +206,23 @@ def incoming(store):
     )
 
 
+def test_automatic_code_is_logged_as_code_without_button_context(observed_store):
+    store = observed_store
+    store.ingest([incoming(store)])
+    store.plan(
+        store.claim("bot_inbox"),
+        [{"method": "send", "params": {"peer_id": 10, "message": "House and codes"}, "automatic_code": True}],
+    )
+    store.finish(store.claim("bot_outbox"))
+    with store.connect() as conn:
+        outcome = conn.execute("SELECT outcome FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()[
+            "outcome"
+        ]
+    assert outcome["automatic_code"] is True
+    assert outcome["effects"][0]["role"] == "code"
+    assert outcome["delivery_status"] == "accepted_by_vk"
+
+
 def test_postgres_keeps_attempts_partial_delivery_and_survives_queue_cleanup(observed_store):
     store = observed_store
     store.ingest([incoming(store)])

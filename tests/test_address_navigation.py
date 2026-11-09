@@ -75,12 +75,18 @@ def test_menu_does_not_show_internal_normalized_locality():
     assert "(город" not in text
 
 
-def test_back_restores_original_page_after_selection_and_code(processor):
+@pytest.mark.parametrize("entrance_count", [1, 2])
+def test_back_restores_original_page_after_selection_and_code(processor, entrance_count):
+    processor._get.return_value.json.return_value["data"] = {str(i): [["TEST", "test"]] for i in range(entrance_count)}
     original = choices()
     chosen = click(processor, original, {"select_building": 6})[0]
     processor.store.choices_closed.return_value = True
-    entrance = payload_for(chosen, "entrance")
-    code = click(processor, chosen["context"], entrance)[0]
+    if entrance_count == 1:
+        code = chosen
+        assert all("entrance" not in json.loads(b["action"]["payload"]) for b in buttons(chosen))
+    else:
+        entrance = payload_for(chosen, "entrance")
+        code = click(processor, chosen["context"], entrance)[0]
     assert "TEST" in code["params"]["message"]
     back = payload_for(code, "return_to_choices")
     restored = click(processor, code["context"], back)[0]
@@ -109,7 +115,9 @@ def test_selected_building_paginates_entrances_and_keeps_back(processor, count):
         if page + 1 < max(1, (count + 6) // 7):
             action = next(a for a in actions if a.get("entrance_page") == page + 1)
             effects = click(processor, effect["context"], action)
-    assert seen == [str(i) for i in range(count)]
+    assert seen == ([str(i) for i in range(count)] if count != 1 else [])
+    if count == 1:
+        assert "TEST" in effects[0]["params"]["message"]
     assert processor._get.call_count == 1
 
 

@@ -184,6 +184,37 @@ def test_unknown_code_type_does_not_crash_formatting() -> None:
     assert "OTHER:" in code_answer({"address": "a", "data": {"1": [["x", "other"]]}}, "1")
 
 
+@pytest.mark.parametrize("geo", [None, {"latitude": 55.9, "longitude": 37.8}])
+def test_single_entrance_codes_are_sent_without_a_button(processor, geo):
+    result = {
+        "address": "Королев, улица Мичурина, дом 1А",
+        "data": {"3": [["TEST-Y", "yaeda"], ["TEST-D", "delivery"]]},
+    }
+    processor.lookup = MagicMock(return_value=result)
+    message = {"id": 1, "text": "мичурина 1а"}
+    if geo:
+        message = {"id": 1, "geo": {"coordinates": geo}}
+    processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": message}})
+    effects = processor.store.plan.call_args.args[1]
+    assert len(effects) == 1
+    effect = effects[0]
+    assert effect["params"]["message"] == code_answer(result, "3")
+    assert json.loads(effect["params"]["keyboard"])["buttons"] == []
+    assert effect.get("context") is None
+    processor.deliver(dict(effect, id=123, result=None))
+    processor.vk.messages.getById.assert_not_called()
+
+
+def test_last_batch_with_one_of_many_entrances_still_requires_selection(processor):
+    result = {"address": "Адрес", "data": {str(i): [["TEST", "test"]] for i in range(11)}}
+    processor.lookup = MagicMock(return_value=result)
+    processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"text": "адрес"}}})
+    effects = processor.store.plan.call_args.args[1]
+    assert len(effects) == 2
+    assert effects[1]["params"]["message"] == result["address"]
+    assert json.loads(effects[1]["params"]["keyboard"])["buttons"][0][0]["action"]["label"] == "10"
+
+
 def test_recovery_uses_watermark_and_preserves_untracked_new_requests(settings: SimpleNamespace) -> None:
     store = MagicMock(group_id=1)
     store.get_state.side_effect = lambda key, default=None: {"tracking_started": 100, "reconcile_watermark": 200}.get(
@@ -465,7 +496,11 @@ def test_ambiguous_choice_edits_the_same_message(processor: Processor, entrance_
         for row in json.loads(effect["params"]["keyboard"])["buttons"]
         for button in row
     }
-    assert labels >= {str(i) for i in range(1, min(entrance_count, 7) + 1)}
+    if entrance_count == 1:
+        assert labels == {"Назад к адресам"}
+        assert "TEST" in effect["params"]["message"]
+    else:
+        assert labels >= {str(i) for i in range(1, min(entrance_count, 7) + 1)}
     assert "Назад к адресам" in labels
     assert ("Следующие подъезды" in labels) is (entrance_count > 7)
     assert len(effects) == 1
