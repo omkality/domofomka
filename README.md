@@ -47,7 +47,7 @@ flowchart LR
     CI --> R[GHCR: проверенные образы]
     R --> DEV[Автоматический dev]
     R --> G[Ручной выпуск master с подтверждением]
-    G --> P[Prod: включим после принятия dev]
+    G --> P[Prod: ручное подтверждение выпуска]
 ```
 
 [CI/CD и откат](docs/cicd.md): сервер запускает готовые образы без сборки; базы и `.env` остаются на сервере.
@@ -87,12 +87,12 @@ flowchart LR
     N --> CAT[Новая БД каталога PostgreSQL]
     HISTORY[Закрытая выгрузка истории VK] --> AUDIT[Аудит и набор проверок с разделением по диалогам]
     AUDIT --> TEST[Сравнение v1 и v2 перед выпуском]
-    IDX --> TEST
+    CAT --> TEST
 ```
 
 Полная сборка ГАР хранится отдельно от рабочего сервера. Компактный каталог содержит упакованные номера известных домов и отдельные записи домов с кодами.
 Большие данные и исходные переписки остаются в игнорируемой папке `artifacts/`. Они не попадают в Git и контекст сборки Docker.
-Каталог v2 работает в отдельной БД существующего PostgreSQL рядом с тестовым ботом на Германии
+Каталог v2 работает в отдельной БД PostgreSQL на сервере приложения
 и не зависит от компьютера разработчика. API читает его через отдельную роль с ограниченными правами;
 при сбое поиска сохраняется fallback на исходную SQLite v1. Файловый каталог v2 поддержан для отката.
 Подробности: [поиск и результаты проверок](docs/search-v2.md), [очередь и сценарии отказов](docs/message-delivery.md), [тестовое окружение](docs/dev-stand.md).
@@ -126,7 +126,7 @@ VK_GROUP_TOKEN=your_vk_group_token_here
 VK_GROUP_ID=your_vk_group_id_here
 VK_PROXY_URL=
 
-# Постоянная очередь VK — обязательна для этой версии dev
+# Постоянная очередь VK
 EXPECTED_VK_GROUP_ID=your_vk_group_id_here
 POSTGRES_PASSWORD=replace_with_long_random_password
 QUEUE_DATABASE_URL=postgresql://domofomka:${POSTGRES_PASSWORD}@queue:5432/domofomka
@@ -136,7 +136,6 @@ SEARCH_BACKEND=postgres
 CATALOG_DATABASE_URL=postgresql://catalog_reader:replace_with_reader_password@queue:5432/domofomka_catalog_release
 CATALOG_REVISION=replace_with_published_catalog_sha256
 
-CACHE_EXPIRE_TIME=1200
 ANTI_SPAM_TIME=5
 
 # Внутренний API для бота VK
