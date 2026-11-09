@@ -194,7 +194,10 @@ class QueueStore:
             state.get("tokens", self.message_rate_burst) + (timestamp - previous) / self.message_rate_interval_seconds,
         )
         limited = tokens + 1e-9 < 1
-        if limited or row["payload"].get("_message_rate_delayed"):
+        if limited or state.get("delayed") or row["payload"].get("_message_rate_delayed"):
+            if limited:
+                # Keep the trailing-request intent even when queue compaction removes its old row.
+                self._state(conn, name, {"tokens": tokens, "updated_at": timestamp, "delayed": True})
             latest = conn.execute(
                 """SELECT id FROM bot_inbox WHERE group_id=%s AND peer_id=%s AND kind='message_new'
                 AND status='pending' AND attempts=0 ORDER BY occurred_at DESC,

@@ -344,6 +344,34 @@ def test_message_budget_survives_restart_without_charging_retries(store):
         assert recreated.claim("bot_inbox") is not None
 
 
+def test_message_rate_keeps_latest_when_pending_cap_removes_the_delayed_row(store):
+    from unittest.mock import patch
+
+    limited = QueueStore(
+        store.dsn,
+        store.group_id,
+        message_rate_interval_seconds=5,
+        message_rate_burst=2,
+        max_pending_messages_per_peer=3,
+    )
+
+    def incoming(number):
+        item = record(limited, cmid=number)
+        item["payload"]["message"]["text"] = f"Разный запрос {number}"
+        return item
+
+    with patch("src.vkbot.queue.time.time", return_value=100) as clock:
+        for i in [1, 2]:
+            limited.ingest([incoming(i)])
+            limited.plan(limited.claim("bot_inbox"), [])
+        limited.ingest([incoming(3)])
+        assert limited.claim("bot_inbox") is None
+        clock.return_value = 104
+        limited.ingest([incoming(4), incoming(5), incoming(6)])
+        clock.return_value = 105
+        assert limited.claim("bot_inbox")["payload"]["message"]["id"] == 6
+
+
 def test_identical_hints_are_limited_per_user_but_codes_are_not(store):
     from unittest.mock import patch
 
