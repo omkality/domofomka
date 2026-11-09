@@ -17,16 +17,29 @@ from src.search.normalize import HOUSE_PATTERN, house_key, street_kind, text
 from tools.quality_suite import address_fields
 from tools.reconcile_street_order import apply
 
-EMBEDDED_STREET = re.compile(
-    r",\s*(улица|ул\.|проспект|пр-кт|проезд|пр-д|переулок|пер\.|шоссе|ш\.|бульвар|б-р|"
-    r"набережная|наб\.|площадь|пл\.)\s+(.+)$",
-    re.I,
+STREET_TYPE = (
+    r"(улица|ул\.|проспект|пр-кт|проезд|пр-д|переулок|пер\.|шоссе|ш\.|бульвар|б-р|" r"набережная|наб\.|площадь|пл\.)"
 )
+EMBEDDED_STREET = re.compile(r",\s*" + STREET_TYPE + r"\s+(.+)$", re.I)
+TRAILING_STREET = re.compile(r"^(.+?)\s+" + STREET_TYPE + r"\s*$", re.I)
+
+
+def repeated_fields(city: str, kind: str, street: str) -> str | None:
+    name, separator, repeated_city = street.rpartition(",")
+    if not separator or text(repeated_city) != text(city):
+        return None
+    suffix = TRAILING_STREET.fullmatch(name.strip())
+    if not suffix or street_kind(suffix[2]) != street_kind(kind):
+        return None
+    return suffix[1]
 
 
 def shape(city: str, kind: str, street: str, house: str) -> tuple[tuple, bool] | None:
     changed = False
     kind = street_kind(kind)
+    if repeated := repeated_fields(city, kind, street):
+        street = repeated
+        changed = True
     if embedded := EMBEDDED_STREET.search(city):
         if street_kind(embedded[1]) != kind:
             return None
@@ -47,14 +60,24 @@ def mappings(db: sqlite3.Connection, legacy: sqlite3.Connection) -> tuple[list[d
     db.row_factory = sqlite3.Row
     legacy.row_factory = sqlite3.Row
     sources = []
+    skipped = collections.Counter()
     for row in db.execute(
         "SELECT b.* FROM (SELECT DISTINCT building_id FROM codes) c JOIN buildings b ON b.id=c.building_id WHERE b.guid IS NULL"
     ):
         try:
-            identity = shape(row["city"], address_fields(row["display"])["kind"], row["street"], row["house"])
+            kind = address_fields(row["display"])["kind"]
+            identity = shape(row["city"], kind, row["street"], row["house"])
         except ValueError:
             continue
         if identity and identity[1]:
+            if repeated_fields(row["city"], kind, row["street"]):
+                literal = db.execute(
+                    "SELECT 1 FROM buildings WHERE city_key=? AND street_key=? AND guid IS NOT NULL LIMIT 1",
+                    (text(row["city"]), text(row["street"])),
+                ).fetchone()
+                if literal:
+                    skipped["literal_source_street_exists"] += 1
+                    continue
             sources.append((dict(row), identity[0]))
     wanted = {(identity[0], identity[2]) for _, identity in sources}
     street_variants = collections.defaultdict(set)
@@ -62,7 +85,7 @@ def mappings(db: sqlite3.Connection, legacy: sqlite3.Connection) -> tuple[list[d
         key = city, street.replace(" ", "")
         if key in wanted:
             street_variants[key].add(street)
-    links, skipped = [], collections.Counter()
+    links = []
     for row, identity in sources:
         variants = street_variants.get((identity[0], identity[2]), set())
         if len(variants) != 1:

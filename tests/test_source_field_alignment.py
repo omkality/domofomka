@@ -116,3 +116,71 @@ def test_non_unique_or_conflicting_source_identity_is_never_relinked(source_fiel
             legacy.execute("UPDATE codes SET house='Территория12к2' WHERE id IN (1,2)")
         links, _ = mappings(db, legacy)
     assert not links
+
+
+def add_repeated_fields(source, legacy, *, footer_city="Тестовый", footer_kind="улица", raw_house="12к1"):
+    street = f"Парковая Территория {footer_kind},{footer_city}"
+    with sqlite3.connect(source) as db:
+        db.execute(
+            "INSERT INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (
+                "repeated",
+                None,
+                f"Тестовый, улица {street}, дом 12к1",
+                "Тестовый",
+                street,
+                "12к1",
+                text(street),
+                "тестовый",
+                "77",
+                "тестовый",
+            ),
+        )
+        db.execute("INSERT INTO codes VALUES('repeated','2','test','KEEP-repeated')")
+        db.execute("INSERT INTO provenance VALUES(20,'repeated','unresolved')")
+        db.execute("INSERT INTO aliases VALUES('repeated','тестовый',?,'12к1')", (text(street),))
+        index_streets(db)
+    legacy.execute(
+        "INSERT INTO codes VALUES(20,'Тестовый','улица',?,?,'2','test','KEEP-repeated')", (street, raw_house)
+    )
+
+
+def test_repeated_city_and_trailing_type_need_the_same_unique_gar_house(source_fields, tmp_path):
+    source, legacy = source_fields
+    add_repeated_fields(source, legacy)
+    with sqlite3.connect(source) as db:
+        links, _ = mappings(db, legacy)
+    assert next(link for link in links if link["source"] == "repeated")["target"] == "gar"
+    target = tmp_path / "aligned-repeated.db"
+    apply(source, target, links, resolution="gar_source_field_alignment", schema_version=8)
+    with sqlite3.connect(target) as db:
+        assert db.execute("SELECT building_id FROM provenance WHERE source_id=20").fetchone()[0] == "gar"
+        assert db.execute("SELECT building_id FROM codes WHERE code='KEEP-repeated'").fetchone()[0] == "gar"
+        redirects = json.loads(db.execute("SELECT value FROM metadata WHERE key='building_redirects'").fetchone()[0])
+        assert redirects["repeated"] == "gar"
+
+
+@pytest.mark.parametrize("conflict", ["city", "kind", "source_house", "literal_street", "second_guid"])
+def test_repeated_fields_do_not_erase_literal_names_or_other_address_components(source_fields, conflict):
+    source, legacy = source_fields
+    add_repeated_fields(
+        source,
+        legacy,
+        footer_city="Другой" if conflict == "city" else "Тестовый",
+        footer_kind="проезд" if conflict == "kind" else "улица",
+        raw_house="12к2" if conflict == "source_house" else "12к1",
+    )
+    with sqlite3.connect(source) as db:
+        if conflict == "literal_street":
+            db.execute(
+                "INSERT INTO buildings SELECT 'literal','guid-literal',display,city,street,'99',street_key,"
+                "city_key,region,lineage FROM buildings WHERE id='repeated'"
+            )
+        elif conflict == "second_guid":
+            db.execute(
+                "INSERT INTO buildings SELECT 'second','guid-second',display,city,street,house,street_key,"
+                "city_key,region,lineage FROM buildings WHERE id='gar'"
+            )
+        index_streets(db)
+        links, _ = mappings(db, legacy)
+    assert "repeated" not in {link["source"] for link in links}
