@@ -18,7 +18,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class TelemetrySettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True
+    )
 
     telemetry_enabled: bool = False
     telemetry_max_spans: int = Field(default=128, ge=8, le=512)

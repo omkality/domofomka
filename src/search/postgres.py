@@ -66,8 +66,9 @@ class PostgresCatalog(Catalog):
         lock_timeout_seconds: float = 2,
         operation_timeout_seconds: float = 5,
         revision: str = "unknown",
+        candidate_limit: int = 100,
     ):
-        super().__init__("postgres", minimum_similarity, ambiguity_margin)
+        super().__init__("postgres", minimum_similarity, ambiguity_margin, candidate_limit=candidate_limit)
         self._dsn = dsn
         self._connect_timeout = connect_timeout_seconds
         self._statement_timeout = statement_timeout_ms
@@ -171,18 +172,20 @@ class PostgresCatalog(Catalog):
             sql += " AND has_codes=1"
         sql += ' ORDER BY has_codes DESC,id COLLATE "C" LIMIT %s'
         with self.connect() as db:
-            ids = [row[0] for row in db.execute(sql, (match, *terms, max(limit * 10, 1000)))]
+            ids = [row[0] for row in db.execute(sql, (match, *terms, limit * 10))]
             return self._expand(db, ids, house, include_known=not coded)
 
     @measured("search.v2.coded_candidates")
-    def coded_candidates(self, query: Query, limit: int = 100) -> list[dict]:
+    def coded_candidates(self, query: Query, limit: int | None = None) -> list[dict]:
+        limit = self.candidate_limit if limit is None else limit
         words = query.words.split()
         return (
             self.fetch(self.query(words, True), words, query.house, limit, coded=True) if words and query.house else []
         )
 
     @measured("search.v2.candidates")
-    def candidates(self, query: Query, limit: int = 100) -> list[dict]:
+    def candidates(self, query: Query, limit: int | None = None) -> list[dict]:
+        limit = self.candidate_limit if limit is None else limit
         words = query.words.split()
         if not words or not query.house:
             return []
@@ -212,8 +215,8 @@ class PostgresCatalog(Catalog):
                 "AND a.house=s.house AND a.city_key||' '||a.street_key=s.words LIMIT 1) AS alias_street "
                 "FROM alias_search s JOIN buildings b ON b.id=s.building_id "
                 "WHERE to_tsvector('simple',s.words) @@ to_tsquery('simple',%s) "
-                "AND s.house=%s ORDER BY s.seq LIMIT 100",
-                (self.query(query.words.split(), True), query.house),
+                "AND s.house=%s ORDER BY s.seq LIMIT %s",
+                (self.query(query.words.split(), True), query.house, self.candidate_limit),
             )
             result = {}
             for row in rows:

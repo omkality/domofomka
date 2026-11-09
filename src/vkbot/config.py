@@ -5,18 +5,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class VKBotSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True
+    )
 
     vk_group_token: str
     vk_group_id: str
     vk_proxy_url: str | None = None
 
-    cache_expire_time: int
     anti_spam_time: int
 
     domofomka_api_host: str
     domofomka_api_port: int
     search_api_version: Literal["v1", "v2"] = "v2"
+    search_max_query_length: int = Field(default=500, ge=20, le=2000)
 
     queue_database_url: str
     queue_workers: int = 2

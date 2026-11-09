@@ -11,6 +11,15 @@ from src.services.outbound import ProxyHealth
 from src.vkbot.http import TimeoutSession
 
 
+def test_configuration_error_does_not_echo_dotenv_secrets(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("VK_GROUP_TOKEN=private-test-token\nDADATA_TOKEN=private-test-dadata\n", encoding="utf8")
+    with pytest.raises(ValidationError) as error:
+        NetworkSettings(_env_file=env, vk_retry_attempts=0)
+    assert "private-test-token" not in str(error.value)
+    assert "private-test-dadata" not in str(error.value)
+
+
 def test_network_values_are_loaded_from_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for key in (
         "VK_CONNECT_TIMEOUT_SECONDS",

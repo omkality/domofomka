@@ -139,6 +139,24 @@ def test_top_n_index_candidates_cannot_hide_exact_catalog_match(catalog):
     assert catalog.resolve("мск Перерва 62к1", [wrong_city])["building_id"] == "a"
 
 
+def test_catalog_candidate_budget_changes_retrieval_without_changing_default(catalog):
+    assert catalog.resolve("Перерва 62к1")["status"] == "ambiguous"
+    limited = Catalog(catalog.path, candidate_limit=1)
+    answer = limited.resolve("Перерва 62к1")
+    assert answer["status"] == "found"
+    assert answer["building_id"] in {"a", "c"}
+
+
+def test_application_passes_candidate_budget_to_sqlite_reader(catalog, monkeypatch):
+    from src.config import settings
+    from src.services.catalog import get_catalog
+
+    monkeypatch.setattr(settings, "search_backend", "sqlite")
+    monkeypatch.setattr(settings, "search_catalog_path", catalog.path)
+    monkeypatch.setattr(settings, "search_candidate_limit", 5)
+    assert get_catalog().candidate_limit == 5
+
+
 def test_locality_words_cannot_replace_the_street_name(catalog):
     unrelated = {
         "id": "wrong",

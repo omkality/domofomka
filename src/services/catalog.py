@@ -18,7 +18,12 @@ def close_catalog() -> None:
 
 def get_catalog() -> Catalog:
     if settings.search_backend == "sqlite":
-        return Catalog(settings.search_catalog_path, settings.search_min_similarity, settings.search_ambiguity_margin)
+        return Catalog(
+            settings.search_catalog_path,
+            settings.search_min_similarity,
+            settings.search_ambiguity_margin,
+            candidate_limit=settings.search_candidate_limit,
+        )
     if not settings.catalog_database_url:
         raise ValueError("CATALOG_DATABASE_URL required for PostgreSQL catalog")
     from src.search.postgres import PostgresCatalog
@@ -32,6 +37,7 @@ def get_catalog() -> Catalog:
         settings.catalog_lock_timeout_seconds,
         settings.catalog_operation_timeout_seconds,
         settings.catalog_revision,
+        settings.search_candidate_limit,
     )
     with _postgres_guard:
         if config not in _postgres_readers:
@@ -45,5 +51,6 @@ def get_catalog() -> Catalog:
                 lock_timeout_seconds=config[5],
                 operation_timeout_seconds=config[6],
                 revision=config[7],
+                candidate_limit=config[8],
             )
         return _postgres_readers[config]

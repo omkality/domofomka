@@ -10,7 +10,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class NetworkSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", allow_inf_nan=False)
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore", allow_inf_nan=False, hide_input_in_errors=True
+    )
 
     dadata_timeout_seconds: float = Field(default=8, gt=0)
     dadata_connect_timeout_seconds: float = Field(default=2, gt=0)

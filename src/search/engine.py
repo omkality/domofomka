@@ -32,10 +32,13 @@ from src.telemetry import measured, note
 
 
 class Catalog:
-    def __init__(self, path: str, minimum_similarity: float = 0.86, ambiguity_margin: float = 0.06):
+    def __init__(
+        self, path: str, minimum_similarity: float = 0.86, ambiguity_margin: float = 0.06, *, candidate_limit: int = 100
+    ):
         self.path = path
         self.minimum_similarity = minimum_similarity
         self.ambiguity_margin = ambiguity_margin
+        self.candidate_limit = candidate_limit
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -103,7 +106,8 @@ class Catalog:
         return rows
 
     @measured("search.v2.coded_candidates")
-    def coded_candidates(self, query: Query, limit: int = 100) -> list[dict]:
+    def coded_candidates(self, query: Query, limit: int | None = None) -> list[dict]:
+        limit = self.candidate_limit if limit is None else limit
         words = query.words.split()
         if not words or not query.house:
             return []
@@ -116,7 +120,7 @@ class Catalog:
                     for r in db.execute(
                         "SELECT s.id FROM search s JOIN streets t ON t.id=s.id "
                         "WHERE search MATCH ? AND t.has_codes=1 AND " + clause + " ORDER BY t.id LIMIT ?",
-                        (match, *words, max(limit * 10, 1000)),
+                        (match, *words, limit * 10),
                     )
                 ]
                 return self._expand(db, ids, query.house, include_known=False)
@@ -133,7 +137,8 @@ class Catalog:
             ]
 
     @measured("search.v2.candidates")
-    def candidates(self, query: Query, limit: int = 100) -> list[dict]:
+    def candidates(self, query: Query, limit: int | None = None) -> list[dict]:
+        limit = self.candidate_limit if limit is None else limit
         words = query.words.split()
         if not words or not query.house:
             return []
@@ -148,7 +153,7 @@ class Catalog:
                         + clause
                         + " ORDER BY t.has_codes DESC,t.id LIMIT ?"
                     )
-                    ids = [r[0] for r in db.execute(sql, (match, *terms, max(limit * 10, 1000)))]
+                    ids = [r[0] for r in db.execute(sql, (match, *terms, limit * 10))]
                     return self._expand(db, ids, query.house)
                 sql = (
                     "SELECT DISTINCT b.* FROM search s JOIN streets t ON t.id=s.id "
@@ -294,8 +299,8 @@ class Catalog:
                 "SELECT b.*,s.words AS alias_words,(SELECT a.street_key FROM aliases a WHERE a.building_id=b.id "
                 "AND a.house=s.house AND a.city_key||' '||a.street_key=s.words LIMIT 1) AS alias_street "
                 "FROM alias_search s JOIN buildings b ON b.id=s.building_id "
-                "WHERE alias_search MATCH ? AND s.house=? LIMIT 100",
-                (match, query.house),
+                "WHERE alias_search MATCH ? AND s.house=? LIMIT ?",
+                (match, query.house, self.candidate_limit),
             )
             result = {}
             for row in rows:

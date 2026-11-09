@@ -497,6 +497,37 @@ def test_long_query_does_not_poison_retry_queue(processor: Processor) -> None:
     assert processor.lookup("x" * 501)["status"] == "invalid_query"
 
 
+@pytest.mark.parametrize(("limit", "length", "rejected"), [(20, 21, True), (600, 501, False)])
+def test_bot_query_length_uses_environment_setting(processor, monkeypatch, limit, length, rejected):
+    for key, value in {
+        "VK_GROUP_TOKEN": "unused",
+        "VK_GROUP_ID": "223949627",
+        "EXPECTED_VK_GROUP_ID": "223949627",
+        "QUEUE_DATABASE_URL": "postgresql://unused",
+    }.items():
+        monkeypatch.setenv(key, value)
+    from src.vkbot.config import VKBotSettings
+
+    monkeypatch.setenv("SEARCH_MAX_QUERY_LENGTH", str(limit))
+    processor.settings = VKBotSettings(
+        _env_file=None,
+        vk_group_token="unused",
+        vk_group_id="223949627",
+        expected_vk_group_id="223949627",
+        cache_expire_time=1200,
+        anti_spam_time=5,
+        domofomka_api_host="api",
+        domofomka_api_port=8000,
+        queue_database_url="postgresql://unused",
+    )
+    processor._get = MagicMock()
+    processor._get.return_value.status_code = 200
+    processor._get.return_value.json.return_value = {"status": "not_found"}
+    answer = processor.lookup("x" * length)
+    assert (answer["status"] == "invalid_query") is rejected
+    assert processor._get.called is not rejected
+
+
 @pytest.mark.parametrize("count", [1, 5, 6, 12, 100])
 def test_choice_pages_have_rejection_and_fit_button_budget(count):
     from src.vkbot.processor import address_choices

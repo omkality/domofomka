@@ -397,3 +397,28 @@ def test_http_postgres_cache_without_sqlite_catalog_and_building_endpoint(local_
         assert answer["engine"] == "v1"
         assert answer["fallback_reason"] == "unavailable"
         fallback.assert_awaited_once()
+
+
+def test_runtime_postgres_reader_reloads_configured_candidate_budget(local_experiment, monkeypatch):
+    from pydantic import SecretStr
+
+    from src.config import settings
+    from src.services.catalog import close_catalog, get_catalog
+
+    monkeypatch.setattr(settings, "search_backend", "postgres")
+    monkeypatch.setattr(settings, "catalog_database_url", SecretStr(os.environ["CATALOG_BENCHMARK_DSN"]))
+    monkeypatch.setattr(settings, "catalog_revision", "unknown")
+    monkeypatch.setattr(settings, "search_candidate_limit", 5)
+    close_catalog()
+    try:
+        first = get_catalog()
+        assert first.candidate_limit == 5
+        assert first.resolve("Москва Перерва 62к1")["building_id"] == "a"
+        monkeypatch.setattr(settings, "search_candidate_limit", 200)
+        second = get_catalog()
+        assert second is not first
+        assert second.candidate_limit == 200
+        assert first._connection is None
+        assert second.resolve("Москва Перерва 62к1")["building_id"] == "a"
+    finally:
+        close_catalog()
