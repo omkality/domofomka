@@ -67,7 +67,8 @@ jobs:
       VK_GROUP_ID: '223949627'
       EXPECTED_VK_GROUP_ID: '223949627'
       QUEUE_DATABASE_URL: postgresql://unused
-      ANTI_SPAM_TIME: '5'
+      ANTI_SPAM_TIME: '2'
+      OUTBOX_PEER_MIN_INTERVAL_SECONDS: '2'
       DOMOFOMKA_API_HOST: localhost
       DOMOFOMKA_API_PORT: '8000'
     steps:

@@ -290,6 +290,98 @@ def click(store: QueueStore, name: str, entrance: str = "1", cmid: int = 12, pee
     )
 
 
+@pytest.mark.parametrize("interval", [2, 5])
+@pytest.mark.parametrize(
+    "action",
+    [
+        {"entrance": "1", "ent_slice": ["1", "2"]},
+        {"select_building": 0},
+        {"choice_page": 1},
+        {"entrance_page": 1},
+        {"return_to_choices": True},
+        {"dismiss_choices": True},
+    ],
+)
+def test_callback_and_reply_pause_start_at_delivery_and_survive_restart(store, interval, action):
+    from unittest.mock import patch
+
+    limited = QueueStore(store.dsn, store.group_id, reply_interval_seconds=interval)
+
+    def incoming(name, peer=10):
+        item = click(limited, name, peer=peer)
+        item["payload"]["payload"] = action
+        limited.ingest([item], callback_window=interval)
+        return item
+
+    def plan(job):
+        limited.plan(
+            job,
+            [{"method": "edit", "params": {"peer_id": job["peer_id"], "conversation_message_id": 12}}],
+        )
+
+    with patch("src.vkbot.queue.time.time", return_value=100) as clock:
+        incoming("initial")
+        first = limited.claim("bot_inbox")
+        plan(first)
+        outgoing = limited.claim("bot_outbox")
+
+        # Passing the nominal pause does not admit more work while delivery is active.
+        clock.return_value = 110
+        incoming("still-delivering")
+        assert limited.claim("bot_inbox") is None
+        assert limited.callback_feedback("callback:10:still-delivering")["feedback"] == "pending"
+
+        incoming("another-user", peer=20)
+        other = limited.claim("bot_inbox")
+        assert other["peer_id"] == 20
+        limited.plan(other, [])
+        limited.finish(outgoing)
+
+        recreated = QueueStore(store.dsn, store.group_id, reply_interval_seconds=interval)
+        clock.return_value = 110 + interval - 0.01
+        incoming("just-before-boundary")
+        assert recreated.claim("bot_inbox") is None
+        assert recreated.claim("bot_outbox") is None
+
+        clock.return_value = 110 + interval
+        incoming("at-boundary")
+        accepted = recreated.claim("bot_inbox")
+        assert accepted["payload"]["event_id"] == "at-boundary"
+        plan(accepted)
+        next_outgoing = recreated.claim("bot_outbox")
+        assert next_outgoing["inbox_id"] == accepted["id"]
+        recreated.finish(next_outgoing)
+
+
+@pytest.mark.parametrize("interval", [2, 5])
+def test_outbox_pause_preserves_retry_identity_and_does_not_delay_other_users(store, interval):
+    from unittest.mock import patch
+
+    limited = QueueStore(store.dsn, store.group_id, reply_interval_seconds=interval)
+    with patch("src.vkbot.queue.time.time", return_value=100) as clock:
+        limited.ingest([record(limited, peer=10), record(limited, peer=20)])
+        for _ in range(2):
+            job = limited.claim("bot_inbox")
+            limited.plan(job, [{"method": "send", "params": {"peer_id": job["peer_id"], "message": "test"}}])
+        first = limited.claim("bot_outbox")
+        assert first["peer_id"] == 10
+        limited.save_result(first, 77)
+        limited.fail("bot_outbox", first, "lost acknowledgement", delay=0)
+        other = limited.claim("bot_outbox")
+        assert other["peer_id"] == 20
+        limited.finish(other)
+
+        recreated = QueueStore(store.dsn, store.group_id, reply_interval_seconds=interval)
+        clock.return_value = 100 + interval - 0.01
+        assert recreated.claim("bot_outbox") is None
+        clock.return_value = 100 + interval
+        retried = recreated.claim("bot_outbox")
+        assert retried["id"] == first["id"]
+        assert retried["result"] == 77
+        recreated.finish(retried)
+        assert recreated.claim("bot_outbox") is None
+
+
 def test_message_rate_keeps_latest_correction_without_blocking_other_users(store):
     from unittest.mock import patch
 

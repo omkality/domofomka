@@ -23,7 +23,7 @@ class VKBotSettings(BaseSettings):
     queue_database_url: str
     queue_workers: int = 2
     queue_max_pending_messages_per_peer: int = Field(default=3, ge=1, le=100)
-    outbox_peer_min_interval_seconds: float = Field(default=5, gt=0)
+    outbox_peer_min_interval_seconds: float = Field(default=2, gt=0)
     message_rate_interval_seconds: float = Field(default=5, ge=0, le=60)
     message_rate_burst: int = Field(default=2, ge=1, le=10)
     message_hint_interval_seconds: float = Field(default=15, ge=0, le=300)

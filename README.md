@@ -136,7 +136,7 @@ SEARCH_BACKEND=postgres
 CATALOG_DATABASE_URL=postgresql://catalog_reader:replace_with_reader_password@queue:5432/domofomka_catalog_release
 CATALOG_REVISION=replace_with_published_catalog_sha256
 
-ANTI_SPAM_TIME=5
+ANTI_SPAM_TIME=2
 
 # Внутренний API для бота VK
 DOMOFOMKA_API_HOST=api
