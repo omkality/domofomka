@@ -28,8 +28,10 @@ from src.code_service.services.v2.constraints import (
     name_constraints_match,
     whole_location_match,
 )
-from src.code_service.services.v2.engine import MAPPING, Catalog, documents, search_body
 from src.code_service.services.v2.normalize import STOP, address_words, building_kind_matches, parse_query
+from src.code_service.services.v2.opensearch import search_body
+from tools.catalog.documents import documents
+from tools.catalog.sqlite_catalog import SqliteCatalog
 from tools.evaluation import evaluate_search as replay
 from tools.evaluation.compare_postgres_catalog import select
 from tools.evaluation.quality_suite import address_fields, literal_words
@@ -38,6 +40,7 @@ from tools.experiments import (
     search_lexical_profiles,
     search_locality_profiles,
 )
+from tools.experiments.opensearch_schema import MAPPING
 
 
 def mapping(*, aliases=False, lexical=False, similarity=None, bm25_b=0.75, city_roles=False):
@@ -338,7 +341,7 @@ def build_index(
         batch, total = [], 0
         by_street = collections.defaultdict(list)
         if aliases:
-            with Catalog(str(catalog)).connect() as db:
+            with SqliteCatalog(str(catalog)).connect() as db:
                 for row in db.execute(r"""
                     SELECT
                       a.*,
@@ -769,7 +772,7 @@ def search_variant(catalog, message, variant, search, analyze=None, city_query=N
         and result["status"] in {"not_found", "incomplete_query", "no_codes_ambiguous"}
         and parsed.house
     ):
-        # Catalog applies the same exact-house, name and scoped-location checks.
+        # SqliteCatalog applies the same exact-house, name and scoped-location checks.
         result = catalog.resolve(message)
     if variant.get("source_choices") and result["status"] in {"found", "ambiguous"}:
         result = search_city_roles.source_choices(result, catalog.resolve(message))
@@ -898,7 +901,7 @@ def run(args):
     if any(variant.get("city_roles") for variant in variants) and metadata.get("city_roles") != 1:
         raise ValueError("City-role profile requires the city-role index schema")
     replay.initialize(str(args.legacy), str(args.catalog))
-    catalog = Catalog(str(args.catalog))
+    catalog = SqliteCatalog(str(args.catalog))
     exact_catalog = search_lexical_profiles.ExactCatalog(str(args.catalog))
     local = threading.local()
     counters = collections.defaultdict(collections.Counter)

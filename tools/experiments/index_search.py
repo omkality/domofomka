@@ -6,7 +6,8 @@ import time
 
 import httpx
 
-from src.code_service.services.v2.engine import MAPPING, documents
+from tools.catalog.documents import documents
+from tools.experiments.opensearch_schema import MAPPING
 
 
 def index(path: str, url: str, alias: str):

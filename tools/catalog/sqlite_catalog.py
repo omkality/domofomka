@@ -1,11 +1,10 @@
-"""Rank candidates, but preserve explicit house and locality constraints."""
+"""Файловый эталон v2 для подготовки данных и офлайн-проверок, вне рабочего API."""
 
 import base64
 import binascii
 import json
 import sqlite3
-import zlib
-from collections.abc import Generator, Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -22,14 +21,13 @@ from src.code_service.services.v2.constraints import (
 from src.code_service.services.v2.normalize import (
     Query,
     building_kind_matches,
-    parse_query,
 )
 from src.code_service.services.v2.ranking import Ranker
 from src.infrastructure.telemetry import measured
 
 
-class Catalog(Ranker):
-    """Общий алгоритм кандидатов, точных ограничений и ранжирования адресов."""
+class SqliteCatalog(Ranker):
+    """Синхронный SQLite-эталон общих правил ранжирования для офлайн-проверок."""
 
     def __init__(
         self, path: str, minimum_similarity: float = 0.86, ambiguity_margin: float = 0.06, *, candidate_limit: int = 100
@@ -490,130 +488,8 @@ class Catalog(Ranker):
             }
 
 
-MAPPING = {
-    "settings": {
-        "number_of_shards": 1,
-        "refresh_interval": "-1",
-        "number_of_replicas": 0,
-        "analysis": {
-            "analyzer": {
-                "address": {"type": "custom", "tokenizer": "standard", "filter": ["lowercase", "russian_stemmer"]}
-            },
-            "filter": {"russian_stemmer": {"type": "stemmer", "language": "russian"}},
-        },
-    },
-    "mappings": {
-        "dynamic": "strict",
-        "properties": {
-            "id": {"type": "keyword"},
-            "words": {"type": "text", "analyzer": "address"},
-            "house": {"type": "keyword"},
-        },
-    },
-}
-
-
-def search_body(message: str, limit: int = 100, *, fuzziness: str = "AUTO", prefix_length: int = 1) -> dict:
-    """Построить лексический запрос OpenSearch для сравнения кандидатов."""
-    query = parse_query(message)
-    return {
-        "size": limit,
-        "query": {
-            "bool": {
-                "filter": [{"term": {"house": query.house or ""}}],
-                "must": [
-                    {
-                        "match": {
-                            "words": {
-                                "query": query.words,
-                                "operator": "and",
-                                "fuzziness": fuzziness,
-                                "prefix_length": prefix_length,
-                            }
-                        }
-                    }
-                ],
-            }
-        },
-    }
-
-
 @lru_cache(maxsize=2)
 def street_vocabulary(path: str, revision: int) -> list[str]:
     """Собрать словарь слов из подготовленных документов улиц."""
-    with Catalog(path).connect() as db:
+    with SqliteCatalog(path).connect() as db:
         return [r[0] for r in db.execute("SELECT term FROM vocabulary")]
-
-
-def documents(path: str, *, structured: bool = False) -> Iterator[dict]:
-    """Прочитать подготовленные поисковые документы каталога."""
-    catalog = Catalog(path)
-    with catalog.connect() as db:
-        compact = catalog._compact(db)
-        for row in db.execute("SELECT * FROM streets"):
-            if compact:
-                packed = db.execute(
-                    r"""
-                    SELECT
-                      data
-                    FROM
-                      street_houses
-                    WHERE
-                      id = ?
-                    """,
-                    (row["id"],),
-                ).fetchone()[0]
-                houses = sorted({house for b in json.loads(zlib.decompress(packed)) for house in b["houses"]})
-            else:
-                houses = [
-                    r[0]
-                    for r in db.execute(
-                        r"""
-                    SELECT DISTINCT
-                      house
-                    FROM
-                      buildings
-                    WHERE
-                      city_key = ?
-                      AND street_key = ?
-                    ORDER BY
-                      house
-                    """,
-                        (row["city_key"], row["street_key"]),
-                    )
-                ]
-            document = {"id": row["id"], "words": row["words"], "house": houses}
-            if structured:
-                document.update(
-                    city=row["city_key"],
-                    street=row["street_key"],
-                    coded_house=(
-                        [
-                            r[0]
-                            for r in db.execute(
-                                r"""
-                    SELECT DISTINCT
-                      house
-                    FROM
-                      buildings
-                    WHERE
-                      city_key = ?
-                      AND street_key = ?
-                      AND EXISTS
-                      (
-                        SELECT
-                          1
-                        FROM
-                          codes AS c
-                        WHERE
-                          c.building_id = buildings.id
-                      )
-                    """,
-                                (row["city_key"], row["street_key"]),
-                            )
-                        ]
-                        if not compact or row["has_codes"]
-                        else []
-                    ),
-                )
-            yield document

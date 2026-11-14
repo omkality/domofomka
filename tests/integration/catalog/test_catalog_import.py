@@ -2,8 +2,8 @@ import sqlite3
 
 import pytest
 
-from src.code_service.services.v2.engine import Catalog
 from tools.catalog.build_catalog import build, relink, source_street
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 
 @pytest.mark.parametrize(("long_kind", "short_kind"), [("проспект", "пр-кт"), ("аллея", "ал."), ("тупик", "туп.")])
@@ -40,7 +40,7 @@ def test_street_types_never_merge_code_rows(tmp_path, long_kind, short_kind):
         )
     output = tmp_path / "catalog.db"
     build(legacy, regions, output)
-    catalog = Catalog(str(output))
+    catalog = SqliteCatalog(str(output))
     street = catalog.resolve("Москва улица Мира 1")
     avenue = catalog.resolve(f"Москва {long_kind} Мира 1")
     assert street["building_id"] == "a"
@@ -63,7 +63,7 @@ def test_street_types_never_merge_code_rows(tmp_path, long_kind, short_kind):
 
     serving = tmp_path / "serving.db"
     compact(output, serving)
-    small = Catalog(str(serving))
+    small = SqliteCatalog(str(serving))
     assert small.resolve("Москва улица Мира 1")["data"] == street["data"]
     assert small.resolve(f"Москва {long_kind} Мира 1")["data"] == avenue["data"]
 
@@ -73,7 +73,7 @@ def test_street_types_never_merge_code_rows(tmp_path, long_kind, short_kind):
     assert empty["fias_id"] is None
     assert small.building(empty["building_id"])["display"] == empty["address"]
 
-    from src.code_service.services.v2.engine import documents
+    from tools.catalog.documents import documents
 
     assert list(documents(str(serving))) == list(documents(str(output)))
     # Known code-bearing identities do not depend on unpacking the full GAR house list.

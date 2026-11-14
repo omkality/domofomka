@@ -2,10 +2,10 @@ import sqlite3
 
 import pytest
 
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import text
 from tools.catalog.build_catalog import SCHEMA, index_streets
 from tools.catalog.compact_catalog import compact
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 
 @pytest.fixture(params=[False, True])
@@ -45,8 +45,8 @@ def prefixes(tmp_path, request):
     if request.param:
         serving = tmp_path / "serving.db"
         compact(source, serving)
-        return Catalog(str(serving))
-    return Catalog(str(source))
+        return SqliteCatalog(str(serving))
+    return SqliteCatalog(str(source))
 
 
 def test_prefix_offers_separate_coded_addresses_without_automatic_city_selection(prefixes):

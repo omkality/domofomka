@@ -26,6 +26,7 @@ dev = [
     "pip-audit>=2.10.1,<3",
     "sqlparse>=0.6.1,<0.7",
     "sqlfluff>=4.5,<5",
+    "testcontainers>=4.15,<5",
 ]
 migrations = [
     "psycopg[binary]>=3.3.6,<4",

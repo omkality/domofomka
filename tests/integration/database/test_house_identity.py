@@ -1,4 +1,3 @@
-import os
 import sqlite3
 import uuid
 from unittest.mock import AsyncMock
@@ -12,12 +11,12 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from src.code_service.config import settings
 from src.code_service.main import app
 from src.code_service.services.v2 import search
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import legacy_house_matches, parse_query
 from src.code_service.services.v2.postgres import PostgresCatalog
 from tools.catalog import build_postgres_catalog as importer
 from tools.catalog.build_catalog import SCHEMA, index_streets
 from tools.catalog.compact_catalog import compact
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 # Explicit expectations: using the parser to generate these would hide its mistakes.
 HOUSE_FORMS = [
@@ -107,7 +106,7 @@ def write_houses(path):
 def neighboring_houses(tmp_path):
     path = tmp_path / "houses.db"
     write_houses(path)
-    return Catalog(str(path))
+    return SqliteCatalog(str(path))
 
 
 @pytest.mark.parametrize(("spelling", "expected"), HOUSE_FORMS)
@@ -154,7 +153,7 @@ def test_legacy_guard_preserves_explicit_quarter_with_corpus_before_it(corpus):
 @pytest.mark.parametrize("catalog_available", [True, False])
 def test_http_fallback_cannot_change_a_house_letter_corpus_or_structure(monkeypatch, catalog_available):
     class MissingResult:
-        def resolve(self, message, candidates):
+        async def resolve(self, message, candidates):
             return {"status": "not_found", "engine": "v2", "data": {}}
 
     async def catalog():
@@ -200,10 +199,10 @@ def test_http_fallback_cannot_change_a_house_letter_corpus_or_structure(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_real_postgres_and_http_preserve_house_components_and_empty_neighbors(tmp_path, monkeypatch):
-    dsn = os.getenv("TEST_QUEUE_DATABASE_URL")
-    if not dsn:
-        pytest.skip("Requires isolated real PostgreSQL")
+async def test_real_postgres_and_http_preserve_house_components_and_empty_neighbors(
+    tmp_path, monkeypatch, postgres_dsn
+):
+    dsn = postgres_dsn
     connection = conninfo_to_dict(dsn)
     if connection.get("host") not in {"localhost", "127.0.0.1", "::1"}:
         pytest.fail("House identity tests only create isolated local databases")

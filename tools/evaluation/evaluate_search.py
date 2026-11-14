@@ -17,8 +17,9 @@ from pathlib import Path
 import httpx
 
 from src.code_service.services.v1.matching import STREET_TYPES, address_exists
-from src.code_service.services.v2.engine import Catalog, search_body
 from src.code_service.services.v2.normalize import address_words, legacy_house_matches, parse_query
+from src.code_service.services.v2.opensearch import search_body
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 legacy_groups = []
 legacy_cache = {}
@@ -63,7 +64,7 @@ def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_c
             ORDER BY
               min(id)
             """).fetchall()
-    catalogs[:] = [Catalog(catalog_path)]
+    catalogs[:] = [SqliteCatalog(catalog_path)]
     if opensearch_url:
         search_clients[:] = [(opensearch_url, httpx.Client(trust_env=False, timeout=2))]
     with catalogs[0].connect() as db:

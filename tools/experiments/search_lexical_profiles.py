@@ -5,8 +5,8 @@ import re
 import time
 from functools import lru_cache
 
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import NAME_LABELS, ORDINALS, STOP, TENS, ordinals
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 
 def exact_text_match(tokens, row, aliases=()):
@@ -18,7 +18,7 @@ def exact_text_match(tokens, row, aliases=()):
     ]
 
 
-class ExactCatalog(Catalog):
+class ExactCatalog(SqliteCatalog):
     """Лабораторный контроль: приоритет полного имени, затем прежнее ранжирование."""
 
     def _resolve_candidates(self, query, variants, candidates):

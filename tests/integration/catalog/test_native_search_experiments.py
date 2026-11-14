@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from src.code_service.services.v2.engine import Catalog
 from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.sqlite_catalog import SqliteCatalog
 from tools.experiments import benchmark_native_search as experiment
 from tools.experiments.benchmark_native_search import configurations, mapping, native_body, native_result
 
@@ -64,7 +64,7 @@ def test_source_alias_does_not_transfer_a_match_to_another_building_in_the_same_
             }
         },
     }
-    answer = native_result(Catalog(str(path)), "Старая 10А", [hit], 0.8)
+    answer = native_result(SqliteCatalog(str(path)), "Старая 10А", [hit], 0.8)
     assert answer["status"] == "found"
     assert answer["building_id"] == "target"
     assert answer["data"] == {"1": [["ONLY-target", "test"]]}
@@ -104,7 +104,7 @@ def test_search_http_failure_is_recorded_without_becoming_not_found_or_aborting_
     monkeypatch.setattr(
         experiment.httpx, "Client", lambda **kw: original_client(transport=httpx.MockTransport(endpoint), **kw)
     )
-    monkeypatch.setattr(experiment, "Catalog", FakeCatalog)
+    monkeypatch.setattr(experiment, "SqliteCatalog", FakeCatalog)
     monkeypatch.setattr(experiment, "sample", lambda *a: [case])
     monkeypatch.setattr(experiment.replay, "initialize", lambda *a: None)
     monkeypatch.setattr(experiment.replay, "legacy_lookup", lambda *a, **kw: None)

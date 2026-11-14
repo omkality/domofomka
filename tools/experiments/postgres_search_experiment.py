@@ -8,9 +8,9 @@ from rapidfuzz.fuzz import ratio
 from rapidfuzz.process import extract
 
 from src.code_service.services.v2.constraints import whole_location_match
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import Query
 from src.code_service.services.v2.postgres import EXACT_LOCALITY_SQL, EXACT_LOCATION_SQL
+from tools.catalog.sqlite_catalog import SqliteCatalog
 from tools.experiments.postgres_catalog_experiment import connect as experiment_connection
 
 
@@ -40,7 +40,7 @@ class SharedReader:
         return self.connection.execute(statement.replace("?", "%s"), parameters)
 
 
-class PostgresExperiment(Catalog):
+class PostgresExperiment(SqliteCatalog):
     """Изолированный читатель PostgreSQL для воспроизводимого сравнения хранилищ."""
 
     def has_exact_location(self, query: Query) -> bool:

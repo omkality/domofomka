@@ -114,7 +114,7 @@ def test_known_street_guard_only_accepts_legacy_with_the_same_complete_name_and_
     monkeypatch.setattr(
         experiment.httpx, "Client", lambda **kw: original(transport=httpx.MockTransport(endpoint), **kw)
     )
-    monkeypatch.setattr(experiment, "Catalog", EmptyCatalog)
+    monkeypatch.setattr(experiment, "SqliteCatalog", EmptyCatalog)
     monkeypatch.setattr(experiment, "analysis_probes", lambda *a: [])
     monkeypatch.setattr(experiment.search_lexical_profiles, "probes", lambda *a: [])
     monkeypatch.setattr(experiment.replay, "initialize", lambda *a: None)

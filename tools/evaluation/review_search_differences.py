@@ -9,8 +9,8 @@ import unicodedata
 from functools import lru_cache
 from pathlib import Path
 
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import legacy_house_matches
+from tools.catalog.sqlite_catalog import SqliteCatalog
 from tools.evaluation.quality_suite import address_fields, literal_words
 
 
@@ -57,7 +57,7 @@ def score_context_run(args):
     """Сравнить результаты вариантов контекста на фиксированных случаях."""
     args.output.mkdir(parents=True, exist_ok=False)
     frozen = json.loads((args.run / "frozen-input.json").read_text(encoding="utf8"))
-    catalog = Catalog(str(args.catalog))
+    catalog = SqliteCatalog(str(args.catalog))
     counts = collections.defaultdict(collections.Counter)
 
     @lru_cache(maxsize=4096)
@@ -216,7 +216,7 @@ def review(args):
         groups[row["case_id"]][row["variant"]] = row
     if len(groups) != len(cases):
         raise ValueError("Review needs a completed paired run")
-    catalog = Catalog(str(args.catalog))
+    catalog = SqliteCatalog(str(args.catalog))
 
     @lru_cache(maxsize=8192)
     def identity(identifier):

@@ -6,7 +6,7 @@ from litestar.testing import TestClient
 from src.code_service.config import settings
 from src.code_service.main import app
 from src.code_service.services.v2 import search
-from src.code_service.services.v2.engine import Catalog
+from src.code_service.services.v2.postgres import PostgresCatalog
 
 
 @pytest.mark.parametrize("path", ["/codes/geo", "/api/v1/codes/geo", "/api/v2/codes/geo"])
@@ -38,7 +38,7 @@ def test_geolocation_uses_the_same_v2_and_guarded_fallback_as_text(monkeypatch, 
         result["data"] = {"1": [["EXPECTED", "test"]]}
 
     class Reader:
-        def resolve(self, message, candidates=None):
+        async def resolve(self, message, candidates=None):
             assert message == address
             return result
 
@@ -110,7 +110,7 @@ def test_code_resources_do_not_accept_writes(version):
 
 def test_v2_unavailable_falls_back(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "opensearch_url", None)
-    monkeypatch.setattr(settings, "search_catalog_path", str(tmp_path / "missing.db"))
+    monkeypatch.setattr(search, "get_catalog", AsyncMock(side_effect=ConnectionError("Catalog unavailable")))
     with TestClient(app) as client:
         result = client.get("/api/v2/codes/msg", params={"message": ""})
         assert result.status_code == 200
@@ -120,9 +120,9 @@ def test_v2_unavailable_falls_back(monkeypatch, tmp_path):
 def test_identity_without_codes_is_not_overridden(monkeypatch):
     monkeypatch.setattr(settings, "opensearch_url", None)
     monkeypatch.setattr(
-        Catalog,
+        PostgresCatalog,
         "resolve",
-        lambda self, message, candidates: {"status": "no_codes", "address": "Known house", "data": {}, "engine": "v2"},
+        AsyncMock(return_value={"status": "no_codes", "address": "Known house", "data": {}, "engine": "v2"}),
     )
 
     async def should_not_run(message):
@@ -143,7 +143,7 @@ def test_long_queries_are_rejected_without_truncating_to_another_house(monkeypat
 
 
 def test_v2_does_not_return_legacy_house_number_reinterpretation(monkeypatch, tmp_path):
-    monkeypatch.setattr(settings, "search_catalog_path", str(tmp_path / "missing.db"))
+    monkeypatch.setattr(search, "get_catalog", AsyncMock(side_effect=ConnectionError("Catalog unavailable")))
     monkeypatch.setattr(settings, "opensearch_url", None)
 
     async def legacy(message, *, accept_source):
@@ -165,7 +165,7 @@ def test_v2_does_not_return_legacy_house_number_reinterpretation(monkeypatch, tm
     ],
 )
 def test_v2_keeps_opaque_legacy_numbering_compatibility(monkeypatch, tmp_path, query, address):
-    monkeypatch.setattr(settings, "search_catalog_path", str(tmp_path / "missing.db"))
+    monkeypatch.setattr(search, "get_catalog", AsyncMock(side_effect=ConnectionError("Catalog unavailable")))
     monkeypatch.setattr(settings, "opensearch_url", None)
 
     async def legacy(message, *, accept_source):
@@ -182,7 +182,7 @@ def test_v2_keeps_opaque_legacy_numbering_compatibility(monkeypatch, tmp_path, q
 @pytest.mark.parametrize("query", ["Набережная улица 19", "Набережная 19"])
 async def test_empty_lexical_result_with_house_still_uses_compatible_v1(monkeypatch, query):
     class EmptyCatalog:
-        def resolve(self, message: str, candidates: list[dict] | None = None):
+        async def resolve(self, message: str, candidates: list[dict] | None = None):
             return {"status": "incomplete_query", "data": {}, "engine": "v2"}
 
     async def legacy(message, *, accept_source):
@@ -199,7 +199,7 @@ async def test_empty_lexical_result_with_house_still_uses_compatible_v1(monkeypa
 @pytest.mark.asyncio
 async def test_incomplete_address_does_not_reinterpret_an_area_number_as_a_house(monkeypatch):
     class EmptyCatalog:
-        def resolve(self, message: str, candidates: list[dict] | None = None):
+        async def resolve(self, message: str, candidates: list[dict] | None = None):
             return {"status": "incomplete_query", "data": {}, "engine": "v2"}
 
     async def forbidden(message):

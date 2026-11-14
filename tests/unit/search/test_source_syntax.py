@@ -2,12 +2,12 @@ import hashlib
 import json
 import sqlite3
 
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import text
 from tools.catalog.build_catalog import SCHEMA, index_streets
 from tools.catalog.build_region_facts import region_facts
 from tools.catalog.reconcile_source_syntax import explicit_region_city, mappings, region_forms
 from tools.catalog.reconcile_street_order import apply
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 FACTS = [{"region": "16", "name": "Татарстан", "kind": "респ."}]
 
@@ -64,7 +64,7 @@ def test_embedded_type_merges_only_reviewed_identity_and_preserves_old_redirects
             db.execute("SELECT resolution FROM provenance WHERE source_id=1").fetchone()[0]
             == "gar_source_syntax_embedded_type"
         )
-    assert Catalog(str(output)).building("older")["id"] == "gar:one"
+    assert SqliteCatalog(str(output)).building("older")["id"] == "gar:one"
 
 
 def test_region_root_restricts_identical_cities_in_different_regions(tmp_path):

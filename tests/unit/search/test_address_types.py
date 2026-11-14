@@ -2,9 +2,9 @@ import sqlite3
 
 import pytest
 
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import parse_query
 from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 
 @pytest.fixture
@@ -34,7 +34,7 @@ def typed_addresses(tmp_path):
             )
             db.execute("INSERT INTO codes VALUES(?,?,?,?)", (identifier, "1", "test", "ONLY-" + identifier))
         index_streets(db)
-    return Catalog(str(path))
+    return SqliteCatalog(str(path))
 
 
 @pytest.mark.parametrize(

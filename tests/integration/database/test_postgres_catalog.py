@@ -13,20 +13,19 @@ from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 from ops.deploy import street_layout_sql
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import text
 from src.code_service.services.v2.postgres import PostgresCatalog
 from tools.catalog import build_postgres_catalog as importer
+from tools.catalog.async_reference import AsyncReferenceReader
 from tools.catalog.build_catalog import SCHEMA, index_streets
 from tools.catalog.compact_catalog import compact
+from tools.catalog.sqlite_catalog import SqliteCatalog
 from tools.experiments.postgres_search_experiment import PostgresExperiment
 
 
 @pytest.fixture
-def local_experiment(tmp_path, monkeypatch):
-    dsn = os.getenv("TEST_QUEUE_DATABASE_URL")
-    if not dsn:
-        pytest.skip("Requires isolated real PostgreSQL")
+def local_experiment(tmp_path, monkeypatch, postgres_dsn):
+    dsn = postgres_dsn
     name = "domofomka_catalog_bench_" + uuid.uuid4().hex[:16]
     connection = conninfo_to_dict(dsn)
     connection["dbname"] = name
@@ -98,7 +97,7 @@ def local_experiment(tmp_path, monkeypatch):
 
 
 def test_postgres_preserves_cities_numbered_streets_no_codes_choices_and_code_order(local_experiment):
-    sqlite = Catalog(str(local_experiment))
+    sqlite = SqliteCatalog(str(local_experiment))
     postgres = PostgresExperiment()
     try:
         for query in [
@@ -163,11 +162,8 @@ def test_failed_street_layout_rolls_back_metadata_and_temporary_index(local_expe
         assert db.execute("SELECT to_regclass('public.catalog_street_layout') AS name").fetchone()["name"] is None
 
 
-def test_experiment_rejects_non_benchmark_database(monkeypatch):
-    dsn = os.getenv("TEST_QUEUE_DATABASE_URL")
-    if not dsn:
-        pytest.skip("Requires isolated real PostgreSQL")
-    monkeypatch.setenv("CATALOG_BENCHMARK_DSN", dsn)
+def test_experiment_rejects_non_benchmark_database(monkeypatch, postgres_dsn):
+    monkeypatch.setenv("CATALOG_BENCHMARK_DSN", postgres_dsn)
     with pytest.raises(ValueError, match="isolated local"):
         importer.connect()
 
@@ -196,7 +192,7 @@ async def test_trigram_comparison_uses_native_async_reader(local_experiment, pro
 
 @pytest.mark.asyncio
 async def test_bounded_reader_preserves_results_and_compact_building_ids(local_experiment):
-    sqlite = Catalog(str(local_experiment))
+    sqlite = SqliteCatalog(str(local_experiment))
     reader = production_reader()
     try:
         empty = await reader.resolve("Москва Коломенская 2")
@@ -221,6 +217,39 @@ async def test_bounded_reader_preserves_results_and_compact_building_ids(local_e
 
 
 @pytest.mark.asyncio
+async def test_offline_reference_replays_the_same_search_and_building_scenarios(local_experiment, monkeypatch):
+    from src.code_service.config import settings
+    from src.code_service.services.v2 import search
+
+    reference = AsyncReferenceReader(SqliteCatalog(str(local_experiment)))
+    postgres = production_reader()
+    monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
+    monkeypatch.setattr(settings, "opensearch_url", None)
+    monkeypatch.setattr(search, "get_data_from_db", AsyncMock(return_value={"data": {}}))
+
+    async def replay(reader, query):
+        monkeypatch.setattr(search, "get_catalog", AsyncMock(return_value=reader))
+        result = await search.lookup(query)
+        identities = [item["building_id"] for item in result.get("candidates", [])]
+        if result.get("building_id"):
+            identities.append(result["building_id"])
+        return result, [await search.read_building(identity) for identity in identities]
+
+    try:
+        for query in [
+            "Перерва 62к1",
+            "Москва Перева 62к1",
+            "Москва первая Парковая 3",
+            "Москва Коломенская 2",
+            "Москва Коломенская 2а",
+            "Москва Коломенская 2к9",
+        ]:
+            assert await replay(postgres, query) == await replay(reference, query), query
+    finally:
+        await postgres.close()
+
+
+@pytest.mark.asyncio
 async def test_compact_expansion_batches_street_reads_and_preserves_empty_houses(local_experiment, monkeypatch):
     reader = production_reader()
     statements = []
@@ -238,8 +267,8 @@ async def test_compact_expansion_batches_street_reads_and_preserves_empty_houses
             rows = await reader._expand(db, ids, "2")
         assert len(statements) == 2
         assert any(row["id"].startswith("address:") for row in rows)
-        with Catalog(str(local_experiment)).connect() as db:
-            assert rows == Catalog(str(local_experiment))._expand(db, ids, "2")
+        with SqliteCatalog(str(local_experiment)).connect() as db:
+            assert rows == SqliteCatalog(str(local_experiment))._expand(db, ids, "2")
     finally:
         await reader.close()
 
@@ -251,7 +280,7 @@ async def test_postgres_prefix_clarification_matches_sqlite_and_requires_confirm
         assert not await reader.has_exact_locality_word("наха")
         assert await reader.has_exact_locality_word("нахабино")
         result = await reader.resolve("наха тестовая 7")
-        assert result == Catalog(str(local_experiment)).resolve("наха тестовая 7")
+        assert result == SqliteCatalog(str(local_experiment)).resolve("наха тестовая 7")
         assert result["status"] == "ambiguous"
         assert [row["building_id"] for row in result["candidates"]] == ["n"]
         assert (await reader.resolve("Нахабино Тестовая 7"))["status"] == "found"
@@ -263,7 +292,7 @@ async def test_postgres_prefix_clarification_matches_sqlite_and_requires_confirm
 async def test_reader_preserves_distinct_codes_for_administrative_variants_and_parent_locality_aliases(
     local_experiment,
 ):
-    sqlite = Catalog(str(local_experiment))
+    sqlite = SqliteCatalog(str(local_experiment))
     reader = production_reader()
     try:
         result = await reader.resolve("Москва Самотечная 11")
@@ -466,10 +495,8 @@ async def test_http_postgres_cache_without_sqlite_catalog_and_building_endpoint(
     from src.code_service.main import app
     from src.code_service.services.v2 import search
 
-    monkeypatch.setattr(settings, "search_backend", "postgres")
     monkeypatch.setattr(settings, "catalog_database_url", SecretStr(os.environ["CATALOG_BENCHMARK_DSN"]))
     monkeypatch.setattr(settings, "catalog_revision", "unknown")
-    monkeypatch.setattr(settings, "search_catalog_path", str(tmp_path / "missing-serving.db"))
     source = tmp_path / "legacy.db"
     source.touch()
     monkeypatch.setattr(settings, "db_name", str(source))
@@ -506,7 +533,6 @@ async def test_runtime_postgres_reader_reloads_configured_candidate_budget(local
     from src.code_service.config import settings
     from src.code_service.services.v2.catalog import close_catalog, get_catalog
 
-    monkeypatch.setattr(settings, "search_backend", "postgres")
     monkeypatch.setattr(settings, "catalog_database_url", SecretStr(os.environ["CATALOG_BENCHMARK_DSN"]))
     monkeypatch.setattr(settings, "catalog_revision", "unknown")
     monkeypatch.setattr(settings, "search_candidate_limit", 5)

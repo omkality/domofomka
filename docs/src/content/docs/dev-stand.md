@@ -23,7 +23,9 @@ docker compose --env-file .env.dev -f compose.dev.yml up -d --build api vkbot
 ```
 
 Для PostgreSQL-поиска предварительно публикуется отдельная БД каталога и роль чтения.
-При разработке без неё можно явно выбрать файловый каталог `SEARCH_BACKEND=sqlite`.
+HTTP-сервис v2 требует PostgreSQL-каталог и `CATALOG_DATABASE_URL`.
+Для офлайн-проверок без сервера используется файловый эталон из `tools/catalog/sqlite_catalog.py`;
+он не включается настройкой HTTP API.
 Сведения о загрузке и миграциях находятся в [БД](database.mdx).
 
 ## Публикация на VDS
@@ -44,7 +46,7 @@ uv run python -m pytest tests/unit
 uv run python -m pytest tests/integration
 ```
 
-SQL-тестам нужен отдельный PostgreSQL и `TEST_QUEUE_DATABASE_URL`.
+SQL-тесты сами запускают отдельный PostgreSQL через Testcontainers; нужен работающий Docker.
 Живая приёмка `tools.operations.dev_acceptance` проверяет тестовый API и сетевые маршруты
 без рассылки пользователям. Управление очередью и подстановка отказов доступны через
 `python -m src.vkbot.manage`; fault-команды действуют только при разрешённом dev-режиме.

@@ -10,9 +10,10 @@ from pathlib import Path
 
 from src.code_service.config import settings
 from src.code_service.services.v2 import search
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.postgres import PostgresCatalog
 from src.infrastructure.event_loop import run_async
+from tools.catalog.async_reference import AsyncReferenceReader
+from tools.catalog.sqlite_catalog import SqliteCatalog
 from tools.experiments.postgres_search_experiment import PostgresExperiment
 
 
@@ -44,7 +45,6 @@ async def compare(args):
     if args.output.exists():
         raise FileExistsError("Preserve completed results; use a new output directory")
     args.output.mkdir(parents=True)
-    settings.search_catalog_path = str(args.catalog)
     settings.db_name = str(args.legacy)
     settings.legacy_index_path = str(args.legacy_index)
     settings.opensearch_url = None
@@ -59,7 +59,7 @@ async def compare(args):
         else PostgresExperiment(settings.search_min_similarity, settings.search_ambiguity_margin)
     )
     baseline_factory = search.get_catalog
-    sqlite = Catalog(str(args.catalog), settings.search_min_similarity, settings.search_ambiguity_margin)
+    sqlite = SqliteCatalog(str(args.catalog), settings.search_min_similarity, settings.search_ambiguity_margin)
     records = select(args.corpus, args.limit)
     times = {"sqlite": [], "postgres": []}
     counts = collections.Counter()
@@ -70,7 +70,9 @@ async def compare(args):
 
         async def selected_catalog():
             """Выдать читатель текущего сравниваемого варианта."""
-            return sqlite if backend == "sqlite" else postgres
+            if backend == "sqlite":
+                return AsyncReferenceReader(sqlite)
+            return postgres if isinstance(postgres, PostgresCatalog) else AsyncReferenceReader(postgres)
 
         search.get_catalog = selected_catalog
         started = time.perf_counter()

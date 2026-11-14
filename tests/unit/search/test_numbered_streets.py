@@ -2,9 +2,9 @@ import sqlite3
 
 import pytest
 
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import parse_query, text
 from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 ORDINALS = [
     ("первая", "1"),
@@ -46,7 +46,7 @@ def streets(tmp_path):
                 (number, "2", "test", "STREET-" + number),
             )
         index_streets(db)
-    return Catalog(str(path))
+    return SqliteCatalog(str(path))
 
 
 @pytest.mark.parametrize(("ordinal", "number"), ORDINALS)

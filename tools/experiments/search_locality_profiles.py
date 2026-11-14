@@ -36,9 +36,9 @@ def locality_hint(message, known, *, comma_prefix=False, require_street_field=Fa
 def _known_localities(path, mtime):
     # Проверяется поле населённого пункта, а не совпадение слова в названии улицы.
     """Загрузить известные названия местностей для ограниченного сравнения."""
-    from src.code_service.services.v2.engine import Catalog
+    from tools.catalog.sqlite_catalog import SqliteCatalog
 
-    with Catalog(path).connect() as db:
+    with SqliteCatalog(path).connect() as db:
         return frozenset(row[0] for row in db.execute("SELECT DISTINCT city_key FROM streets"))
 
 

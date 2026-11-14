@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 
 from src.code_service.services.v2.constraints import legacy_result_matches
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import parse_query, text
 from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ def names(tmp_path):
             )
             db.execute("INSERT INTO codes VALUES(?,?,?,?)", (bid, "1", "test", "ONLY-" + bid))
         index_streets(db)
-    return Catalog(str(path))
+    return SqliteCatalog(str(path))
 
 
 @pytest.mark.parametrize(
@@ -117,7 +117,7 @@ def test_repair_preserves_addresses_codes_and_bundles(names, tmp_path):
     with sqlite3.connect(output) as db:
         assert frozen == {table: db.execute("SELECT * FROM " + table + " ORDER BY 1").fetchall() for table in frozen}
         assert db.execute("SELECT count(*) FROM search WHERE search MATCH 'набережная'").fetchone()[0] > 0
-    assert Catalog(str(output)).resolve("Мичурина 1а")["building_id"] == "split"
+    assert SqliteCatalog(str(output)).resolve("Мичурина 1а")["building_id"] == "split"
 
 
 @pytest.mark.parametrize(

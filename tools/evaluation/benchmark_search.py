@@ -122,7 +122,7 @@ if __name__ == "__main__":
         "note": "Корпус включает реальные запросы и предполагаемые исправления. Это сравнение конфигураций, а не независимая оценка точности.",
     }
     source_files = [
-        Path("src/code_service/services/v2/engine.py"),
+        Path("tools/catalog/sqlite_catalog.py"),
         Path("src/code_service/services/v2/normalize.py"),
         Path("tools/evaluation/evaluate_search.py"),
     ]

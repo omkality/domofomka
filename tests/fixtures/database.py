@@ -1,6 +1,5 @@
 """Настоящий тестовый PostgreSQL с миграциями и отдельным namespace на тест."""
 
-import os
 import uuid
 from collections.abc import Generator
 
@@ -8,15 +7,13 @@ import pytest
 import pytest_asyncio
 
 
-@pytest.fixture(scope="session", autouse=True)
-def migrated_database() -> str | None:
-    """Подготовить явно переданную тестовую БД; без неё SQL-тесты пропускаются."""
+@pytest.fixture(scope="session")
+def migrated_database(postgres_dsn) -> str:
+    """Применить настоящие yoyo-миграции к PostgreSQL из Testcontainers."""
     from src.infrastructure.database.migrate import apply
 
-    dsn = os.getenv("TEST_QUEUE_DATABASE_URL")
-    if dsn:
-        apply(dsn)
-    return dsn
+    apply(postgres_dsn)
+    return postgres_dsn
 
 
 @pytest_asyncio.fixture
@@ -24,8 +21,6 @@ async def queue_factory(migrated_database):
     """Создать очередь в своём сообществе и удалить только её строки после теста."""
     from src.vkbot.queue import QueueStore
 
-    if not migrated_database:
-        pytest.skip("Set TEST_QUEUE_DATABASE_URL to run real PostgreSQL integration tests")
     created = []
 
     async def create(*, telemetry=False, lease_seconds=3):
@@ -57,18 +52,16 @@ async def observed_store(queue_factory):
 
 
 @pytest.fixture
-def isolated_database(migrated_database) -> Generator[str, None, None]:
+def isolated_database(postgres_dsn) -> Generator[str, None, None]:
     """Выдать пустую БД для проверки DDL, не затрагивая общие таблицы очереди."""
     import psycopg
     from psycopg import sql
     from psycopg.conninfo import make_conninfo
 
-    if not migrated_database:
-        pytest.skip("Requires isolated real PostgreSQL")
     name = "domofomka_test_" + uuid.uuid4().hex
-    with psycopg.connect(migrated_database, autocommit=True) as admin:
+    with psycopg.connect(postgres_dsn, autocommit=True) as admin:
         admin.execute(sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(sql.Identifier(name)))
         try:
-            yield make_conninfo(migrated_database, dbname=name)
+            yield make_conninfo(postgres_dsn, dbname=name)
         finally:
             admin.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))

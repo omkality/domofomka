@@ -3,9 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from src.code_service.services.v2.engine import Catalog, search_body
 from src.code_service.services.v2.normalize import parse_query, text
+from src.code_service.services.v2.opensearch import search_body
 from tools.catalog.build_catalog import SCHEMA
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 
 @pytest.mark.parametrize(
@@ -81,7 +82,7 @@ def catalog(tmp_path: Path):
     )
     db.commit()
     db.close()
-    return Catalog(str(path))
+    return SqliteCatalog(str(path))
 
 
 def test_ambiguous_city_requires_choice(catalog):
@@ -141,21 +142,10 @@ def test_top_n_index_candidates_cannot_hide_exact_catalog_match(catalog):
 
 def test_catalog_candidate_budget_changes_retrieval_without_changing_default(catalog):
     assert catalog.resolve("Перерва 62к1")["status"] == "ambiguous"
-    limited = Catalog(catalog.path, candidate_limit=1)
+    limited = SqliteCatalog(catalog.path, candidate_limit=1)
     answer = limited.resolve("Перерва 62к1")
     assert answer["status"] == "found"
     assert answer["building_id"] in {"a", "c"}
-
-
-@pytest.mark.asyncio
-async def test_application_passes_candidate_budget_to_sqlite_reader(catalog, monkeypatch):
-    from src.code_service.config import settings
-    from src.code_service.services.v2.catalog import get_catalog
-
-    monkeypatch.setattr(settings, "search_backend", "sqlite")
-    monkeypatch.setattr(settings, "search_catalog_path", catalog.path)
-    monkeypatch.setattr(settings, "search_candidate_limit", 5)
-    assert (await get_catalog()).candidate_limit == 5
 
 
 def test_locality_words_cannot_replace_the_street_name(catalog):

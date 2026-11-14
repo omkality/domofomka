@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Callable
 from litestar.exceptions import HTTPException
 from litestar.response import Response
 
+from src.code_service.services.v2.catalog import CATALOG_BACKEND
 from src.infrastructure.telemetry import Capture, note, settings, span
 
 
@@ -18,16 +19,18 @@ async def observed(operation: Callable[[], Awaitable[dict]], requested: bool) ->
 
         note(
             search_config={
-                name: getattr(api_settings, name)
-                for name in (
-                    "search_min_similarity",
-                    "search_backend",
-                    "search_ambiguity_margin",
-                    "search_candidate_limit",
-                    "search_cache_ttl_seconds",
-                    "opensearch_fuzziness",
-                    "opensearch_prefix_length",
-                )
+                "search_backend": CATALOG_BACKEND,
+                **{
+                    name: getattr(api_settings, name)
+                    for name in (
+                        "search_min_similarity",
+                        "search_ambiguity_margin",
+                        "search_candidate_limit",
+                        "search_cache_ttl_seconds",
+                        "opensearch_fuzziness",
+                        "opensearch_prefix_length",
+                    )
+                },
             }
         )
         try:

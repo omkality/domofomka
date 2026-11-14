@@ -16,7 +16,7 @@ from pathlib import Path
 
 from src.code_service.services.v1.index import lookup
 from src.code_service.services.v2.constraints import legacy_source_matches
-from src.code_service.services.v2.engine import Catalog
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 worker_context = {}
 
@@ -41,7 +41,7 @@ def offered_codes(result: dict, legacy: dict, read_codes) -> set[tuple[str, str,
 def initialize(catalog_path, legacy, legacy_index, baseline=None):
     """Подготовить входные данные и читатели процесса сравнения."""
     codes = collections.defaultdict(set)
-    with Catalog(str(catalog_path)).connect() as db:
+    with SqliteCatalog(str(catalog_path)).connect() as db:
         for building_id, entrance, kind, code in db.execute(r"""
             SELECT
               building_id,
@@ -128,7 +128,7 @@ def run(args):
     for path in args.results:
         frozen = json.loads((path / "frozen-input.json").read_text(encoding="utf8"))
         if revision != frozen["catalog_sha256"]:
-            raise ValueError("Catalog differs from the frozen search run")
+            raise ValueError("SqliteCatalog differs from the frozen search run")
     groups = collections.defaultdict(list)
     for path in args.results:
         with (path / "results.jsonl").open(encoding="utf8") as stream:
