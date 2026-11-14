@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 def main():
+    """Передать проверенный выпуск по SSH без сохранения токена реестра на диске."""
     action = os.environ.get("DEPLOY_ACTION", "deploy")
     if action not in {"deploy", "rollback", "rollback-legacy"}:
         raise ValueError("Unsupported deployment action")
@@ -43,6 +44,7 @@ def main():
         "bot": os.environ["BOT_IMAGE"],
         "api_bytes": int(os.environ["API_IMAGE_BYTES"]),
         "bot_bytes": int(os.environ["BOT_IMAGE_BYTES"]),
+        "schema_migrations": 1,
     }
     if os.environ.get("CATALOG_LAYOUT"):
         manifest["catalog_layout"] = os.environ["CATALOG_LAYOUT"]

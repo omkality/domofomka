@@ -1,6 +1,6 @@
 """Ограниченная команда отдельного SSH-ключа Actions. Не предоставляет shell/SFTP.
 
-Устанавливается bootstrap-ci.py в закрытый каталог вне получаемых релизов.
+Устанавливается bootstrap_ci.py в закрытый каталог вне получаемых релизов.
 stdin: строка JSON с краткоживущим токеном GHCR, затем tar (максимум 2 МиБ).
 """
 
@@ -20,6 +20,7 @@ FILES = {"compose.deploy.yml", "ops/deploy.py", "release.json"}
 
 
 def read_url(url: str) -> bytes:
+    """Прочитать проверяемый исходный артефакт по URL с ограничением размера."""
     with urlopen(Request(url, headers={"User-Agent": "domofomka-deploy"}), timeout=20) as response:
         data = response.read(1048577)
     if len(data) > 1048576:
@@ -42,6 +43,7 @@ def verify_source(release: Path, target: str) -> None:
 
 
 def unpack(payload: bytes, destination: Path) -> None:
+    """Принять только разрешённые небольшие файлы архива выпуска."""
     with tarfile.open(fileobj=io.BytesIO(payload), mode="r:*") as archive:
         members = archive.getmembers()
         if {m.name for m in members} != FILES or len(members) != len(FILES):
@@ -55,6 +57,7 @@ def unpack(payload: bytes, destination: Path) -> None:
 
 
 def main() -> None:
+    """Ограниченная команда отдельного SSH-ключа Actions. Не предоставляет shell/SFTP."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--environment", choices=["dev", "prod"], required=True)

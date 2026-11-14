@@ -13,7 +13,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from src.code_service.v2.normalize import HOUSE_PATTERN, house_key, street_kind, text
+from src.code_service.services.v2.normalize import HOUSE_PATTERN, house_key, street_kind, text
 from tools.catalog.reconcile_street_order import apply
 from tools.evaluation.quality_suite import address_fields
 
@@ -25,6 +25,7 @@ TRAILING_STREET = re.compile(r"^(.+?)\s+" + STREET_TYPE + r"\s*$", re.I)
 
 
 def repeated_fields(city: str, kind: str, street: str) -> str | None:
+    """Распознать повторённые адресные поля исходной строки."""
     name, separator, repeated_city = street.rpartition(",")
     if not separator or text(repeated_city) != text(city):
         return None
@@ -35,6 +36,7 @@ def repeated_fields(city: str, kind: str, street: str) -> str | None:
 
 
 def shape(city: str, kind: str, street: str, house: str) -> tuple[tuple, bool] | None:
+    """Получить структурную форму исходного адреса для сверки."""
     changed = False
     kind = street_kind(kind)
     if repeated := repeated_fields(city, kind, street):
@@ -57,28 +59,53 @@ def shape(city: str, kind: str, street: str, house: str) -> tuple[tuple, bool] |
 
 
 def mappings(db: sqlite3.Connection, legacy: sqlite3.Connection) -> tuple[list[dict], dict]:
+    """Подготовить только однозначно проверенные перенаправления исходных адресов."""
     db.row_factory = sqlite3.Row
     legacy.row_factory = sqlite3.Row
     sources = []
     skipped = collections.Counter()
-    for row in db.execute(
-        "SELECT b.* FROM (SELECT DISTINCT building_id FROM codes) c JOIN buildings b ON b.id=c.building_id WHERE b.guid IS NULL"
-    ):
+    for row in db.execute(r"""
+        SELECT
+          b.*
+        FROM
+          (
+            SELECT DISTINCT
+              building_id
+            FROM
+              codes
+          ) AS c
+        INNER JOIN
+          buildings AS b
+          ON b.id = c.building_id
+        WHERE
+          b.guid IS NULL
+        """):
         try:
             kind = address_fields(row["display"])["kind"]
-            identity = shape(row["city"], kind, row["street"], row["house"])
+            source_shape = shape(row["city"], kind, row["street"], row["house"])
         except ValueError:
             continue
-        if identity and identity[1]:
+        if source_shape and source_shape[1]:
             if repeated_fields(row["city"], kind, row["street"]):
                 literal = db.execute(
-                    "SELECT 1 FROM buildings WHERE city_key=? AND street_key=? AND guid IS NOT NULL LIMIT 1",
+                    r"""
+                    SELECT
+                      1
+                    FROM
+                      buildings
+                    WHERE
+                      city_key = ?
+                      AND street_key = ?
+                      AND guid IS NOT NULL
+                    LIMIT
+                      1
+                    """,
                     (text(row["city"]), text(row["street"])),
                 ).fetchone()
                 if literal:
                     skipped["literal_source_street_exists"] += 1
                     continue
-            sources.append((dict(row), identity[0]))
+            sources.append((dict(row), source_shape[0]))
     wanted = {(identity[0], identity[2]) for _, identity in sources}
     street_variants = collections.defaultdict(set)
     for city, street in db.execute("SELECT city_key,street_key FROM streets"):
@@ -92,7 +119,17 @@ def mappings(db: sqlite3.Connection, legacy: sqlite3.Connection) -> tuple[list[d
             skipped["no_unique_official_street"] += 1
             continue
         official = db.execute(
-            "SELECT * FROM buildings WHERE city_key=? AND street_key=? AND house=? AND guid IS NOT NULL",
+            r"""
+            SELECT
+              *
+            FROM
+              buildings
+            WHERE
+              city_key = ?
+              AND street_key = ?
+              AND house = ?
+              AND guid IS NOT NULL
+            """,
             (identity[0], next(iter(variants)), identity[3]),
         ).fetchall()
         same_kind = [
@@ -104,7 +141,20 @@ def mappings(db: sqlite3.Connection, legacy: sqlite3.Connection) -> tuple[list[d
             skipped["non_unique_gar_identity"] += 1
             continue
         target = same_kind[0]
-        ids = [r[0] for r in db.execute("SELECT source_id FROM provenance WHERE building_id=?", (row["id"],))]
+        ids = [
+            r[0]
+            for r in db.execute(
+                r"""
+            SELECT
+              source_id
+            FROM
+              provenance
+            WHERE
+              building_id = ?
+            """,
+                (row["id"],),
+            )
+        ]
         actual = []
         for start in range(0, len(ids), 500):
             batch = ids[start : start + 500]
@@ -140,6 +190,7 @@ def mappings(db: sqlite3.Connection, legacy: sqlite3.Connection) -> tuple[list[d
 
 
 def main() -> None:
+    """Восстановить границы полей источника только при единственном точном доме ГАР."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--legacy", type=Path, default=Path("codes.db"))
@@ -154,7 +205,14 @@ def main() -> None:
         closing(sqlite3.connect("file:" + args.catalog.resolve().as_posix() + "?mode=ro", uri=True)) as db,
         closing(sqlite3.connect("file:" + args.legacy.resolve().as_posix() + "?mode=ro", uri=True)) as legacy,
     ):
-        stats = json.loads(db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()[0])
+        stats = json.loads(db.execute(r"""
+            SELECT
+              value
+            FROM
+              metadata
+            WHERE
+              key = 'build'
+            """).fetchone()[0])
         if stats["source_sha256"] != revision:
             raise ValueError("Legacy source revision differs")
         links, summary = mappings(db, legacy)

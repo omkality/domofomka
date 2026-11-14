@@ -1,35 +1,41 @@
 repos:
-  - repo: https://gitlab.com/vojko.pribudic.foss/pre-commit-update
-    rev: v0.9.0
-    hooks:
-      - id: pre-commit-update
-        args: [--dry-run]
-
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        args: [--unsafe]  # Docker Compose использует стандартный для него тег !override.
       - id: check-added-large-files
         args: ['--maxkb=2048']
       - id: check-merge-conflict
 
-  - repo: https://github.com/psf/black
-    rev: 26.1.0
+  - repo: local
     hooks:
       - id: black
-        args: [--config=pyproject.toml]
-
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.14
-    hooks:
+        name: Black (uv.lock)
+        entry: uv run --frozen --all-groups black --config=pyproject.toml
+        language: system
+        types: [python]
       - id: ruff
-        args: [--fix, --config=ruff.toml, --exit-non-zero-on-fix]
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1
-    hooks:
+        name: Ruff and concise docstrings (uv.lock)
+        entry: uv run --frozen --all-groups ruff check --fix --config=ruff.toml --exit-non-zero-on-fix
+        language: system
+        types: [python]
       - id: mypy
-        args: [--config-file=mypy.ini]
-        additional_dependencies: [pydantic]
+        name: Mypy (uv.lock)
+        entry: uv run --frozen --all-groups mypy --config-file=mypy.ini
+        language: system
+        types: [python]
+        files: ^(src|ops|tools)/
+      - id: explicit-environment-examples
+        name: Complete and consistently ordered environment examples
+        entry: uv run --frozen --all-groups python -m tools.configuration.environment --check-examples
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: sql-layout
+        name: SQL layout and keyword style
+        entry: uv run --frozen --all-groups sqlfluff lint --disable-progress-bar
+        language: system
+        types: [sql]

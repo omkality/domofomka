@@ -1,0 +1,10 @@
+# Applied yoyo revisions are immutable, including whitespace and comments.
+# New migration revisions use the root Mozilla-style rules.
+src/infrastructure/database/migrations/catalog/0001-catalog-tables.sql
+src/infrastructure/database/migrations/catalog/0001-catalog-tables.rollback.sql
+src/infrastructure/database/migrations/catalog/0002-catalog-indexes.sql
+src/infrastructure/database/migrations/catalog/0002-catalog-indexes.rollback.sql
+src/infrastructure/database/migrations/queue/0001-queue.sql
+src/infrastructure/database/migrations/queue/0001-queue.rollback.sql
+src/infrastructure/database/migrations/queue/0002-telemetry.sql
+src/infrastructure/database/migrations/queue/0002-telemetry.rollback.sql

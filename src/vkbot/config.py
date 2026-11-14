@@ -1,3 +1,5 @@
+"""Параметры приложения и их проверка при запуске."""
+
 from typing import Literal
 
 from pydantic import Field
@@ -5,6 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class VKBotSettings(BaseSettings):
+    """Настройки сообщества, очереди и политик VK-бота."""
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True
     )

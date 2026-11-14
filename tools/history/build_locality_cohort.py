@@ -13,6 +13,7 @@ from tools.history.audit_query_localities import LocalityMatcher, mentions, quer
 
 
 def select_cases(rows, *, excluded: set[str], per_place: int = 8) -> tuple[list[dict], dict]:
+    """Отобрать контрольные запросы без смешивания диалогов между выборками."""
     if not 1 <= per_place <= 32:
         raise ValueError("Per-place sample must be between 1 and 32")
     counts = Counter()
@@ -72,6 +73,7 @@ def select_cases(rows, *, excluded: set[str], per_place: int = 8) -> tuple[list[
 
 
 def stratify(frozen: dict, result_path: Path, matcher: LocalityMatcher, observed: list[dict]) -> dict:
+    """Распределить случаи по проверяемым группам местностей и ошибок."""
     cases = frozen["cases"]
     variants = {variant["name"] for variant in frozen["variants"]}
     labels = [mentions(matcher.find(case["query"])) for case in cases]
@@ -117,6 +119,7 @@ def stratify(frozen: dict, result_path: Path, matcher: LocalityMatcher, observed
 
 
 def build(audit_path: Path, frozen_path: Path, catalog: Path, output: Path, per_place: int) -> dict:
+    """Подготовить отдельный проверяемый артефакт из исходных данных."""
     if output.exists():
         raise FileExistsError("Preserve previous comparison; choose a new output")
     frozen = json.loads((frozen_path / "frozen-input.json").read_text(encoding="utf8"))
@@ -162,6 +165,7 @@ def build(audit_path: Path, frozen_path: Path, catalog: Path, output: Path, per_
 
 
 def main():
+    """Разрез полного прогона по упоминаниям и дополнительная равномерная выборка населённых пунктов."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audit", type=Path, required=True)
     parser.add_argument("--frozen", type=Path, required=True)

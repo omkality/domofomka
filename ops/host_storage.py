@@ -12,43 +12,25 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
-
-JOURNAL = """[Journal]
-SystemMaxUse=64M
-SystemMaxFileSize=8M
-SystemKeepFree=512M
-RuntimeMaxUse=16M
-RuntimeMaxFileSize=4M
-RuntimeKeepFree=32M
-MaxRetentionSec=7day
-Compress=yes
-"""
-TIMER = """[Timer]
-OnCalendar=
-OnCalendar=*-*-* *:0/5:00
-RandomizedDelaySec=30s
-AccuracySec=30s
-Persistent=true
-"""
+from pathlib import Path, PurePosixPath
 
 
-def log_rule(paths: list[str], size: str, copies: int, create: str = "") -> str:
-    return (
-        "\n".join(paths)
-        + " {\n    daily\n    maxsize "
-        + size
-        + "\n    rotate "
-        + str(copies)
-        + (
-            "\n    maxage 7\n    missingok\n    notifempty\n    compress\n    "
-            + ("create " + create if create else "copytruncate")
-            + "\n}\n"
-        )
-    )
+def configuration_files(config: Path) -> list[dict]:
+    """Прочитать проверенный перечень штатных конфигураций без генерации их синтаксиса."""
+    files = json.loads((config / "manifest.json").read_text(encoding="utf-8"))
+    for entry in files:
+        source = (config / entry["source"]).resolve()
+        source.relative_to(config.parent.resolve())
+        target = PurePosixPath(entry["target"])
+        if not source.is_file() or not target.is_absolute() or ".." in target.parts:
+            raise ValueError("Invalid host configuration manifest")
+        if entry.get("when") not in {None, "exists", "missing"}:
+            raise ValueError("Invalid host configuration condition")
+    return files
 
 
 def audit() -> dict:
+    """Прочитать свободное место и состояние штатной ротации без изменений хоста."""
     disk = shutil.disk_usage("/")
     return {
         "total_bytes": disk.total,
@@ -62,6 +44,7 @@ def audit() -> dict:
 
 
 def apply() -> None:
+    """Установить проверенные конфиги хранения с резервированием прежних файлов."""
     if os.geteuid() != 0:
         raise PermissionError("Root required")
     os.umask(0o077)
@@ -70,6 +53,7 @@ def apply() -> None:
     changes = {}
 
     def write(name: str, content: str) -> None:
+        """Сохранить прежний конфиг и заменить его только при изменившемся содержимом."""
         path = Path(name)
         if path.exists() and path.read_text() == content:
             return
@@ -83,59 +67,14 @@ def apply() -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
 
-    write("/etc/systemd/journald.conf.d/99-storage-budget.conf", JOURNAL)
-    write("/etc/systemd/system/logrotate.timer.d/zz-storage-budget.conf", TIMER)
-    write("/etc/logrotate.d/btmp", log_rule(["/var/log/btmp"], "2M", 7, "0660 root utmp"))
-    write("/etc/logrotate.d/wtmp", log_rule(["/var/log/wtmp"], "1M", 2, "0664 root utmp"))
-    if Path("/etc/logrotate.d/rsyslog").exists():
-        write(
-            "/etc/logrotate.d/rsyslog",
-            log_rule(
-                ["/var/log/" + x for x in ["syslog", "mail.log", "kern.log", "auth.log", "user.log", "cron.log"]],
-                "2M",
-                7,
-            ),
-        )
-    if Path("/etc/logrotate.d/tinyproxy").exists():
-        write("/etc/logrotate.d/tinyproxy", log_rule(["/var/log/tinyproxy/tinyproxy.log"], "1M", 4))
-    write("/etc/apt/apt.conf.d/99-cache-budget", 'APT::Periodic::MaxAge "7";\nAPT::Periodic::MaxSize "64";\n')
-    write("/etc/sysctl.d/99-storage-no-core.conf", "kernel.core_pattern = |/bin/false\nfs.suid_dumpable = 0\n")
-    guard = Path(__file__).with_name("disk_reserve.py")
-    write("/usr/local/libexec/domofomka-disk-reserve.py", guard.read_text())
-    if not Path("/etc/domofomka-storage.env").exists():
-        write(
-            "/etc/domofomka-storage.env",
-            "DISK_RESERVE_BYTES=268435456\nDISK_LOW_BYTES=536870912\n"
-            "DISK_CRITICAL_BYTES=134217728\nDISK_REARM_BYTES=1342177280\n",
-        )
-    write(
-        "/etc/systemd/system/domofomka-disk-reserve.service",
-        """[Unit]
-Description=Release emergency disk reserve and protect host availability
-After=local-fs.target
-[Service]
-Type=oneshot
-EnvironmentFile=-/etc/domofomka-storage.env
-ExecStart=/usr/bin/python3 /usr/local/libexec/domofomka-disk-reserve.py
-Nice=19
-IOSchedulingClass=idle
-CPUQuota=10%
-MemoryMax=64M
-TimeoutStartSec=180
-""",
-    )
-    write(
-        "/etc/systemd/system/domofomka-disk-reserve.timer",
-        """[Unit]
-Description=Check emergency disk reserve every minute
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=1min
-AccuracySec=10s
-[Install]
-WantedBy=timers.target
-""",
-    )
+    config = Path(__file__).with_name("config")
+    for entry in configuration_files(config):
+        target = Path(entry["target"])
+        if entry.get("when") == "exists" and not target.exists():
+            continue
+        if entry.get("when") == "missing" and target.exists():
+            continue
+        write(str(target), (config / entry["source"]).read_text(encoding="utf-8"))
     try:
         subprocess.run(
             ["logrotate", "--debug", "/etc/logrotate.conf"],
@@ -143,7 +82,12 @@ WantedBy=timers.target
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        subprocess.run(["systemd-analyze", "calendar", "*-*-* *:0/5:00"], check=True, stdout=subprocess.DEVNULL)
+        calendar = next(
+            line.split("=", 1)[1]
+            for line in (config / "logrotate-timer.conf").read_text().splitlines()
+            if line.startswith("OnCalendar=") and line.split("=", 1)[1]
+        )
+        subprocess.run(["systemd-analyze", "calendar", calendar], check=True, stdout=subprocess.DEVNULL)
     except BaseException:
         for name, existed in changes.items():
             if existed:

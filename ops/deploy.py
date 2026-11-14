@@ -33,23 +33,29 @@ TARGETS = {
 # inside the image so rollback does not depend on today's source tree.
 CATALOG_ENTRYPOINT = (
     "import runpy; from pathlib import Path; "
-    "runpy.run_module('src.code_service.v2.catalog_update' "
+    "runpy.run_module('src.code_service.services.v2.catalog_update' "
+    "if Path('/backend/src/code_service/services/v2/catalog_update.py').is_file() "
+    "else 'src.code_service.v2.catalog_update' "
     "if Path('/backend/src/code_service/v2/catalog_update.py').is_file() "
     "else 'src.search.catalog_update', run_name='__main__')"
 )
 
 
 def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+    """Выполнить системную команду и остановить операцию при ненулевом коде."""
     return subprocess.run(args, check=True, text=True, **kwargs)
 
 
 def validate_manifest(value: dict, target: str) -> dict:
+    """Проверить окружение, ревизию и неизменяемые образы выпуска."""
     if value.get("runtime", "v2") != "v2":
         raise ValueError("Legacy runtime is only allowed in an administrator-frozen baseline")
     if value.get("environment") != target or not SHA.fullmatch(value.get("revision", "")):
         raise ValueError("Invalid release environment or commit")
     if value.get("catalog_layout") and (target != "dev" or value["catalog_layout"] != "street-key-v1"):
         raise ValueError("Invalid catalog layout request; dev-only maintenance")
+    if value.get("schema_migrations", 0) not in {0, 1}:
+        raise ValueError("Unsupported migration protocol")
     for service, pattern in IMAGES.items():
         if not pattern.fullmatch(value.get(service, "")):
             raise ValueError("Immutable image digest required")
@@ -81,6 +87,7 @@ COMMIT;
 
 
 def write_json(path: Path, value: dict) -> None:
+    """Атомарно заменить JSON-файл состояния готовым содержимым."""
     temp = path.with_suffix(".tmp")
     temp.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
     temp.replace(path)
@@ -88,6 +95,7 @@ def write_json(path: Path, value: dict) -> None:
 
 def settings(path: Path) -> dict:
     # Compose самостоятельно читает секреты и подстановки .env. Здесь только числовые лимиты.
+    """Прочитать параметры развёртывания без вывода секретов окружения."""
     return dict(
         line.strip().split("=", 1)
         for line in path.read_text().splitlines()
@@ -96,7 +104,10 @@ def settings(path: Path) -> dict:
 
 
 class Deployment:
+    """Проверяемое переключение готовых образов с сохранением данных и откатом."""
+
     def __init__(self, root: Path, target: str):
+        """Выбрать окружение, пути релизов, порт и пределы развёртывания."""
         self.root = root.resolve()
         self.target = target
         self.project, env_name, self.group, port = TARGETS[target]
@@ -111,6 +122,7 @@ class Deployment:
             raise ValueError("Invalid deploy limits")
 
     def compose(self, release: Path, *args: str, **kwargs: Any) -> subprocess.CompletedProcess:
+        """Запустить Compose выбранного выпуска с его образом и окружением."""
         manifest = json.loads((Path(release) / "release.json").read_text())
         legacy = manifest.get("runtime") == "legacy-v1"
         snapshot = Path(release) / "legacy-snapshot"
@@ -145,10 +157,12 @@ class Deployment:
         )
 
     def inspect(self, service: str) -> dict:
+        """Прочитать состояние контейнера выбранного сервиса."""
         name = f"{self.project}-{service}-1"
         return json.loads(run(["docker", "inspect", name], capture_output=True).stdout)[0]
 
     def verify_environment(self) -> None:
+        """Проверить сообщество, исходные данные и готовность существующего PostgreSQL."""
         if self.config.get("VK_GROUP_ID") != self.group or self.config.get("EXPECTED_VK_GROUP_ID") != self.group:
             raise ValueError("Wrong VK community in server environment")
         for file in (self.root / "codes.db", self.root / "artifacts/search/legacy-index.db"):
@@ -159,15 +173,21 @@ class Deployment:
             raise ValueError("Existing PostgreSQL must be healthy; database bootstrap is separate")
 
     def free_space(self, extra: int = 0) -> None:
+        """Запретить операцию, если она нарушит резерв свободного диска."""
         if shutil.disk_usage(self.root).free < self.reserve + extra:
             raise RuntimeError("Insufficient free disk; running release unchanged")
 
     def verify_legacy_retry(self, current: Path) -> None:
+        """Не допустить повторный переход с v1 при незавершённой работе v2."""
         if json.loads((current / "release.json").read_text()).get("runtime") != "legacy-v1":
             return
         command = ["docker", "exec", f"{self.project}-queue-1", "psql", "-U", "domofomka", "-d", "domofomka", "-Atc"]
         exists = run(
-            command + ["SELECT to_regclass('public.bot_inbox') IS NOT NULL"], capture_output=True
+            command + [r"""
+            SELECT
+              to_regclass('public.bot_inbox') IS NOT NULL
+            """],
+            capture_output=True,
         ).stdout.strip()
         if exists == "f":
             return
@@ -176,7 +196,9 @@ class Deployment:
         pending = run(
             command
             + [
-                "SELECT (SELECT count(*) FROM bot_inbox WHERE group_id=" + self.group + " AND status<>'done')+"
+                r"""
+            SELECT (SELECT count(*) FROM bot_inbox WHERE group_id=
+            """ + self.group + " AND status<>'done')+"
                 "(SELECT count(*) FROM bot_outbox WHERE group_id=" + self.group + " AND status<>'done')"
             ],
             capture_output=True,
@@ -185,6 +207,7 @@ class Deployment:
             raise RuntimeError("Unfinished v2 work after legacy rollback; reconcile deliveries before retrying")
 
     def catalog_revision(self, database: str) -> str:
+        """Прочитать ревизию указанного каталога через существующий PostgreSQL."""
         return run(
             [
                 "docker",
@@ -196,12 +219,20 @@ class Deployment:
                 "-d",
                 database,
                 "-Atc",
-                "SELECT value FROM metadata WHERE key='source_catalog_sha256'",
+                r"""
+            SELECT
+              value
+            FROM
+              metadata
+            WHERE
+              key = 'source_catalog_sha256'
+            """,
             ],
             capture_output=True,
         ).stdout.strip()
 
     def catalog_change(self, image: str) -> dict | None:
+        """Проверить необходимость и совместимость обратимого патча каталога."""
         info = json.loads(
             run(
                 [
@@ -216,11 +247,8 @@ class Deployment:
                     "--ulimit",
                     "core=0",
                     "--entrypoint",
-                    "uv",
+                    "/backend/.venv/bin/python",
                     image,
-                    "run",
-                    "--frozen",
-                    "python",
                     "-c",
                     CATALOG_ENTRYPOINT,
                     "inspect",
@@ -279,12 +307,46 @@ class Deployment:
                 command
                 + [
                     "-c",
-                    "SELECT json_build_object("
-                    "'revision',(SELECT value FROM metadata WHERE key='source_catalog_sha256'),"
-                    "'state',(SELECT value FROM metadata WHERE key='publication_state'),"
-                    "'schema',(SELECT value FROM metadata WHERE key='catalog_schema_version'),"
-                    "'layout',(SELECT value FROM metadata WHERE key='street_layout'),"
-                    "'bytes',pg_total_relation_size('public.streets'))",
+                    r"""
+            SELECT
+              json_build_object(
+                'revision',
+                (
+                  SELECT
+                    value
+                  FROM
+                    metadata
+                  WHERE
+                    KEY = 'source_catalog_sha256'
+                ), 'state',
+                (
+                  SELECT
+                    value
+                  FROM
+                    metadata
+                  WHERE
+                    KEY = 'publication_state'
+                ), 'schema',
+                (
+                  SELECT
+                    value
+                  FROM
+                    metadata
+                  WHERE
+                    KEY = 'catalog_schema_version'
+                ), 'layout',
+                (
+                  SELECT
+                    value
+                  FROM
+                    metadata
+                  WHERE
+                    KEY = 'street_layout'
+                ),
+                'bytes',
+                pg_total_relation_size('public.streets')
+              )
+            """,
                 ],
                 capture_output=True,
             ).stdout
@@ -317,6 +379,7 @@ class Deployment:
         return True
 
     def set_catalog_revision(self, revision: str) -> None:
+        """Обновить ссылку на принятую ревизию в серверном окружении."""
         if not re.fullmatch(r"[0-9a-f]{64}", revision):
             raise ValueError("Invalid catalog revision")
         lines = self.env_file.read_text().splitlines()
@@ -327,6 +390,7 @@ class Deployment:
         temp.replace(self.env_file)
 
     def run_catalog(self, info: dict, reverse: bool = False) -> None:
+        """Запустить ограниченный контейнер применения или обращения патча."""
         if self.target != "dev":
             raise ValueError("Catalog mutation is dev-only")
         self.free_space()
@@ -377,11 +441,8 @@ class Deployment:
                         "--mount",
                         "type=bind,source=" + info["patch"] + ",target=/patch,readonly",
                         "--entrypoint",
-                        "uv",
+                        "/backend/.venv/bin/python",
                         info["image"],
-                        "run",
-                        "--frozen",
-                        "python",
                         "-c",
                         CATALOG_ENTRYPOINT,
                         "reverse" if reverse else "apply",
@@ -400,6 +461,7 @@ class Deployment:
         self.set_catalog_revision(target)
 
     def check(self, release: Path) -> None:
+        """Проверить HTTP-контракт, настоящий v2 и активный runtime бота."""
         manifest = json.loads((Path(release) / "release.json").read_text())
         legacy = manifest.get("runtime") == "legacy-v1"
         # Выполняется внутри готового API, без зависимости хоста от Python-пакетов.
@@ -429,10 +491,7 @@ if os.environ.get('SEARCH_BACKEND','sqlite')=='postgres':
             "exec",
             "-T",
             "api",
-            "uv",
-            "run",
-            "--frozen",
-            "python",
+            "/backend/.venv/bin/python",
             "-c",
             probe,
             stdout=subprocess.DEVNULL,
@@ -442,8 +501,13 @@ if os.environ.get('SEARCH_BACKEND','sqlite')=='postgres':
         probe_bot = """
 from src.vkbot.config import settings
 from src.vkbot.runtime import Runtime
+from src.infrastructure.network import network_settings
+import psycopg
+from psycopg.rows import dict_row
 r=Runtime(settings)
-with r.store.connect() as db:
+with psycopg.connect(r.store.dsn, row_factory=dict_row,
+    connect_timeout=network_settings.queue_db_connect_timeout_seconds,
+    options=f'-c statement_timeout={network_settings.queue_db_statement_timeout_ms}') as db:
     assert db.execute('SELECT NOT pg_try_advisory_lock(20261021,%s) AS active',(r.store.group_id,)).fetchone()['active']
 """
         if legacy:
@@ -473,10 +537,7 @@ asyncio.run(redis_ready())
             "exec",
             "-T",
             "vkbot",
-            "uv",
-            "run",
-            "--frozen",
-            "python",
+            "/backend/.venv/bin/python",
             "-c",
             probe_bot,
             stdout=subprocess.DEVNULL,
@@ -484,7 +545,38 @@ asyncio.run(redis_ready())
         )
 
     def activate(self, release: Path) -> None:
+        """Остановить прежний бот, подготовить схему и запустить проверенный выпуск."""
         self.compose(release, "stop", "-t", "30", "vkbot")
+        manifest = json.loads((release / "release.json").read_text())
+        if manifest.get("schema_migrations") == 1:
+            self.compose(
+                release,
+                "run",
+                "--rm",
+                "--no-deps",
+                "-T",
+                "vkbot",
+                "/backend/.venv/bin/python",
+                "-m",
+                "src.infrastructure.database.migrate",
+                "apply",
+                "queue",
+            )
+            if self.config.get("SEARCH_BACKEND") == "postgres":
+                self.compose(
+                    release,
+                    "run",
+                    "--rm",
+                    "--no-deps",
+                    "-T",
+                    "vkbot",
+                    "/backend/.venv/bin/python",
+                    "-m",
+                    "src.infrastructure.database.migrate",
+                    "apply",
+                    "catalog",
+                    "--adopt-baseline",
+                )
         self.compose(release, "up", "-d", "--no-deps", "--no-build", "--pull", "never", "api", "vkbot")
         deadline = time.monotonic() + self.timeout
         while time.monotonic() < deadline:
@@ -505,6 +597,7 @@ asyncio.run(redis_ready())
         raise RuntimeError("Release failed readiness check")
 
     def deploy(self, release: Path) -> None:
+        """Принять точные digest, проверить данные и переключить приложения с откатом при ошибке."""
         previous = json.loads(self.state_path.read_text())
         manifest = validate_manifest(json.loads((release / "release.json").read_text()), self.target)
         self.verify_environment()
@@ -539,7 +632,7 @@ asyncio.run(redis_ready())
                 raise ValueError("Image revision differs from release commit")
             self.free_space()
         catalog = self.catalog_change(manifest["api"])
-        # Очередь не мигрируем; каталог допускает только проверенный обратимый патч.
+        # Копия до миграций. Автоматический откат меняет образы, а не схему очереди.
         backup = self.home / "queue-before-deploy.dump"
         with backup.with_suffix(".part").open("wb") as output:
             subprocess.run(
@@ -587,6 +680,7 @@ asyncio.run(redis_ready())
         sys.stdout.write(f"Healthy {self.target} release {manifest['revision']}\n")
 
     def rollback(self, legacy_v1: bool = False) -> None:
+        """Вернуть сохранённый выпуск без автоматического отката SQL-схемы."""
         state = json.loads(self.state_path.read_text())
         if legacy_v1:
             baseline = self.home / "releases/baseline"
@@ -639,6 +733,7 @@ asyncio.run(redis_ready())
         sys.stdout.write(f"Rolled back {self.target} to {manifest['revision']}\n")
 
     def recover_pending(self) -> None:
+        """Завершить либо обратить прерванное переключение по журналу транзакции."""
         journal = self.home / "transaction.json"
         if journal.exists():
             interrupted_release = json.loads(journal.read_text())
@@ -704,6 +799,7 @@ asyncio.run(redis_ready())
         sys.stdout.write(f"Healthy {self.target} catalog maintenance at {active['revision']}\n")
 
     def cleanup(self, extra_keep: Path | None = None) -> None:
+        """Удалить только неприкреплённые артефакты выпуска, сохранив текущий и резервный."""
         state = json.loads(self.state_path.read_text())
         keep = {state["current"], state.get("previous")}
         if extra_keep is not None:
@@ -732,6 +828,7 @@ asyncio.run(redis_ready())
 
 
 def main() -> None:
+    """Развёртывание приложений и проверенных обратимых обновлений каталога dev."""
     import fcntl
 
     parser = argparse.ArgumentParser()
@@ -746,6 +843,7 @@ def main() -> None:
     deployment = Deployment(args.root, args.environment)
 
     def interrupted(signum: int, frame: Any) -> None:
+        """Прервать переключение через общий путь обработки сигналов."""
         raise RuntimeError("Deployment interrupted")
 
     for signum in (signal.SIGTERM, signal.SIGHUP):

@@ -6,11 +6,12 @@ import json
 import sqlite3
 from pathlib import Path
 
-from src.code_service.v2.normalize import indexed_name_words
+from src.code_service.services.v2.normalize import indexed_name_words
 from tools.catalog.refresh_aliases import refresh
 
 
 def repair(source: Path, output: Path) -> dict:
+    """Создать проверяемое исправление отдельной копии поискового каталога."""
     if output.exists() or source.resolve() == output.resolve():
         raise FileExistsError("Preserve the frozen source and previous result")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -19,7 +20,17 @@ def repair(source: Path, output: Path) -> dict:
         try:
             before.backup(db)
             changed = 0
-            cursor = db.execute("SELECT id,city_key,street_key,words FROM streets ORDER BY id")
+            cursor = db.execute(r"""
+                SELECT
+                  id,
+                  city_key,
+                  street_key,
+                  words
+                FROM
+                  streets
+                ORDER BY
+                  id
+                """)
             while rows := cursor.fetchmany(5000):
                 edits = [
                     (indexed_name_words(city, street), sid)
@@ -29,7 +40,16 @@ def repair(source: Path, output: Path) -> dict:
                 db.executemany("UPDATE streets SET words=? WHERE id=?", edits)
                 changed += len(edits)
             db.execute("DELETE FROM search")
-            db.execute("INSERT INTO search(id,words) SELECT id,words FROM streets ORDER BY id")
+            db.execute(r"""
+                INSERT INTO search (id, words)
+                SELECT
+                  id,
+                  words
+                FROM
+                  streets
+                ORDER BY
+                  id
+                """)
             aliases = refresh(db)
             db.commit()
             db.execute("ANALYZE")

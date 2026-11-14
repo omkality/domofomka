@@ -22,7 +22,7 @@ services:
     memswap_limit: ${API_MEMSWAP_LIMIT:-512m}
     pids_limit: ${API_PIDS_LIMIT:-128}
     logging: *logging
-    command: uv run --frozen granian --interface asgi src.code_service.app:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8000} --workers ${WORKERS_NUM:-1} --log --access-log
+    command: /backend/.venv/bin/granian --interface asgi src.code_service.main:app --host ${API_HOST:-0.0.0.0} --port ${API_PORT:-8000} --workers ${WORKERS_NUM:-1} --log --access-log
     env_file: ['${DEPLOY_ENV_FILE:?Set DEPLOY_ENV_FILE}']
     environment:
       APP_REVISION: ${APP_REVISION:?Set APP_REVISION}
@@ -35,7 +35,7 @@ services:
       - ${APP_ROOT:?Set APP_ROOT}/codes.db:/backend/codes.db:ro
       - ${APP_ROOT}/artifacts/search:/backend/catalog:ro
     healthcheck:
-      test: [CMD, python, -c, "import http.client,os; c=http.client.HTTPConnection('127.0.0.1',int(os.environ.get('API_PORT','8000')),timeout=3); c.request('GET','/version'); assert c.getresponse().status==200"]
+      test: [CMD, wget, -q, -T, '${API_HEALTH_REQUEST_TIMEOUT_SECONDS:-3}', -O, /dev/null, 'http://127.0.0.1:${API_PORT:-8000}/version']
       interval: ${API_HEALTH_INTERVAL:-20s}
       timeout: ${API_HEALTH_TIMEOUT:-5s}
       retries: ${API_HEALTH_RETRIES:-5}
@@ -57,7 +57,7 @@ services:
     memswap_limit: ${BOT_MEMSWAP_LIMIT:-192m}
     pids_limit: ${BOT_PIDS_LIMIT:-64}
     logging: *logging
-    command: uv run --frozen python -m src.vkbot.main
+    command: /backend/.venv/bin/python -m src.vkbot.main
     env_file: ['${DEPLOY_ENV_FILE}']
     environment:
       APP_REVISION: ${APP_REVISION}

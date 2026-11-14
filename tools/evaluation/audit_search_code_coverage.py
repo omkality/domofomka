@@ -14,14 +14,15 @@ import time
 from functools import partial
 from pathlib import Path
 
-from src.code_service.v1.index import lookup
-from src.code_service.v2.constraints import legacy_source_matches
-from src.code_service.v2.engine import Catalog
+from src.code_service.services.v1.index import lookup
+from src.code_service.services.v2.constraints import legacy_source_matches
+from src.code_service.services.v2.engine import Catalog
 
 worker_context = {}
 
 
 def code_values(answer: dict) -> set[tuple[str, str, str]]:
+    """Получить сравнимое множество кодов по источникам и подъездам."""
     return {
         (str(entrance), str(kind), str(code))
         for entrance, items in answer.get("data", {}).items()
@@ -30,6 +31,7 @@ def code_values(answer: dict) -> set[tuple[str, str, str]]:
 
 
 def offered_codes(result: dict, legacy: dict, read_codes) -> set[tuple[str, str, str]]:
+    """Собрать коды всех адресов, фактически предложенных результатом поиска."""
     if result.get("engine") == "v1" and result["status"] == "found":
         return code_values(legacy)
     options = [result] if result["status"] == "found" else result.get("candidates", [])
@@ -37,14 +39,24 @@ def offered_codes(result: dict, legacy: dict, read_codes) -> set[tuple[str, str,
 
 
 def initialize(catalog_path, legacy, legacy_index, baseline=None):
+    """Подготовить входные данные и читатели процесса сравнения."""
     codes = collections.defaultdict(set)
     with Catalog(str(catalog_path)).connect() as db:
-        for building_id, entrance, kind, code in db.execute("SELECT building_id,entrance,kind,code FROM codes"):
+        for building_id, entrance, kind, code in db.execute(r"""
+            SELECT
+              building_id,
+              entrance,
+              kind,
+              code
+            FROM
+              codes
+            """):
             codes[building_id].add((str(entrance), str(kind), str(code)))
     worker_context.update(codes=codes, legacy=str(legacy), index=str(legacy_index), baseline=baseline)
 
 
 def compare(item):
+    """Сравнить результаты одинаковых запросов на проверяемых вариантах."""
     query, rows = item
     legacy = lookup(query, worker_context["legacy"], worker_context["index"])
     if legacy is None:
@@ -103,6 +115,7 @@ def compare(item):
 
 
 def run(args):
+    """Выполнить выбранный контрольный прогон и сохранить его результаты."""
     private = Path("artifacts/private").resolve()
     output = args.output.resolve()
     if not output.is_relative_to(private):
@@ -176,6 +189,7 @@ def run(args):
 
 
 def main():
+    """Сверить сохранность уникальных кодов v1 в замороженных результатах поиска."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results", type=Path, nargs="+", required=True)
     parser.add_argument("--output", type=Path, required=True)

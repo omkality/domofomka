@@ -10,6 +10,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class NetworkSettings(BaseSettings):
+    """Бюджеты времени, повторы и ограничения сетевых клиентов."""
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore", allow_inf_nan=False, hide_input_in_errors=True
     )
@@ -35,11 +37,14 @@ class NetworkSettings(BaseSettings):
     internal_api_geo_timeout_seconds: float = Field(default=30, gt=0)
 
     queue_db_connect_timeout_seconds: int = Field(default=5, gt=0)
+    queue_db_max_concurrent: int = Field(default=4, ge=1, le=16)
     queue_db_statement_timeout_ms: int = Field(default=15000, gt=0)
     queue_db_lock_timeout_ms: int = Field(default=5000, gt=0)
+    migration_statement_timeout_ms: int = Field(default=120000, ge=1000, le=600000)
 
     @model_validator(mode="after")
     def consistent_limits(self) -> "NetworkSettings":
+        """Проверить согласованность вложенных сетевых бюджетов."""
         if self.proxy_retry_max_seconds < self.proxy_retry_initial_seconds:
             raise ValueError("Proxy retry maximum must cover the initial delay")
         if self.dadata_connect_timeout_seconds > self.dadata_timeout_seconds:

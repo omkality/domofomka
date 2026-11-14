@@ -1,0 +1,12 @@
+[Unit]
+Description=Release emergency disk reserve and protect host availability
+After=local-fs.target
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/domofomka-storage.env
+ExecStart=/usr/bin/python3 /usr/local/libexec/domofomka-disk-reserve.py
+Nice=19
+IOSchedulingClass=idle
+CPUQuota=10%
+MemoryMax=64M
+TimeoutStartSec=180

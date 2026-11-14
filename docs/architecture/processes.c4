@@ -1,0 +1,160 @@
+// Два процесса: приём/обработка и доставка/восстановление.
+views {
+  dynamic view requestLifecycle {
+    title 'Запрос: приём, поиск и подготовка ответа'
+    description 'Ветви показывают разные исходы одного запроса; они не выполняются одновременно.'
+    user -> vk 'Отправляет текст, геометку или нажатие'
+    vk -> domofomka.bot.collector 'Long Poll передаёт событие'
+    domofomka.bot.collector -> domofomka.postgres.queue.inbox 'Атомарно сохраняет событие и курсор Long Poll'
+    alt {
+      when 'Событие уже сохранено' {
+        domofomka.bot.collector -> domofomka.postgres.queue.inbox 'Уникальный event_key исключает повторную обработку'
+      }
+      else 'Новое событие' {
+        opt 'Это callback-нажатие' {
+          domofomka.bot.collector -> domofomka.bot.transport 'Подтверждает записанное нажатие и сообщает cooldown'
+          domofomka.bot.transport -> vk 'Снимает индикатор кнопки; учитывает общий RateGate'
+        }
+        domofomka.bot.policy -> domofomka.postgres.queue.state 'Проверяет бюджет отдельного пользователя'
+        domofomka.bot.policy -> domofomka.postgres.queue.inbox 'Объединяет лишние неначатые запросы; откладывает частые'
+        domofomka.postgres.queue.inbox -> domofomka.bot.planner 'Выдаёт разрешённое задание с lease'
+        opt 'Новое сообщение, кроме команды «Начать»' {
+          domofomka.bot.planner -> vk 'Проверяет подписку на сообщество'
+          opt 'Нет подписки' {
+            domofomka.bot.planner -> domofomka.bot.presentation 'Готовит приглашение подписаться, без поиска' {
+              notes 'Дальнейшие ветви поиска выполняются только для допущенного запроса.'
+            }
+          }
+        }
+        alt {
+          when 'Текст или стартовая команда' {
+            alt {
+              when 'Стартовая команда' {
+                domofomka.bot.planner -> domofomka.bot.presentation 'Читает стартовое сообщение и готовит приветствие'
+              }
+              else 'Адрес текстом' {
+                domofomka.bot.planner -> domofomka.api.v2 'GET поиска с исходным текстом'
+              }
+            }
+          }
+          when 'Геометка' {
+            domofomka.bot.planner -> domofomka.api.geo 'Передаёт координаты'
+            domofomka.api.geo -> dadata 'Определяет адрес; при настройке использует прокси'
+            alt {
+              when 'Адрес определён' {
+                domofomka.api.geo -> domofomka.api.v2 'Передаёт адрес в тот же поиск'
+              }
+              when 'Временный сетевой сбой' {
+                domofomka.bot.planner -> domofomka.postgres.queue.inbox 'Сохраняет отложенный geo_retry с предельным возрастом' {
+                  notes 'Новый текст проходит вперёд и отменяет устаревшую геометку. Повторы не бесконечны.'
+                }
+              }
+              else 'Адрес не определён или доступ DaData исчерпан' {
+                domofomka.bot.planner -> domofomka.bot.presentation 'Готовит просьбу прислать текст либо временную недоступность'
+              }
+            }
+          }
+          else 'Callback: адрес, подъезд, страница, назад или отмена' {
+            domofomka.bot.planner -> domofomka.postgres.queue.context 'Восстанавливает адреса, страницу и результат сообщения'
+            alt {
+              when 'Контекст действителен' {
+                domofomka.bot.planner -> domofomka.api.v2 'При выборе дома получает его данные по ID'
+                domofomka.bot.planner -> domofomka.bot.presentation 'Выбирает подъезд, возвращает список или закрывает меню'
+              }
+              else 'Контекст отсутствует или истёк' {
+                domofomka.bot.planner -> domofomka.bot.presentation 'Просит отправить адрес заново'
+              }
+            }
+          }
+        }
+        opt 'Для запроса нужен поиск адреса' {
+          domofomka.api.v2 -> domofomka.api.cache 'Проверяет кеш, включая ревизию каталога'
+          opt 'Нет готового кешированного результата' {
+            domofomka.api.v2 -> domofomka.api.reader 'Нормализует запрос; получает улицы и точные дома'
+            domofomka.api.reader -> domofomka.postgres.catalog 'Читает GIN/B-tree и ограниченный набор домов'
+            domofomka.api.v2 -> domofomka.api.v2 'Проверяет местность, название, номер, корпус и строение'
+            opt 'v2 не нашёл адрес или каталог недоступен' {
+              domofomka.api.v2 -> domofomka.api.v1 'Вызывает совместимый поиск'
+              domofomka.api.v1 -> domofomka.sqlite 'Читает исходные варианты адресов и коды'
+              domofomka.api.v2 -> domofomka.api.v2 'Допускает v1 только при сохранении ограничений запроса'
+            }
+            domofomka.api.v2 -> domofomka.api.cache 'Сохраняет результат в ограниченном TTL/LRU'
+          }
+          domofomka.api.v2 -> domofomka.bot.planner 'Возвращает адрес с кодами, выбор, отсутствие кодов или not_found'
+          domofomka.bot.planner -> domofomka.bot.presentation 'Один подъезд: коды сразу; несколько: кнопки; неоднозначность: выбор'
+        }
+        alt {
+          when 'Повтор одинаковой подсказки в пределах паузы' {
+            domofomka.bot.planner -> domofomka.postgres.queue.inbox 'Завершает с hint_suppressed, без нового outbox' {
+              notes 'Ответы с кодами не подавляются правилом повторных подсказок. Лимиты пользователей независимы.'
+            }
+          }
+          else 'Ответ требуется' {
+            domofomka.bot.planner -> domofomka.postgres.queue.outbox 'В одной транзакции сохраняет send/edit, контекст и завершение inbox'
+            domofomka.postgres.queue.outbox -> domofomka.bot.sender 'Передаёт постоянный план доставки' { navigateTo deliveryRecovery }
+          }
+        }
+      }
+    }
+  }
+  dynamic view deliveryRecovery {
+    title 'Доставка, сетевые сбои и восстановление после остановки'
+    opt 'Процесс перезапущен или потерял Long Poll' {
+      domofomka.bot.collector -> domofomka.postgres.queue.state 'Читает сохранённый ts'
+      domofomka.bot.history -> domofomka.postgres.queue.state 'Читает watermark и окно перекрытия'
+      domofomka.bot.history -> vk 'Ограниченно читает диалоги и историю'
+      domofomka.bot.history -> domofomka.postgres.queue.inbox 'Добавляет отсутствующие сообщения с защитой от дублей' {
+        notes 'История восстанавливает текст и геометки. Callback, не доставленный и не записанный до остановки, восстановить нельзя.'
+      }
+      domofomka.postgres.queue.inbox -> domofomka.bot.planner 'Возобновляет обработку; сохраняет лимит хвоста пользователя' { navigateTo requestLifecycle }
+    }
+    loop 'Есть разрешённые к доставке действия' {
+      domofomka.postgres.queue.outbox -> domofomka.bot.sender 'Выдаёт действие с lease; учитывает порядок и паузу peer_id'
+      domofomka.bot.sender -> domofomka.postgres.queue.outbox 'Проверяет владение и актуальность отложенной геометки'
+      alt {
+        when 'Действие устарело или отменено' {
+          domofomka.bot.sender -> domofomka.postgres.queue.outbox 'Завершает без отправки'
+        }
+        else 'Действие актуально' {
+          domofomka.bot.sender -> domofomka.bot.transport 'Передаёт send с постоянным random_id или те же параметры edit'
+          domofomka.bot.transport -> domofomka.bot.transport 'RateGate ограничивает реальные HTTP-попытки'
+          alt {
+            when 'Прокси настроен и его cooldown закончился' {
+              domofomka.bot.transport -> proxy 'Пробует HTTPS CONNECT'
+              alt {
+                when 'Соединение с прокси не установлено' {
+                  domofomka.bot.transport -> domofomka.bot.transport 'Открывает cooldown прокси'
+                  domofomka.bot.transport -> vk 'Безопасно повторяет напрямую'
+                }
+                else 'Соединение установлено' {
+                  proxy -> vk 'Передаёт HTTPS-запрос без расшифровки'
+                }
+              }
+            }
+            else 'Прокси не задан или временно исключён' {
+              domofomka.bot.transport -> vk 'Использует прямой маршрут'
+            }
+          }
+          alt {
+            when 'VK подтвердил действие' {
+              domofomka.bot.sender -> domofomka.postgres.queue.outbox 'Сохраняет результат, контекст и done'
+            }
+            when 'Временная ошибка или потеря подтверждения' {
+              domofomka.bot.sender -> domofomka.postgres.queue.outbox 'Сохраняет попытку и next_at для повтора' {
+                notes 'Отправка повторяется с тем же random_id, редактирование — с тем же содержимым. Таймаут чтения не переключает маршрут прокси. Истёкшую аренду подхватит следующий worker.'
+              }
+            }
+            else 'Невосстановимая ошибка' {
+              domofomka.bot.sender -> domofomka.postgres.queue.outbox 'Оставляет failed для оператора; автоматического повтора нет'
+            }
+          }
+          domofomka.bot.sender -> domofomka.postgres.queue.diagnostics 'Сохраняет этапы и сетевые маршруты в пределах бюджета'
+        }
+      }
+    }
+    opt 'Наступило обслуживание хранения' {
+      domofomka.bot.policy -> domofomka.postgres.queue.inbox 'Удаляет допустимые завершённые задания; сохраняет receipts'
+      domofomka.bot.policy -> domofomka.postgres.queue.diagnostics 'При заполнении бюджета убирает старые завершённые измерения'
+    }
+  }
+}

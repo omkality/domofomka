@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from src.code_service.v2.normalize import ordinals
+from src.code_service.services.v2.normalize import ordinals
 
 VARIANTS = [
     ("catalog", None),
@@ -22,6 +22,7 @@ VARIANTS = [
 
 
 def patterns(query):
+    """Определить признаки пользовательских ошибок для стратификации выборки."""
     q = query.casefold().replace("ё", "е")
     return {
         "entrance": bool(re.search(r"под[ъь]?езд|под\.", q)),
@@ -35,12 +36,15 @@ def patterns(query):
 
 
 def make_sample(source, output, limit):
+    """Выбрать детерминированный набор запросов с фиксированным разделением."""
     selected = {}
 
     def key(row):
+        """Построить устойчивый ключ сравнения текущей записи."""
         return row["query"], row["expected_address"], row["split"], row["evidence"]
 
     def read(name):
+        """Прочитать данные текущего контрольного или адресного результата."""
         values = [json.loads(line) for line in (source / (name + ".jsonl")).read_text(encoding="utf8").splitlines()]
         return sorted(values, key=lambda r: hashlib.sha256(json.dumps(r, sort_keys=True).encode()).hexdigest())
 
@@ -75,6 +79,7 @@ def make_sample(source, output, limit):
 
 
 def summarize(path):
+    """Подсчитать агрегированные показатели качества и задержки прогона."""
     counts = collections.Counter()
     by_pattern = collections.defaultdict(collections.Counter)
     for line in (path / "results.jsonl").read_text(encoding="utf8").splitlines():
@@ -116,7 +121,11 @@ if __name__ == "__main__":
         "variants": [],
         "note": "Корпус включает реальные запросы и предполагаемые исправления. Это сравнение конфигураций, а не независимая оценка точности.",
     }
-    source_files = [Path("src/code_service/v2/engine.py"), Path("src/code_service/v2/normalize.py"), Path("tools/evaluation/evaluate_search.py")]
+    source_files = [
+        Path("src/code_service/services/v2/engine.py"),
+        Path("src/code_service/services/v2/normalize.py"),
+        Path("tools/evaluation/evaluate_search.py"),
+    ]
     source_hash = hashlib.sha256(b"".join(p.read_bytes() for p in source_files)).hexdigest()
     for name, config in VARIANTS:
         assert hashlib.sha256(b"".join(p.read_bytes() for p in source_files)).hexdigest() == source_hash

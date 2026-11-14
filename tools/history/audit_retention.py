@@ -10,6 +10,7 @@ from pathlib import Path
 
 
 def audit(roots: list[Path]) -> dict:
+    """Проанализировать исходные данные и сохранить агрегированный отчёт."""
     seen, dialogs = set(), set()
     daily, outgoing = collections.Counter(), collections.Counter()
     first, last, sizes = None, None, []

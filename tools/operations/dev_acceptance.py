@@ -15,6 +15,7 @@ from urllib.request import urlopen
 
 
 def inspect():
+    """Сохранить состояние контейнеров dev перед и после ограниченной проверки."""
     result = {}
     for service in ("api", "vkbot", "queue"):
         item = json.loads(subprocess.check_output(["docker", "inspect", f"domofomka-dev-{service}-1"]))[0]
@@ -29,6 +30,7 @@ def inspect():
 
 
 def lookup(query, version):
+    """Вызвать версию dev API и записать результат без отправки в VK."""
     start = time.monotonic()
     with urlopen(
         "http://127.0.0.1:18000/api/" + version + "/codes/msg?" + urlencode({"message": query}), timeout=15
@@ -48,6 +50,7 @@ def lookup(query, version):
 
 def probe(service, variable, route, code):
     # None оставляет рабочую настройку; переопределение действует лишь у docker exec.
+    """Выполнить ограниченную dev-проверку маршрута без отправки сообщений."""
     start = time.monotonic()
     wrapped = (
         "import json\nfrom src.infrastructure.telemetry import Capture\nwith Capture() as capture:\n try:\n  exec("
@@ -67,10 +70,7 @@ def probe(service, variable, route, code):
                 "exec",
                 *(["-e", variable + "=" + route] if route is not None else []),
                 f"domofomka-dev-{service}-1",
-                "uv",
-                "run",
-                "--frozen",
-                "python",
+                "/backend/.venv/bin/python",
                 "-c",
                 wrapped,
             ],
@@ -97,6 +97,7 @@ def probe(service, variable, route, code):
 
 
 def main():
+    """Ограниченная приёмочная проверка dev на хосте VDS, без отправки сообщений VK."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path("/root/domofomka-dev"))
     parser.add_argument("--samples", type=int, default=120)
@@ -142,7 +143,7 @@ def main():
             )
         time.sleep(args.interval)
     dadata = (
-        "import asyncio; from src.code_service.geocoding import DadataClient; from src.code_service.config import settings; "
+        "import asyncio; from src.code_service.services.geocoding import DadataClient; from src.code_service.config import settings; "
         "c=DadataClient(settings.dadata_token,proxy_url=settings.dadata_proxy_url); "
         "assert asyncio.run(c.get_address_by_geo(lat=55.617586,lon=37.495482))"
     )

@@ -10,40 +10,17 @@ from contextlib import closing
 from pathlib import Path
 
 import psycopg
+import sqlparse
 from psycopg.rows import dict_row
 
-SCHEMA = """
-CREATE TABLE buildings(id TEXT PRIMARY KEY,guid TEXT,display TEXT,city TEXT,street TEXT,house TEXT,
-    street_key TEXT,city_key TEXT,region TEXT,lineage TEXT);
-CREATE TABLE codes(building_id TEXT NOT NULL,entrance TEXT NOT NULL,kind TEXT NOT NULL,code TEXT NOT NULL);
-CREATE TABLE aliases(building_id TEXT NOT NULL,city_key TEXT,street_key TEXT,house TEXT);
-CREATE TABLE streets(id TEXT PRIMARY KEY,city_key TEXT,street_key TEXT,words TEXT,has_codes INT);
-CREATE TABLE street_houses(id TEXT PRIMARY KEY REFERENCES streets(id),data BYTEA);
-CREATE TABLE alias_search(seq BIGINT PRIMARY KEY,building_id TEXT NOT NULL REFERENCES buildings(id),house TEXT,words TEXT);
-CREATE TABLE provenance(source_id BIGINT PRIMARY KEY,building_id TEXT NOT NULL REFERENCES buildings(id),resolution TEXT);
-CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT);
-CREATE TABLE vocabulary(term TEXT PRIMARY KEY);
-CREATE TABLE entrances(building_id TEXT NOT NULL REFERENCES buildings(id),number TEXT NOT NULL,PRIMARY KEY(building_id,number));
-CREATE TABLE code_sources(kind TEXT PRIMARY KEY);
-"""
-INDEXES = [
-    "CREATE INDEX building_lookup ON buildings(street_key,house)",
-    "CREATE INDEX building_street ON buildings(city_key,street_key,house)",
-    "CREATE UNIQUE INDEX codes_identity ON codes(building_id,entrance,kind,code)",
-    "CREATE INDEX aliases_building ON aliases(building_id)",
-    "CREATE INDEX alias_house ON alias_search(house)",
-    "CREATE INDEX street_words ON streets USING GIN(to_tsvector('simple',words)) WITH(fastupdate=off)",
-    "CREATE INDEX coded_street_words ON streets USING GIN(to_tsvector('simple',words)) WITH(fastupdate=off) WHERE has_codes=1",
-    "CREATE INDEX alias_words ON alias_search USING GIN(to_tsvector('simple',words)) WITH(fastupdate=off)",
-    "INSERT INTO entrances SELECT DISTINCT building_id,entrance FROM codes",
-    "INSERT INTO code_sources SELECT DISTINCT kind FROM codes",
-    "ALTER TABLE codes ADD FOREIGN KEY(building_id,entrance) REFERENCES entrances(building_id,number)",
-    "ALTER TABLE codes ADD FOREIGN KEY(kind) REFERENCES code_sources(kind)",
-    "ALTER TABLE aliases ADD FOREIGN KEY(building_id) REFERENCES buildings(id)",
-]
+from src.infrastructure.database.resources import read_sql
+
+SCHEMA = read_sql("experiment-postgres-tables.sql")
+INDEXES = list(sqlparse.split(read_sql("experiment-postgres-tables-indexes.sql")))
 
 
 def connect():
+    """Открыть соединение с явно выбранной локальной БД подготовки данных."""
     dsn = os.environ["CATALOG_BENCHMARK_DSN"]
     db = psycopg.connect(dsn, autocommit=True, row_factory=dict_row)
     if not db.info.dbname.startswith("domofomka_catalog_bench") or db.info.host not in {
@@ -57,6 +34,7 @@ def connect():
 
 
 def copy_table(source: sqlite3.Connection, target, table: str, select: str, types: list[str]):
+    """Потоково перенести строки таблицы бинарным COPY и измерить длительность."""
     started = time.perf_counter()
     count = 0
     with target.cursor().copy(f"COPY {table} FROM STDIN WITH(FORMAT BINARY)") as sink:
@@ -69,10 +47,14 @@ def copy_table(source: sqlite3.Connection, target, table: str, select: str, type
 
 
 def load(catalog: Path, full_catalog: Path, output: Path):
+    """Загрузить подготовленные данные в отдельную локальную БД и проверить публикацию."""
     output.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     with connect() as db:
-        if db.execute("SELECT to_regclass('public.buildings') AS name").fetchone()["name"]:
+        if db.execute(r"""
+            SELECT
+              to_regclass('public.buildings') AS name
+            """).fetchone()["name"]:
             raise FileExistsError("Preserve the loaded experiment; choose another isolated database")
         with closing(sqlite3.connect(f"file:{catalog.resolve().as_posix()}?mode=ro", uri=True)) as source:
             db.execute(SCHEMA)
@@ -85,7 +67,15 @@ def load(catalog: Path, full_catalog: Path, output: Path):
                 ("street_houses", "SELECT * FROM street_houses", ["text", "bytea"]),
                 (
                     "alias_search",
-                    "SELECT rowid,building_id,house,words FROM alias_search",
+                    r"""
+                SELECT
+                  rowid,
+                  building_id,
+                  house,
+                  words
+                FROM
+                  alias_search
+                """,
                     ["int8", "text", "text", "text"],
                 ),
                 ("metadata", "SELECT * FROM metadata", ["text"] * 2),
@@ -107,15 +97,31 @@ def load(catalog: Path, full_catalog: Path, output: Path):
         db.execute("CHECKPOINT")
         with catalog.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
-        db.execute("INSERT INTO metadata VALUES('benchmark_source_sha256',%s)", (digest,))
+        db.execute(
+            r"""
+            INSERT INTO metadata VALUES ('benchmark_source_sha256', %s)
+            """,
+            (digest,),
+        )
         report = {
             "source_sha256": digest,
             "source_bytes": catalog.stat().st_size,
             "rows": counts,
             "seconds": round(time.perf_counter() - started, 2),
-            "database_bytes": db.execute("SELECT pg_database_size(current_database()) AS n").fetchone()["n"],
-            "tables": db.execute("""SELECT relname,pg_total_relation_size(relid) AS total_bytes,
-                pg_indexes_size(relid) AS index_bytes FROM pg_stat_user_tables ORDER BY relname""").fetchall(),
+            "database_bytes": db.execute(r"""
+            SELECT
+              pg_database_size(current_database()) AS n
+            """).fetchone()["n"],
+            "tables": db.execute(r"""
+            SELECT
+              relname,
+              pg_total_relation_size(relid) AS total_bytes,
+              pg_indexes_size(relid) AS index_bytes
+            FROM
+              pg_stat_user_tables
+            ORDER BY
+              relname
+            """).fetchall(),
             "settings": {
                 key: db.execute("SHOW " + key).fetchone()[key]
                 for key in ("shared_buffers", "work_mem", "maintenance_work_mem", "max_connections")

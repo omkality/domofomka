@@ -1,0 +1,3 @@
+:root { --sl-color-accent-high: #e8c6ff; --sl-color-accent: #ad3fca; --sl-color-accent-low: #33133d; }
+.c4-view { margin: 1.5rem 0; border: 1px solid var(--sl-color-hairline); border-radius: .6rem; padding: .75rem; }
+.c4-view figcaption { color: var(--sl-color-gray-3); font-size: .85rem; padding-top: .6rem; }

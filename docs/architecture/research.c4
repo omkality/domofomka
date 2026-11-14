@@ -1,0 +1,97 @@
+model {
+  research = system 'Исторические схемы' {
+    r1_G = component 'GIN: ID подходящих улиц'
+    r1_H = component 'Чтение строк streets'
+    r1_S = component 'Порядок кандидатов'
+    r1_B = component 'Проверка точного дома и кодов'
+    r1_P = component 'Загрузка рядом одинаковых street_key'
+    r14_Q = component 'Запрос'
+    r14_F = component 'Есть отдельное поле населённого пункта?'
+    r14_OLD = component 'Прежний лексический поиск и защищённый fallback'
+    r14_EXACT = component 'Точное ограничение населённого пункта'
+    r14_CITY = component 'OpenSearch: fuzzy только в полях города'
+    r14_KEYS = component 'Разные названия населённых пунктов'
+    r14_STREET = component 'Улица в поле улицы; точный дом, корпус и строение'
+    r14_FILTER = component 'Проверка города каждого выбранного дома'
+    r14_CONFIRM = component 'При исправлении города всегда подтверждение'
+    r15_Q = component 'Запрос'
+    r15_H = component 'Точный дом и номер улицы'
+    r15_N = component 'Поиск названия'
+    r15_S = component 'Полные город и улица?'
+    r15_E = component 'Защитить буквальное название'
+    r15_C = component 'Сохранить допустимые варианты с кодами'
+    r15_V = component 'Проверить выбранный адрес и доступные коды'
+    r17_Q = component 'Один исходный запрос'
+    r17_P = component 'Общий разбор дома, корпуса, строения и типа'
+    r17_PY = component 'Текст очищает Python'
+    r17_OS = component 'Исходные формы слов обрабатывает анализатор OpenSearch'
+    r17_I = component 'Одинаковые документы и поля OpenSearch'
+    r17_R = component 'Одинаковые fuzzy и правила выбора'
+    r17_H = component 'Проверки точного дома и номера улицы'
+    r17_V = component 'Ответ, уточнение или допустимый fallback v1'
+    r20_Q = component 'Запрос: точный дом и ограничения названия'
+    r20_P = component 'Рабочий dev: каталог PostgreSQL'
+    r20_O = component 'Локальный эксперимент: native OpenSearch'
+    r20_V1 = component 'Совместимый поиск v1'
+    r20_G = component 'Проверка исходных ограничений'
+    r20_A = component 'Коды или выбор адреса'
+    r20_N = component 'Адрес не найден'
+  }
+  research.r1_G -> research.r1_H
+  research.r1_H -> research.r1_S
+  research.r1_S -> research.r1_B
+  research.r1_P -> research.r1_H 'Меньше страниц для чтения'
+  research.r14_Q -> research.r14_F
+  research.r14_F -> research.r14_OLD 'Нет'
+  research.r14_F -> research.r14_EXACT 'Да, имя известно'
+  research.r14_F -> research.r14_CITY 'Да, имя неизвестно'
+  research.r14_CITY -> research.r14_KEYS
+  research.r14_KEYS -> research.r14_STREET
+  research.r14_EXACT -> research.r14_STREET
+  research.r14_STREET -> research.r14_FILTER
+  research.r14_FILTER -> research.r14_CONFIRM
+  research.r15_Q -> research.r15_H
+  research.r15_H -> research.r15_N
+  research.r15_N -> research.r15_S
+  research.r15_S -> research.r15_E 'Да'
+  research.r15_S -> research.r15_C 'Нет'
+  research.r15_E -> research.r15_V
+  research.r15_C -> research.r15_V
+  research.r17_Q -> research.r17_P
+  research.r17_P -> research.r17_PY
+  research.r17_P -> research.r17_OS
+  research.r17_PY -> research.r17_I
+  research.r17_OS -> research.r17_I
+  research.r17_I -> research.r17_R
+  research.r17_R -> research.r17_H
+  research.r17_H -> research.r17_V
+  research.r20_Q -> research.r20_P
+  research.r20_Q -> research.r20_O
+  research.r20_O -> research.r20_P 'Нет допустимого результата'
+  research.r20_P -> research.r20_V1 'Адрес не найден или пустая лексика при указанном доме'
+  research.r20_V1 -> research.r20_G
+  research.r20_G -> research.r20_A 'Совпадают'
+  research.r20_G -> research.r20_N 'Конфликт'
+}
+views {
+  view catalogReadPlan {
+    title 'Чтение каталога'
+    include research.r1_G, research.r1_H, research.r1_S, research.r1_B, research.r1_P
+  }
+  view researchSearchCityRoles {
+    title 'Схема исторического сравнения'
+    include research.r14_Q, research.r14_F, research.r14_OLD, research.r14_EXACT, research.r14_CITY, research.r14_KEYS, research.r14_STREET, research.r14_FILTER, research.r14_CONFIRM
+  }
+  view researchSearchCoverage {
+    title 'Схема исторического сравнения'
+    include research.r15_Q, research.r15_H, research.r15_N, research.r15_S, research.r15_E, research.r15_C, research.r15_V
+  }
+  view researchSearchLexicalReview {
+    title 'Схема исторического сравнения'
+    include research.r17_Q, research.r17_P, research.r17_PY, research.r17_OS, research.r17_I, research.r17_R, research.r17_H, research.r17_V
+  }
+  view researchSearchNameIdentity {
+    title 'Схема исторического сравнения'
+    include research.r20_Q, research.r20_P, research.r20_O, research.r20_V1, research.r20_G, research.r20_A, research.r20_N
+  }
+}

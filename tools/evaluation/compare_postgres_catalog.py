@@ -1,7 +1,6 @@
 """Сравнить весь ответ v2 с одинаковым fallback v1, без обращений к VK и DaData."""
 
 import argparse
-import asyncio
 import collections
 import hashlib
 import json
@@ -10,13 +9,15 @@ import time
 from pathlib import Path
 
 from src.code_service.config import settings
-from src.code_service.v2 import search
-from src.code_service.v2.engine import Catalog
-from src.code_service.v2.postgres import PostgresCatalog
+from src.code_service.services.v2 import search
+from src.code_service.services.v2.engine import Catalog
+from src.code_service.services.v2.postgres import PostgresCatalog
+from src.infrastructure.event_loop import run_async
 from tools.experiments.postgres_search_experiment import PostgresExperiment
 
 
 def select(corpus: Path, limit: int):
+    """Выбрать фиксированный набор случаев для сравнения хранилищ."""
     rows, seen = [], set()
     for name in ("correction-hypotheses", "successful-queries"):
         for line in (corpus / (name + ".jsonl")).read_text(encoding="utf8").splitlines():
@@ -30,6 +31,7 @@ def select(corpus: Path, limit: int):
 
 
 def signature(result: dict):
+    """Получить устойчивое представление результата без непостоянных измерений."""
     return {
         key: result[key]
         for key in ("status", "engine", "address", "building_id", "candidates", "fallback_reason", "fallback_rejected")
@@ -38,6 +40,7 @@ def signature(result: dict):
 
 
 async def compare(args):
+    """Сравнить результаты одинаковых запросов на проверяемых вариантах."""
     if args.output.exists():
         raise FileExistsError("Preserve completed results; use a new output directory")
     args.output.mkdir(parents=True)
@@ -63,7 +66,13 @@ async def compare(args):
     fingerprint = hashlib.sha256(json.dumps(records, sort_keys=True).encode()).hexdigest()
 
     async def lookup(backend, query):
-        search.get_catalog = lambda: sqlite if backend == "sqlite" else postgres
+        """Получить результат текущего варианта поиска для контрольного запроса."""
+
+        async def selected_catalog():
+            """Выдать читатель текущего сравниваемого варианта."""
+            return sqlite if backend == "sqlite" else postgres
+
+        search.get_catalog = selected_catalog
         started = time.perf_counter()
         result = await search.lookup(query)
         elapsed = (time.perf_counter() - started) * 1000
@@ -117,7 +126,10 @@ async def compare(args):
         print(json.dumps(summary, ensure_ascii=False), flush=True)
     finally:
         search.get_catalog = baseline_factory
-        postgres.close()
+        if isinstance(postgres, PostgresCatalog):
+            await postgres.close()
+        else:
+            postgres.close()
 
 
 if __name__ == "__main__":
@@ -129,4 +141,4 @@ if __name__ == "__main__":
     p.add_argument("--corpus", type=Path, default=Path("artifacts/private/audit"))
     p.add_argument("--output", type=Path, default=Path("artifacts/private/postgres-benchmark/paired-4000"))
     p.add_argument("--limit", type=int, default=4000)
-    asyncio.run(compare(p.parse_args()))
+    run_async(compare(p.parse_args()))

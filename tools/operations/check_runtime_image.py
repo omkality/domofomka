@@ -3,14 +3,21 @@
 import importlib
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from tempfile import TemporaryFile
 
 
 def main() -> None:
+    """Проверить импорты и фактические ограничения безопасности рабочего образа."""
     modules = {
-        "api": ["src.code_service.app", "granian", "src.code_service.v2.postgres", "src.code_service.v2.catalog_update"],
+        "api": [
+            "src.code_service.main",
+            "granian",
+            "src.code_service.services.v2.postgres",
+            "src.code_service.services.v2.catalog_update",
+        ],
         "vkbot": ["src.vkbot.main"],
     }[sys.argv[1]]
     assert os.getuid() == os.getgid() == 10001, "Application must run without root"
@@ -25,6 +32,11 @@ def main() -> None:
         stream.write(b"bounded temporary storage")
     for module in modules:
         importlib.import_module(module)
+    assert "yoyo" not in sys.modules, "Workers must not load the administrative migration engine"
+    assert shutil.which("uv") is None, "Build tools must stay in the build stage"
+    assert shutil.which("uvx") is None, "Build tools must stay in the build stage"
+    unused = "vkbot" if sys.argv[1] == "api" else "code_service"
+    assert not Path("src", unused).exists(), "Do not package the other application"
     print(json.dumps({"uid": os.getuid(), "capabilities": 0, "no_new_privileges": True, "root_readonly": True}))
 
 

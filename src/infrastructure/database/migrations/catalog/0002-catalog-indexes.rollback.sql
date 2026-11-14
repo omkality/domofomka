@@ -1,0 +1,11 @@
+ALTER TABLE aliases DROP CONSTRAINT aliases_building_id_fkey;
+ALTER TABLE codes DROP CONSTRAINT codes_kind_fkey;
+ALTER TABLE codes DROP CONSTRAINT codes_building_id_entrance_fkey;
+DROP INDEX alias_words;
+DROP INDEX coded_street_words;
+DROP INDEX street_words;
+DROP INDEX alias_house;
+DROP INDEX aliases_building;
+DROP INDEX building_street;
+DROP INDEX building_lookup;
+ALTER TABLE codes DROP CONSTRAINT codes_pkey;

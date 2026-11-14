@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 def published_image(repository: str, revision: str) -> tuple[str, int]:
+    """Получить точный опубликованный digest образа и его размер."""
     image = repository + ":sha-" + revision
     raw = subprocess.check_output(
         ["docker", "buildx", "imagetools", "inspect", image, "--format", "{{json .Manifest}}"], text=True
@@ -50,6 +51,7 @@ def published_image(repository: str, revision: str) -> tuple[str, int]:
 
 
 def main() -> None:
+    """Записать точные digest и размеры опубликованных образов в выходы Actions."""
     revision = os.environ["GITHUB_SHA"]
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("Full commit SHA required")

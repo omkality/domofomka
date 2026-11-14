@@ -1,3 +1,5 @@
+"""Построение клавиатур VK с проверкой ограничений платформы."""
+
 import json
 
 from vk_api.keyboard import VkKeyboard
@@ -7,6 +9,7 @@ BUTTONS_PER_ROW = 5
 
 
 def callback_button(label: str, payload: dict) -> dict:
+    """Создать callback-кнопку с заданным текстом и полезной нагрузкой."""
     return {
         "action": {"type": "callback", "label": label, "payload": json.dumps(payload)},
         "color": "secondary",
@@ -14,6 +17,7 @@ def callback_button(label: str, payload: dict) -> dict:
 
 
 def serialize_inline_keyboard(rows: list[list[dict]]) -> str:
+    """Проверить лимиты и сериализовать inline-клавиатуру VK."""
     if sum(len(row) for row in rows) > INLINE_BUTTON_LIMIT or any(
         not row or len(row) > BUTTONS_PER_ROW for row in rows
     ):
@@ -22,6 +26,7 @@ def serialize_inline_keyboard(rows: list[list[dict]]) -> str:
 
 
 def build_one_button(entrance: str, entrances: list[str]) -> dict:
+    """Создать кнопку выбора одного подъезда."""
     return {
         "action": {
             "type": "callback",
@@ -37,6 +42,7 @@ def build_one_button(entrance: str, entrances: list[str]) -> dict:
 
 
 def build_many_buttons(entrances: list[str]) -> list[list[dict]]:
+    """Разложить кнопки подъездов по допустимым строкам клавиатуры."""
     buttons = []
     ent_normalized = []
 
@@ -54,6 +60,7 @@ def build_many_buttons(entrances: list[str]) -> list[list[dict]]:
 
 
 def get_location_keyboard() -> str:
+    """Подготовить клавиатуру отправки геолокации."""
     keyboard = VkKeyboard()
     keyboard.add_location_button()
     return keyboard.get_keyboard()

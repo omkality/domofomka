@@ -11,6 +11,7 @@ from tools.evaluation.evaluate_search import catalogs, initialize, legacy_lookup
 
 
 def evaluate(record):
+    """Выполнить контрольный запрос и собрать его результат для сравнения."""
     query = record["query"]
     old = bool(legacy_lookup(query))
     answer = catalogs[0].resolve(query) if len(query) <= 500 else {"status": "invalid_query"}

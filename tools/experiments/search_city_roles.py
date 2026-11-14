@@ -6,9 +6,9 @@ import json
 import re
 from collections import Counter
 
-from src.code_service.v2.constraints import literal_name_tokens
-from src.code_service.v2.localities import URBAN
-from src.code_service.v2.normalize import address_words, parse_query, text
+from src.code_service.services.v2.constraints import literal_name_tokens
+from src.code_service.services.v2.localities import URBAN
+from src.code_service.services.v2.normalize import address_words, parse_query, text
 from tools.experiments.search_locality_profiles import LOCALITY_PREFIX, locality_matches
 
 FIELD_TYPE = re.compile(
@@ -19,12 +19,14 @@ FIELD_TYPE = re.compile(
 
 
 def extend_mapping(definition):
+    """Добавить поля, используемые только выбранным экспериментальным профилем."""
     props = definition["mappings"]["properties"]
     props["city"]["fields"]["key"] = {"type": "keyword"}
     props["aliases"]["properties"]["city"] = copy.deepcopy(props["city"])
 
 
 def indexed_document(original):
+    """Подготовить один документ с отдельными адресными полями."""
     document = copy.deepcopy(original)
     for alias in document.get("aliases", []):
         words, street = alias["words"], alias["street"]
@@ -35,6 +37,7 @@ def indexed_document(original):
 
 
 def clone_documents(client, source, target, definition, expected_meta):
+    """Перенести одинаковые документы в новый индекс сравнения."""
     if not source.startswith("domofomka-native-lab-") or not target.startswith("domofomka-native-lab-"):
         raise ValueError("Only isolated lab indexes may be cloned")
     response = client.get("/" + source + "/_mapping")
@@ -98,6 +101,7 @@ def clone_documents(client, source, target, definition, expected_meta):
 
 
 def city_field(message, known):
+    """Получить поле местности для выбранного экспериментального документа."""
     first, separator, rest = message.strip().partition(",")
     marker = LOCALITY_PREFIX.match(first)
     urban = URBAN.fullmatch(first.strip())
@@ -128,6 +132,7 @@ def city_field(message, known):
 
 
 def role_locality_matches(hint, row, aliases=()):
+    """Проверить совпадение явно выделенной роли населённого пункта."""
     if locality_matches(hint, row, aliases):
         return True
     required = literal_name_tokens(hint)
@@ -143,6 +148,7 @@ def role_locality_matches(hint, row, aliases=()):
 
 
 def street_terms(tokens, city_tokens):
+    """Получить значимые слова поля улицы для запроса сравнения."""
     remaining, result = Counter(city_tokens), []
     for token in tokens:
         if remaining[token]:
@@ -153,6 +159,7 @@ def street_terms(tokens, city_tokens):
 
 
 def city_probe(value, *, fuzziness="AUTO", limit=64):
+    """Найти допустимые варианты местности в экспериментальном индексе."""
     options = {
         "query": value,
         "analyzer": "ordinal_graph",
@@ -184,6 +191,7 @@ def city_probe(value, *, fuzziness="AUTO", limit=64):
 
 
 def probe_places(value):
+    """Получить кандидатов местности с фиксированными ограничениями."""
     if value.get("timed_out") or value.get("terminated_early") or value.get("_shards", {}).get("failed", 0):
         raise RuntimeError("City aggregation is incomplete")
     aggs = value["aggregations"]
@@ -194,6 +202,7 @@ def probe_places(value):
 
 
 def city_filter(places):
+    """Построить точный фильтр подтверждённой местности."""
     if not places:
         return {"match_none": {}}
     return {
@@ -208,6 +217,7 @@ def city_filter(places):
 
 
 def confirmation(result, reason="locality_spelling"):
+    """Отметить необходимость подтверждения исправленной местности пользователем."""
     flag = {"locality_confirmation_required": True} if reason == "locality_spelling" else {}
     answer = dict(result, **flag)
     if answer["status"] == "found":
@@ -227,6 +237,7 @@ def confirmation(result, reason="locality_spelling"):
 
 
 def constrain_result(result, catalog, places):
+    """Удалить результаты, противоречащие ограничениям исходного запроса."""
     if result["status"] not in {"found", "no_codes", "ambiguous"}:
         return result
     options = [result] if result["status"] in {"found", "no_codes"} else result["candidates"]
@@ -238,7 +249,18 @@ def constrain_result(result, catalog, places):
         with catalog.connect() as db:
             aliases = [
                 {"street": r[1], "words": r[0] + " " + r[1]}
-                for r in db.execute("SELECT city_key,street_key FROM aliases WHERE building_id=?", (row["id"],))
+                for r in db.execute(
+                    r"""
+                SELECT
+                  city_key,
+                  street_key
+                FROM
+                  aliases
+                WHERE
+                  building_id = ?
+                """,
+                    (row["id"],),
+                )
             ]
         if any(role_locality_matches(place, row, aliases) for place in places):
             safe.append(option)
@@ -248,6 +270,7 @@ def constrain_result(result, catalog, places):
 
 
 def source_choices(result, baseline, limit=100):
+    """Собрать варианты по подтверждённым исходным адресам."""
     if result["status"] == "found" and baseline["status"] in {"no_codes", "no_codes_ambiguous"}:
         return confirmation(result, reason="street_spelling")
     if result["status"] not in {"found", "ambiguous"} or baseline["status"] != "ambiguous":
