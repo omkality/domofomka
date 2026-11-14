@@ -41,15 +41,15 @@ jobs:
     env:
       ASTRO_TELEMETRY_DISABLED: '1'
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '22.22.3'
+          node-version: '22.23.4'
           cache: npm
           cache-dependency-path: docs/package-lock.json
       - name: Install locked documentation dependencies
         working-directory: docs
-        run: npm ci --ignore-scripts --no-fund
+        run: npm ci --engine-strict --ignore-scripts --no-fund
       - name: Audit documentation dependencies
         working-directory: docs
         run: npm audit --audit-level=moderate
@@ -57,7 +57,7 @@ jobs:
         working-directory: docs
         run: npm run build
       - name: Save static documentation without deploying another VDS service
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: documentation-${{ github.sha }}
           path: docs/dist
@@ -100,7 +100,7 @@ jobs:
       DOMOFOMKA_API_HOST: localhost
       DOMOFOMKA_API_PORT: '8000'
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           version: '0.13.7'
@@ -157,7 +157,7 @@ jobs:
       contents: read
       packages: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install environment SSH credentials
@@ -188,7 +188,7 @@ jobs:
         run: python tools/operations/ci_send.py
       - name: Record release manifest
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ github.sha }}
           path: release.json
