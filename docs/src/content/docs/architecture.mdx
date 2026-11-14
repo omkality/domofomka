@@ -21,7 +21,7 @@ import C4View from "../../components/C4View.astro";
 | `src/code_service/services/geocoding.py` | Клиент DaData, общий для обеих версий. |
 | `src/code_service/config.py` | Настройки сервиса кодов. Настройки бота остаются в `vkbot/config.py`. |
 | `src/code_service/services/v1/` | Сценарии `search.py`, чтение SQLite `codes.py`, индекс `index.py`, сопоставление `matching.py`. |
-| `src/code_service/services/v2/` | Сценарии `search.py`, разбор `normalize.py`, ограничения `constraints.py`/`localities.py`, ранжирование `engine.py`, PostgreSQL `postgres.py`, читатель `catalog.py`, ограниченный кеш `cache.py`. |
+| `src/code_service/services/v2/` | Сценарии `search.py`, разбор `normalize.py`, ограничения `constraints.py`/`localities.py`, общие правила ранжирования `ranking.py`, SQLite `engine.py`, асинхронный PostgreSQL `postgres.py`, жизненный цикл читателя `catalog.py`, ограниченный кеш `cache.py`. |
 | `src/infrastructure/` | Общие сетевые настройки, выбор прямого/прокси-маршрута, измерение этапов и версия приложения. Без зависимостей от бота или сервиса кодов. |
 | `ops/` | Инфраструктура хоста: приём выпуска, развёртывание, откат и контроль хранения. Эти скрипты работают вне приложений. |
 | `src/infrastructure/database/` | SQL-миграции yoyo, проверка совместимости схемы и SQL-ресурсы. Обычный worker не загружает и не запускает yoyo. |

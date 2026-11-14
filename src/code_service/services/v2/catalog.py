@@ -1,23 +1,28 @@
 """Создание и завершение конкретных читателей каталога."""
 
-import threading
+import asyncio
 
 from src.code_service.config import settings
 from src.code_service.services.v2.engine import Catalog
+from src.code_service.services.v2.postgres import PostgresCatalog
 
 _postgres_readers: dict = {}
-_postgres_guard = threading.Lock()
+_postgres_guards: dict = {}
 
 
-def close_catalog() -> None:
+async def close_catalog() -> None:
     """Закрыть текущий читатель каталога при остановке API."""
-    with _postgres_guard:
-        for reader in _postgres_readers.values():
-            reader.close()
-        _postgres_readers.clear()
+    loop = asyncio.get_running_loop()
+    guard = _postgres_guards.get(loop)
+    if guard is not None:
+        async with guard:
+            cached = _postgres_readers.pop(loop, None)
+            if cached is not None:
+                await cached[1].close()
+        _postgres_guards.pop(loop, None)
 
 
-def get_catalog() -> Catalog:
+async def get_catalog() -> Catalog | PostgresCatalog:
     """Вернуть читатель опубликованной ревизии выбранного хранилища."""
     if settings.search_backend == "sqlite":
         return Catalog(
@@ -28,8 +33,6 @@ def get_catalog() -> Catalog:
         )
     if not settings.catalog_database_url:
         raise ValueError("CATALOG_DATABASE_URL required for PostgreSQL catalog")
-    from src.code_service.services.v2.postgres import PostgresCatalog
-
     config = (
         settings.catalog_database_url.get_secret_value(),
         settings.search_min_similarity,
@@ -41,12 +44,14 @@ def get_catalog() -> Catalog:
         settings.catalog_revision,
         settings.search_candidate_limit,
     )
-    with _postgres_guard:
-        if config not in _postgres_readers:
-            for reader in _postgres_readers.values():
-                reader.close()
-            _postgres_readers.clear()
-            _postgres_readers[config] = PostgresCatalog(
+    loop = asyncio.get_running_loop()
+    guard = _postgres_guards.setdefault(loop, asyncio.Lock())
+    async with guard:
+        cached = _postgres_readers.get(loop)
+        if cached is None or cached[0] != config:
+            if cached is not None:
+                await cached[1].close()
+            reader = PostgresCatalog(
                 *config[:3],
                 connect_timeout_seconds=config[3],
                 statement_timeout_ms=config[4],
@@ -55,4 +60,5 @@ def get_catalog() -> Catalog:
                 revision=config[7],
                 candidate_limit=config[8],
             )
-        return _postgres_readers[config]
+            _postgres_readers[loop] = (config, reader)
+        return _postgres_readers[loop][1]

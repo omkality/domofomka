@@ -1,7 +1,6 @@
 """Сравнить весь ответ v2 с одинаковым fallback v1, без обращений к VK и DaData."""
 
 import argparse
-import asyncio
 import collections
 import hashlib
 import json
@@ -13,6 +12,7 @@ from src.code_service.config import settings
 from src.code_service.services.v2 import search
 from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.postgres import PostgresCatalog
+from src.infrastructure.event_loop import run_async
 from tools.experiments.postgres_search_experiment import PostgresExperiment
 
 
@@ -67,7 +67,12 @@ async def compare(args):
 
     async def lookup(backend, query):
         """Получить результат текущего варианта поиска для контрольного запроса."""
-        search.get_catalog = lambda: sqlite if backend == "sqlite" else postgres
+
+        async def selected_catalog():
+            """Выдать читатель текущего сравниваемого варианта."""
+            return sqlite if backend == "sqlite" else postgres
+
+        search.get_catalog = selected_catalog
         started = time.perf_counter()
         result = await search.lookup(query)
         elapsed = (time.perf_counter() - started) * 1000
@@ -121,7 +126,10 @@ async def compare(args):
         print(json.dumps(summary, ensure_ascii=False), flush=True)
     finally:
         search.get_catalog = baseline_factory
-        postgres.close()
+        if isinstance(postgres, PostgresCatalog):
+            await postgres.close()
+        else:
+            postgres.close()
 
 
 if __name__ == "__main__":
@@ -133,4 +141,4 @@ if __name__ == "__main__":
     p.add_argument("--corpus", type=Path, default=Path("artifacts/private/audit"))
     p.add_argument("--output", type=Path, default=Path("artifacts/private/postgres-benchmark/paired-4000"))
     p.add_argument("--limit", type=int, default=4000)
-    asyncio.run(compare(p.parse_args()))
+    run_async(compare(p.parse_args()))

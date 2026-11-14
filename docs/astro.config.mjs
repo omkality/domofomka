@@ -43,6 +43,7 @@ export default defineConfig({
           { label: "Хранение и диск", slug: "storage-safety" },
           { label: "Стенд dev", slug: "dev-stand" },
           { label: "Разработка и проверки", slug: "development" },
+            { label: "Миграции yoyo", slug: "migrations" },
           { label: "Индексы PostgreSQL", slug: "catalog-street-layout" },
         ] },
         { label: "Исследования и история", items: [{ autogenerate: { directory: "research" } }] },

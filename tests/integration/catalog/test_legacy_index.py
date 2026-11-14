@@ -182,7 +182,7 @@ async def test_v2_catalog_failure_does_not_mix_another_house_into_a_valid_fallba
     monkeypatch.setattr(settings, "legacy_index_path", str(index))
     monkeypatch.setattr(settings, "opensearch_url", None)
 
-    def unavailable():
+    async def unavailable():
         raise OSError("isolated catalog failure")
 
     monkeypatch.setattr(search, "get_catalog", unavailable)

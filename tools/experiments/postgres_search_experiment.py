@@ -7,9 +7,10 @@ from functools import cached_property
 from rapidfuzz.fuzz import ratio
 from rapidfuzz.process import extract
 
+from src.code_service.services.v2.constraints import whole_location_match
 from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import Query
-from src.code_service.services.v2.postgres import PostgresCatalog
+from src.code_service.services.v2.postgres import EXACT_LOCALITY_SQL, EXACT_LOCATION_SQL
 from tools.experiments.postgres_catalog_experiment import connect as experiment_connection
 
 
@@ -42,8 +43,17 @@ class SharedReader:
 class PostgresExperiment(Catalog):
     """Изолированный читатель PostgreSQL для воспроизводимого сравнения хранилищ."""
 
-    has_exact_location = PostgresCatalog.has_exact_location
-    has_exact_locality_word = PostgresCatalog.has_exact_locality_word
+    def has_exact_location(self, query: Query) -> bool:
+        """Проверить точную местность в синхронном варианте сравнения."""
+        words = query.words.split()
+        if len(words) < 2:
+            return False
+        rows = self.connection.execute(EXACT_LOCATION_SQL, (self.query(words, False),))
+        return any(whole_location_match(query, row["city_key"], row["street_key"]) for row in rows)
+
+    def has_exact_locality_word(self, word: str) -> bool:
+        """Проверить полное слово местности в синхронном варианте сравнения."""
+        return self.connection.execute(EXACT_LOCALITY_SQL, (self.token(word), word)).fetchone() is not None
 
     def __init__(self, minimum_similarity=0.86, ambiguity_margin=0.06):
         """Сохранить зависимости и настроить ресурсы экземпляра."""

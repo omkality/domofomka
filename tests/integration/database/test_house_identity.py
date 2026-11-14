@@ -1,10 +1,11 @@
 import os
 import sqlite3
 import uuid
+from unittest.mock import AsyncMock
 
 import psycopg
 import pytest
-from litestar.testing import TestClient
+from litestar.testing import AsyncTestClient, TestClient
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
@@ -156,7 +157,7 @@ def test_http_fallback_cannot_change_a_house_letter_corpus_or_structure(monkeypa
         def resolve(self, message, candidates):
             return {"status": "not_found", "engine": "v2", "data": {}}
 
-    def catalog():
+    async def catalog():
         if not catalog_available:
             raise TimeoutError("Injected catalog outage")
         return MissingResult()
@@ -198,7 +199,8 @@ def test_http_fallback_cannot_change_a_house_letter_corpus_or_structure(monkeypa
                     assert answer["data"] == {}
 
 
-def test_real_postgres_and_http_preserve_house_components_and_empty_neighbors(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_real_postgres_and_http_preserve_house_components_and_empty_neighbors(tmp_path, monkeypatch):
     dsn = os.getenv("TEST_QUEUE_DATABASE_URL")
     if not dsn:
         pytest.skip("Requires isolated real PostgreSQL")
@@ -208,16 +210,12 @@ def test_real_postgres_and_http_preserve_house_components_and_empty_neighbors(tm
     name = "domofomka_catalog_bench_house_" + uuid.uuid4().hex[:16]
     connection["dbname"] = name
     test_dsn = make_conninfo(**connection)
-    source, serving = tmp_path / "full.db", tmp_path / "serving.db"
+    source, serving = (tmp_path / "full.db", tmp_path / "serving.db")
     write_houses(source)
     empty_houses = {"10", "10а"}
     with sqlite3.connect(source) as db:
-        db.executemany(
-            "DELETE FROM codes WHERE building_id=?",
-            [(house,) for house in empty_houses],
-        )
+        db.executemany("DELETE FROM codes WHERE building_id=?", [(house,) for house in empty_houses])
     compact(source, serving)
-
     with psycopg.connect(dsn, autocommit=True) as admin:
         admin.execute(sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(sql.Identifier(name)))
         try:
@@ -225,7 +223,7 @@ def test_real_postgres_and_http_preserve_house_components_and_empty_neighbors(tm
             importer.load(serving, source, tmp_path / "report")
             reader = PostgresCatalog(test_dsn)
             try:
-                monkeypatch.setattr(search, "get_catalog", lambda: reader)
+                monkeypatch.setattr(search, "get_catalog", AsyncMock(return_value=reader))
                 monkeypatch.setattr(settings, "opensearch_url", None)
                 monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
 
@@ -233,11 +231,10 @@ def test_real_postgres_and_http_preserve_house_components_and_empty_neighbors(tm
                     raise AssertionError("A resolved house must not be replaced by legacy search")
 
                 monkeypatch.setattr(search, "get_data_from_db", unexpected_legacy)
-                with TestClient(app) as client:
+                async with AsyncTestClient(app) as client:
                     for spelling, expected in HOUSE_FORMS:
-                        response = client.get(
-                            "/api/v2/codes/msg",
-                            params={"message": "Москва, улица Тестовая, дом " + spelling},
+                        response = await client.get(
+                            "/api/v2/codes/msg", params={"message": "Москва, улица Тестовая, дом " + spelling}
                         )
                         assert response.status_code == 200
                         answer = response.json()
@@ -250,6 +247,6 @@ def test_real_postgres_and_http_preserve_house_components_and_empty_neighbors(tm
                             assert answer["status"] == "found"
                             assert answer["data"] == {"1": [["ONLY-" + expected, "test"]]}
             finally:
-                reader.close()
+                await reader.close()
         finally:
             admin.execute(sql.SQL("DROP DATABASE {} WITH(FORCE)").format(sql.Identifier(name)))

@@ -75,21 +75,19 @@ class Runtime:
         await asyncio.to_thread(self.store.initialize)
         # One collector/runtime per community. This is an operator-controlled
         # standby, not an automatic two-server failover implementation.
-        guard = await asyncio.to_thread(self.store.connect)
-        guard.autocommit = True
-        row = await asyncio.to_thread(
-            lambda: guard.execute(
-                r"""
+        guard = await self.store.connect_async(autocommit=True)
+        async with guard:
+            row = await (
+                await guard.execute(
+                    r"""
             SELECT
               pg_try_advisory_lock(20261021, %s) AS locked
             """,
-                (self.store.group_id,),
+                    (self.store.group_id,),
+                )
             ).fetchone()
-        )
-        if not row["locked"]:
-            guard.close()
-            raise RuntimeError("Another runtime already owns this VK community")
-        try:
+            if not row["locked"]:
+                raise RuntimeError("Another runtime already owns this VK community")
             async with asyncio.TaskGroup() as tasks:
                 tasks.create_task(self._guard(guard))
                 tasks.create_task(self._collect())
@@ -98,8 +96,6 @@ class Runtime:
                 for index in range(self.settings.queue_workers):
                     tasks.create_task(self._worker("bot_inbox", index))
                     tasks.create_task(self._worker("bot_outbox", index))
-        finally:
-            guard.close()
 
     async def _maintenance(self) -> None:
         """Периодически очищать допустимые записи и проверять состояние хранения."""
@@ -151,10 +147,10 @@ class Runtime:
             await asyncio.sleep(self.settings.queue_maintenance_interval_seconds)
 
     async def _guard(self, connection: Any) -> None:
-        """Выполнять фоновую операцию с контролируемым повтором после ошибки."""
+        """Остановить runtime при потере сессии, удерживающей блокировку сообщества."""
         while True:
             await asyncio.sleep(self.settings.queue_guard_interval_seconds)
-            await asyncio.to_thread(lambda: connection.execute("SELECT 1").fetchone())
+            await (await connection.execute("SELECT 1")).fetchone()
 
     def _longpoll(self) -> VkBotLongPoll:
         """Получить события Long Poll с ограниченными сетевыми бюджетами."""

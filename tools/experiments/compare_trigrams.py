@@ -14,6 +14,7 @@ from rapidfuzz.fuzz import ratio
 from rapidfuzz.process import extract
 
 from src.code_service.services.v2.postgres import PostgresCatalog
+from src.infrastructure.event_loop import run_async
 
 
 class TrigramCatalog(PostgresCatalog):
@@ -21,7 +22,7 @@ class TrigramCatalog(PostgresCatalog):
 
     mode = "word"
 
-    def trigrams(self, query, coded):
+    async def trigrams(self, query, coded):
         """Найти похожие улицы с прежним пределом и стабильным порядком."""
         if not query.words or not query.house:
             return []
@@ -45,29 +46,29 @@ class TrigramCatalog(PostgresCatalog):
             LIMIT
               %s
             """
-        with self.connect() as db:
-            ids = [row[0] for row in db.execute(statement, (*values, self.candidate_limit * 10))]
-            return self._expand(db, ids, query.house, include_known=not coded)
+        async with self.connect() as db:
+            ids = [row["id"] for row in await self.rows(db, statement, (*values, self.candidate_limit * 10))]
+            return await self._expand(db, ids, query.house, include_known=not coded)
 
-    def coded_candidates(self, query, limit=None):
+    async def coded_candidates(self, query, limit=None):
         """Отобрать дома с кодами через триграммы."""
-        return self.trigrams(query, True)
+        return await self.trigrams(query, True)
 
-    def candidates(self, query, limit=None):
+    async def candidates(self, query, limit=None):
         """Отобрать известные дома через триграммы, сохранив конечные ограничения."""
-        return self.trigrams(query, False)
+        return await self.trigrams(query, False)
 
 
 class VocabularyCatalog(PostgresCatalog):
     """Проверить pg_trgm как короткий список для существующего RapidFuzz."""
 
-    def candidates(self, query, limit=None):
+    async def candidates(self, query, limit=None):
         """Сохранить точный поиск, заменив только извлечение словарных альтернатив."""
         words = query.words.split()
         if not words or not query.house:
             return []
         limit = self.candidate_limit if limit is None else limit
-        result = self.fetch(self.query(words, True), words, query.house, limit)
+        result = await self.fetch(self.query(words, True), words, query.house, limit)
         if result:
             return result
         groups, terms = [], []
@@ -75,10 +76,11 @@ class VocabularyCatalog(PostgresCatalog):
             if any(char.isdigit() for char in word):
                 alternatives = [word]
             else:
-                with self.connect() as db:
+                async with self.connect() as db:
                     shortlist = [
-                        row[0]
-                        for row in db.execute(
+                        row["term"]
+                        for row in await self.rows(
+                            db,
                             r"""
                             SELECT
                               term
@@ -100,7 +102,7 @@ class VocabularyCatalog(PostgresCatalog):
                 return []
             terms.extend(alternatives)
             groups.append("(" + " | ".join(self.token(value) for value in alternatives) + ")")
-        return self.fetch(" & ".join(groups), list(dict.fromkeys(terms)), query.house, limit)
+        return await self.fetch(" & ".join(groups), list(dict.fromkeys(terms)), query.house, limit)
 
 
 def summary(values):
@@ -113,7 +115,7 @@ def summary(values):
     }
 
 
-def main():
+async def main():
     """Измерить неизменяемый корпус и сохранить закрытые ответы и публичные агрегаты."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path, required=True)
@@ -181,27 +183,27 @@ def main():
             reader.mode = "whole"
         timings, output = [], []
         try:
-            with reader.connect() as db:
+            async with reader.connect() as db:
                 # Подключение читателя только для чтения; настройка лишь текущей сессии.
-                db.execute(r"""
+                await db.execute(r"""
                     SELECT
                       set_config('pg_trgm.similarity_threshold', '0.2', false)
                     """)
-                db.execute(r"""
+                await db.execute(r"""
                     SELECT
                       set_config('pg_trgm.strict_word_similarity_threshold', '0.5', false)
                     """)
             for case in cases:
                 start = time.perf_counter()
                 try:
-                    result = reader.resolve(case["query"])
+                    result = await reader.resolve(case["query"])
                 except Exception as error:
                     result = {"status": "error", "error_type": type(error).__name__}
                 elapsed = (time.perf_counter() - start) * 1000
                 timings.append(elapsed)
                 output.append({"result": result, "milliseconds": elapsed})
         finally:
-            reader.close()
+            await reader.close()
         outputs[name] = output
         report["profiles"][name] = dict(
             summary(timings),
@@ -222,4 +224,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_async(main())

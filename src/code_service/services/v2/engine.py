@@ -2,42 +2,33 @@
 
 import base64
 import binascii
-import hashlib
 import json
-import re
 import sqlite3
 import zlib
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
-from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 
-from rapidfuzz.distance import DamerauLevenshtein
 from rapidfuzz.fuzz import ratio
-from rapidfuzz.process import extract, extractOne
+from rapidfuzz.process import extract
 
 from src.code_service.services.v2.constraints import (
     complete_name_match,
-    full_name_match,
     has_misaligned_source_fields,
-    literal_name_tokens,
     locality_prefix_match,
-    name_constraints_match,
-    street_name_keys,
     whole_location_match,
 )
 from src.code_service.services.v2.normalize import (
     Query,
-    address_words,
     building_kind_matches,
     parse_query,
-    query_name_words,
 )
-from src.infrastructure.telemetry import measured, note
+from src.code_service.services.v2.ranking import Ranker
+from src.infrastructure.telemetry import measured
 
 
-class Catalog:
+class Catalog(Ranker):
     """Общий алгоритм кандидатов, точных ограничений и ранжирования адресов."""
 
     def __init__(
@@ -89,7 +80,6 @@ class Catalog:
         ]
         if not include_known:
             return rows
-        seen = {(r["display"].rsplit(", дом ", 1)[0], r["region"], r["lineage"]) for r in rows}
         packed_streets = {
             r[0]: r
             for r in db.execute(
@@ -105,36 +95,7 @@ class Catalog:
                 ids,
             )
         }
-        for sid in ids:
-            packed = packed_streets.get(sid)
-            if not packed:
-                continue
-            bundles = json.loads(zlib.decompress(packed[1]))
-            for b in bundles:
-                if house not in b["houses"]:
-                    continue
-                identity = (b["prefix"], b["region"], b["lineage"])
-                if identity in seen:
-                    continue
-                seen.add(identity)
-                rows.append(
-                    {
-                        "id": f"address:{sid}:"
-                        + hashlib.sha256("\0".join(identity).encode()).hexdigest()[:20]
-                        + ":"
-                        + base64.urlsafe_b64encode(house.encode()).decode().rstrip("="),
-                        "guid": None,
-                        "display": b["prefix"] + ", дом " + house,
-                        "city": b["city"],
-                        "street": b["street"],
-                        "house": house,
-                        "city_key": packed[2],
-                        "street_key": packed[3],
-                        "region": b["region"],
-                        "lineage": b["lineage"],
-                    }
-                )
-        return rows
+        return self.expand_houses(ids, house, rows, packed_streets)
 
     @measured("search.v2.coded_candidates")
     def coded_candidates(self, query: Query, limit: int | None = None) -> list[dict]:
@@ -355,25 +316,10 @@ class Catalog:
         }
 
     def joined_variants(self, query: Query, candidates: list[dict]) -> list[Query]:
-        """Try at most four adjacent word joins, supported by the actual catalog."""
-        pairs = list(re.finditer(r"(?=(\b[а-яa-z]{2,}\s+[а-яa-z]{2,}\b))", query.search_text))
-        if not pairs:
+        """Подготовить варианты слитного написания по словарю файла."""
+        if not self.joined_pairs(query):
             return []
-        vocabulary = [
-            *self.vocabulary_terms(),
-            *(word for row in candidates for word in address_words(row["street"]).split()),
-        ]
-        variants = []
-        for pair in pairs[:4]:
-            joined = "".join(pair[1].split())
-            if len(joined) < 6 or not extractOne(
-                joined, vocabulary, scorer=DamerauLevenshtein.distance, score_cutoff=0 if len(joined) < 8 else 1
-            ):
-                continue
-            alternate = address_words(query.search_text[: pair.start()] + joined + query.search_text[pair.end(1) :])
-            # The original parsed identity is authoritative, including area numbers.
-            variants.append(replace(query, words=alternate))
-        return variants
+        return super().joined_variants(query, candidates, self.vocabulary_terms())
 
     @measured("search.v2.alias_candidates")
     def alias_candidates(self, query: Query) -> list[dict]:
@@ -461,14 +407,6 @@ class Catalog:
                 return next((r for r in self._expand(db, [parts[1]], house) if r["id"] == id), None)
         return None
 
-    @staticmethod
-    def similarity(query: str, document: str) -> float:
-        """Рассчитать лексическую близость запроса и адресного кандидата."""
-        tokens = document.split()
-        if any(any(c.isdigit() for c in word) and word not in tokens for word in query.split()):
-            return 0
-        return min((max((ratio(w, t) / 100 for t in tokens), default=0) for w in query.split()), default=0)
-
     @measured("search.v2.read_codes")
     def answer(self, building: dict, entrance: str | None = None) -> dict:
         """Собрать результат выбранного адреса и доступных кодов."""
@@ -490,51 +428,13 @@ class Catalog:
                 """,
                 (building["id"],),
             ).fetchall()
-        data = {}
-        for row in rows:
-            data.setdefault(row["entrance"], []).append([row["code"], row["kind"]])
-        return {
-            "status": "found" if data else "no_codes",
-            "address": building["display"],
-            "building_id": building["id"],
-            "fias_id": building["guid"],
-            "data": data,
-            "requested_entrance": entrance,
-            "engine": "v2",
-            "identity": (
-                "gar"
-                if building["guid"]
-                else ("gar_address" if building["id"].startswith("address:") else "legacy_unverified")
-            ),
-        }
+        return self.format_answer(building, rows, entrance)
 
     def resolve(self, message: str, candidates: list[dict] | None = None) -> dict:
         """Найти адрес с сохранением точных ограничений дома и местности."""
-        query = parse_query(message)
-        if not query.words and query.name_words:
-            query = replace(query, words=query.name_words)
-        note(
-            normalized_query={
-                "words": query.words,
-                "house": query.house,
-                "entrance": query.entrance,
-                "kind": query.kind,
-            }
-        )
-        if not message.strip():
-            return {"status": "not_found", "data": {}, "engine": "v2"}
-        if not query.house or not query.words:
-            # Unsupported house formats and streets named like a type (e.g.
-            # "Набережная") still get the unchanged v1 compatibility path.
-            numeric_street = any(any(char.isdigit() for char in word) for word in query.words.split())
-            if (query.house and any(c.isalpha() for c in message)) or (
-                not query.house and any(c.isdigit() for c in message) and not numeric_street
-            ):
-                return {"status": "not_found", "data": {}, "engine": "v2"}
-            return {"status": "incomplete_query", "data": {}, "engine": "v2"}
-        variants = [query]
-        if query.name_words and query.name_words != query.words:
-            variants.append(replace(query, words=query.name_words))
+        query, variants, early = self.prepare_query(message)
+        if early is not None:
+            return early
         cheap = [
             row for variant in variants for row in [*self.coded_candidates(variant), *self.alias_candidates(variant)]
         ]
@@ -561,127 +461,33 @@ class Catalog:
 
     @measured("search.v2.rank")
     def _resolve_candidates(self, query: Query, variants: list[Query], candidates: list[dict]) -> dict:
-        # Backend scores never decide house identity or permit dropping a city token.
-        """Отфильтровать и ранжировать кандидатов до ответа или уточнения."""
-        scored = []
-        for row in candidates:
-            if row["house"] != query.house:
-                continue
-            if not name_constraints_match(query, row):
-                continue
-            if has_misaligned_source_fields(row):
-                # Misaligned source columns are not a verified v2 address. Let
-                # compatibility fallback preserve v1 until the row is reviewed.
-                continue
-            street_words = (address_words(row["street"]) or query_name_words(row["street"])).split()
-            # A missing ordinal must not silently select another named street.
-            if any(any(c.isdigit() for c in part) and part not in query.words.split() for part in street_words):
-                continue
-            if not any(
-                (word == part if any(c.isdigit() for c in word) else ratio(word, part) / 100 >= self.minimum_similarity)
-                for variant in variants
-                for word in variant.words.split()
-                for part in street_words
-            ):
-                continue
-            if not building_kind_matches(query, row):
-                continue
-            score = max(
-                self.similarity(variant.words, document)
-                for variant in variants
-                for document in [
-                    address_words(row["city"] + " " + row["street"]),
-                    query_name_words(row["city"] + " " + row["street"]),
-                    *row.get("_aliases", []),
-                ]
-            )
-            if score >= self.minimum_similarity:
-                scored.append((score, row))
-        scored.sort(key=lambda v: (-v[0], v[1]["id"]))
-        if not any(score == 1 for score, row in scored) and self.has_exact_location(query):
-            return {
-                "status": "not_found",
-                "data": {},
-                "engine": "v2",
-                "fallback_rejected": "known_street_without_requested_house",
-            }
-        if not scored:
-            return {"status": "not_found", "data": {}, "engine": "v2"}
-        best = scored[0][0]
-        # Code availability must not replace an exact address with a fuzzy one.
-        cutoff = 1 if best == 1 else best - self.ambiguity_margin
-        close = [row for score, row in scored if score >= cutoff]
-        locations = [
-            row
-            for row in close
-            if whole_location_match(query, row["city"], row["street"]) and complete_name_match(query, row)
-        ]
-        if locations:
-            # A complete city/street must be respected before code availability.
-            # Keep source aliases of that same full name, including administrative
-            # locality spellings; a longer or different street cannot supply codes.
-            tokens = literal_name_tokens(query.name_words or query.words)
-            names = {
-                key
-                for row in locations
-                for key in street_name_keys(row)
-                if tokens - (literal_name_tokens(row["city"]) - key) == key
-            }
-            if names:
-                close = [
-                    row
-                    for row in close
-                    if any(
-                        bool(street_name_keys(row, name) & names)
-                        for name in [row["street"], *row.get("_alias_streets", [])]
-                    )
-                ]
-        if len(close) > 1:
-            with self.connect() as db:
-                ids = [r["id"] for r in close]
-                coded = {
-                    r[0]
-                    for r in db.execute(
-                        "SELECT DISTINCT building_id FROM codes WHERE building_id IN ("
-                        + ",".join("?" for _ in ids)
-                        + ")",
-                        ids,
-                    )
-                }
-            if coded:
-                close = [row for row in close if row["id"] in coded]
-            else:
-                return {"status": "no_codes_ambiguous", "data": {}, "engine": "v2"}
-        exact = (
-            [
-                row
-                for row in close
-                if any(
-                    full_name_match(variant, row) or complete_name_match(variant, row, row.get("_alias_names", []))
-                    for variant in variants
-                )
-            ]
-            if query.name_words == query.words
-            else []
-        )
-        if exact:
-            close = exact
-        if len(close) > 1:
-            return {
-                "status": "ambiguous",
-                "data": {},
-                "engine": "v2",
-                "candidates": [
-                    {"building_id": r["id"], "address": r["display"], "locality_context": r["lineage"]}
-                    for r in close[:100]
-                ],
-                "candidate_count": len(close),
-            }
-        answer = self.answer(close[0], query.entrance)
-        if answer["status"] == "no_codes" and best < 1:
-            # A merely similar empty house must not become a confident address.
+        """Ранжировать файловые результаты и прочитать выбранные коды."""
+        scored = self.score_candidates(query, variants, candidates)
+        exact = self.has_exact_location(query) if not any(score == 1 for score, _ in scored) else False
+        close = self.shortlist_candidates(query, scored, exact)
+        if isinstance(close, dict):
+            return close
+        coded = self.coded_building_ids([row["id"] for row in close]) if len(close) > 1 else set()
+        selected = self.choose_candidates(query, variants, close, coded)
+        if "building" not in selected:
+            return selected
+        answer = self.answer(selected["building"], query.entrance)
+        if answer["status"] == "no_codes" and scored[0][0] < 1:
             return {"status": "no_codes_ambiguous", "data": {}, "engine": "v2"}
         return answer
+
+    def coded_building_ids(self, ids: list[str]) -> set[str]:
+        """Получить наличие кодов у ограниченного списка домов."""
+        if not ids:
+            return set()
+        with self.connect() as db:
+            return {
+                row[0]
+                for row in db.execute(
+                    "SELECT DISTINCT building_id FROM codes WHERE building_id IN (" + ",".join("?" for _ in ids) + ")",
+                    ids,
+                )
+            }
 
 
 MAPPING = {

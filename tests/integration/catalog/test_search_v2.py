@@ -147,14 +147,15 @@ def test_catalog_candidate_budget_changes_retrieval_without_changing_default(cat
     assert answer["building_id"] in {"a", "c"}
 
 
-def test_application_passes_candidate_budget_to_sqlite_reader(catalog, monkeypatch):
+@pytest.mark.asyncio
+async def test_application_passes_candidate_budget_to_sqlite_reader(catalog, monkeypatch):
     from src.code_service.config import settings
     from src.code_service.services.v2.catalog import get_catalog
 
     monkeypatch.setattr(settings, "search_backend", "sqlite")
     monkeypatch.setattr(settings, "search_catalog_path", catalog.path)
     monkeypatch.setattr(settings, "search_candidate_limit", 5)
-    assert get_catalog().candidate_limit == 5
+    assert (await get_catalog()).candidate_limit == 5
 
 
 def test_locality_words_cannot_replace_the_street_name(catalog):

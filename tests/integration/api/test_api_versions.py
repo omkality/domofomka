@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock
+
 import pytest
 from litestar.testing import TestClient
 
@@ -43,7 +45,7 @@ def test_geolocation_uses_the_same_v2_and_guarded_fallback_as_text(monkeypatch, 
     legacy = AsyncMock(return_value={"address": result["address"], "data": {"1": [["LEGACY", "test"]]}})
     monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
     monkeypatch.setattr(settings, "opensearch_url", None)
-    monkeypatch.setattr(search, "get_catalog", Reader)
+    monkeypatch.setattr(search, "get_catalog", AsyncMock(return_value=Reader()))
     monkeypatch.setattr(search, "get_data_from_db", legacy)
     monkeypatch.setattr(DadataClient, "get_address_by_geo", AsyncMock(return_value=address))
     with TestClient(app) as client:
@@ -187,7 +189,7 @@ async def test_empty_lexical_result_with_house_still_uses_compatible_v1(monkeypa
         return {"address": "Долгопрудный, улица Набережная, дом 19", "data": {"1": [["CODE", "test"]]}}
 
     monkeypatch.setattr(settings, "opensearch_url", None)
-    monkeypatch.setattr(search, "get_catalog", EmptyCatalog)
+    monkeypatch.setattr(search, "get_catalog", AsyncMock(return_value=EmptyCatalog()))
     monkeypatch.setattr(search, "get_data_from_db", legacy)
     result = await search.uncached_lookup(query)
     assert result["status"] == "found"
@@ -204,6 +206,6 @@ async def test_incomplete_address_does_not_reinterpret_an_area_number_as_a_house
         raise AssertionError("A house number was not supplied")
 
     monkeypatch.setattr(settings, "opensearch_url", None)
-    monkeypatch.setattr(search, "get_catalog", EmptyCatalog)
+    monkeypatch.setattr(search, "get_catalog", AsyncMock(return_value=EmptyCatalog()))
     monkeypatch.setattr(search, "get_data_from_db", forbidden)
     assert (await search.uncached_lookup("квартал 114А"))["status"] == "incomplete_query"

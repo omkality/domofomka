@@ -8,6 +8,7 @@ import hashlib
 import logging
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from src.code_service.config import settings
 from src.code_service.errors import BuildingNotFound, CatalogUnavailable
@@ -18,6 +19,7 @@ from src.code_service.services.v2.catalog import get_catalog
 from src.code_service.services.v2.constraints import legacy_result_matches, legacy_source_matches
 from src.code_service.services.v2.normalize import parse_query
 from src.code_service.services.v2.opensearch import candidate_ids
+from src.code_service.services.v2.postgres import PostgresCatalog
 from src.infrastructure.telemetry import note, search_result, span
 
 logger = logging.getLogger(__name__)
@@ -91,14 +93,18 @@ async def uncached_lookup(message: str) -> dict:
     reason = None
     whole_location = False
     try:
-        catalog = get_catalog()
+        catalog = await get_catalog()
         candidates = None
         if settings.opensearch_url:
             try:
                 async with asyncio.timeout(settings.opensearch_timeout_seconds):
                     ids = await candidate_ids(message, settings)
                     candidates = (
-                        await asyncio.to_thread(catalog.load_candidates, ids, parse_query(message).house)
+                        (
+                            await catalog.load_candidates(ids, parse_query(message).house)
+                            if isinstance(catalog, PostgresCatalog)
+                            else await asyncio.to_thread(catalog.load_candidates, ids, parse_query(message).house)
+                        )
                         if ids
                         else None
                     )
@@ -113,7 +119,11 @@ async def uncached_lookup(message: str) -> dict:
             storage_backend=settings.search_backend,
             query=message[: settings.search_max_query_length],
         ) as detail:
-            result = await asyncio.to_thread(catalog.resolve, message, candidates)
+            result = (
+                await catalog.resolve(message, candidates)
+                if isinstance(catalog, PostgresCatalog)
+                else await asyncio.to_thread(catalog.resolve, message, candidates)
+            )
             detail["result"] = search_result(result)
         note(result=search_result(result))
         recoverable_incomplete = result["status"] == "incomplete_query" and bool(parse_query(message).house)
@@ -170,15 +180,20 @@ async def read_building(building_id: str) -> dict:
     """Прочитать выбранный дом или сообщить о его отсутствии."""
     note(catalog_backend=settings.search_backend)
 
-    def read() -> dict | None:
+    def read(catalog: Any) -> dict | None:
         """Прочитать данные текущего контрольного или адресного результата."""
-        catalog = get_catalog()
         row = catalog.building(building_id)
         return catalog.answer(row) if row else None
 
     try:
         with span("search.v2.building", kind="search", engine="v2", storage_backend=settings.search_backend) as detail:
-            result = await asyncio.to_thread(read)
+            catalog = await get_catalog()
+            if isinstance(catalog, PostgresCatalog):
+                async with catalog.connect():
+                    row = await catalog.building(building_id)
+                    result = await catalog.answer(row) if row else None
+            else:
+                result = await asyncio.to_thread(read, catalog)
             detail["result"] = search_result(result) if result is not None else {"status": "not_found"}
     except Exception as exc:
         raise CatalogUnavailable("Catalog unavailable") from exc

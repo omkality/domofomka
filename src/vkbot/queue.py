@@ -460,15 +460,22 @@ class QueueStore:
 
     def connect(self) -> psycopg.Connection[DictRow]:
         """Открыть соединение очереди с ограничениями подключения, SQL и блокировок."""
-        return psycopg.connect(
-            self.dsn,
-            connect_timeout=network_settings.queue_db_connect_timeout_seconds,
-            row_factory=dict_row,
-            options=(
+        return psycopg.connect(self.dsn, **self._connection_options())
+
+    def _connection_options(self) -> dict:
+        """Использовать одинаковые бюджеты для sync- и async-соединений Psycopg."""
+        return {
+            "connect_timeout": network_settings.queue_db_connect_timeout_seconds,
+            "row_factory": dict_row,
+            "options": (
                 f"-c statement_timeout={network_settings.queue_db_statement_timeout_ms} "
                 f"-c lock_timeout={network_settings.queue_db_lock_timeout_ms}"
             ),
-        )
+        }
+
+    async def connect_async(self, *, autocommit: bool = False) -> psycopg.AsyncConnection[DictRow]:
+        """Открыть асинхронное соединение для задач жизненного цикла runtime."""
+        return await psycopg.AsyncConnection.connect(self.dsn, autocommit=autocommit, **self._connection_options())
 
     def initialize(self) -> None:
         """Проверить схему и подготовить состояние сообщества без DDL."""

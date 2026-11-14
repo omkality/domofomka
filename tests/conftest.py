@@ -1,8 +1,20 @@
 """Изолированное окружение тестов и регистрация общих фикстур."""
 
+import asyncio
 import os
+import sys
+
+import pytest
 
 pytest_plugins = ["tests.fixtures.database"]
+
+
+@pytest.fixture(scope="session")
+def event_loop_policy():
+    if sys.platform == "win32":
+        return asyncio.WindowsSelectorEventLoopPolicy()
+    return asyncio.DefaultEventLoopPolicy()
+
 
 # Значения приложений не должны попадать в тесты из личного .env разработчика.
 os.environ.update(

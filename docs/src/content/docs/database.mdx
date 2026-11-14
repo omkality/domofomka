@@ -263,6 +263,8 @@ DDL находится в `src/infrastructure/database/migrations/catalog`; за
 
 Схемой управляет yoyo-migrations через уже используемый Psycopg 3, без ORM.
 Файлы находятся в `src/infrastructure/database/migrations/queue/` и `catalog/`.
+Создание SQL- и Python-ревизий, команды применения и отката разобраны в
+[ручной работе с миграциями](migrations.md).
 Для каждой ревизии есть SQL применения и соседний `.rollback.sql`; зависимости
 указаны в комментарии `-- depends:`. Таблица `_yoyo_migration` хранит применённые ревизии.
 

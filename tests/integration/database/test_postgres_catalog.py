@@ -1,7 +1,6 @@
-import concurrent.futures
+import asyncio
 import os
 import sqlite3
-import threading
 import time
 import uuid
 from contextlib import suppress
@@ -177,13 +176,32 @@ def production_reader(**options: Any):
     return PostgresCatalog(os.environ["CATALOG_BENCHMARK_DSN"], **options)
 
 
-def test_bounded_reader_preserves_results_and_compact_building_ids(local_experiment):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("profile", ["whole", "word", "vocabulary"])
+async def test_trigram_comparison_uses_native_async_reader(local_experiment, profile):
+    from tools.experiments.compare_trigrams import TrigramCatalog, VocabularyCatalog
+
+    with importer.connect() as admin:
+        admin.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    factory = VocabularyCatalog if profile == "vocabulary" else TrigramCatalog
+    reader = factory(os.environ["CATALOG_BENCHMARK_DSN"])
+    if profile != "vocabulary":
+        reader.mode = profile
+    try:
+        assert (await reader.resolve("Москва Перерва 62к1"))["building_id"] == "a"
+        assert (await reader.resolve("Москва Перева 62к1"))["building_id"] == "a"
+    finally:
+        await reader.close()
+
+
+@pytest.mark.asyncio
+async def test_bounded_reader_preserves_results_and_compact_building_ids(local_experiment):
     sqlite = Catalog(str(local_experiment))
     reader = production_reader()
     try:
-        empty = reader.resolve("Москва Коломенская 2")
+        empty = await reader.resolve("Москва Коломенская 2")
         assert empty["status"] == "no_codes"
-        identity = reader.building(empty["building_id"])
+        identity = await reader.building(empty["building_id"])
         assert identity["street"] == "Коломенская"
         assert identity["house"] == "2"
         for query in [
@@ -194,172 +212,254 @@ def test_bounded_reader_preserves_results_and_compact_building_ids(local_experim
             "Москва Коломенская 2",
             "Москва Коломенская 2а",
         ]:
-            actual = reader.resolve(query)
+            actual = await reader.resolve(query)
             assert actual == sqlite.resolve(query)
             for item in actual.get("candidates", []) or ([actual] if actual.get("building_id") else []):
-                assert reader.building(item["building_id"]) == sqlite.building(item["building_id"])
+                assert await reader.building(item["building_id"]) == sqlite.building(item["building_id"])
     finally:
-        reader.close()
+        await reader.close()
 
 
-def test_compact_expansion_batches_street_reads_and_preserves_empty_houses(local_experiment, monkeypatch):
-    from src.code_service.services.v2.postgres import SharedReader
-
+@pytest.mark.asyncio
+async def test_compact_expansion_batches_street_reads_and_preserves_empty_houses(local_experiment, monkeypatch):
     reader = production_reader()
     statements = []
-    original = SharedReader.execute
+    original = psycopg.AsyncConnection.execute
 
-    def tracked(self, statement, parameters=()):
+    async def tracked(self, statement, parameters=(), **kwargs: Any):
         statements.append(statement)
-        return original(self, statement, parameters)
+        return await original(self, statement, parameters, **kwargs)
 
-    monkeypatch.setattr(SharedReader, "execute", tracked)
+    monkeypatch.setattr(psycopg.AsyncConnection, "execute", tracked)
     try:
-        with reader.connect() as db:
-            ids = [row[0] for row in db.execute("SELECT id FROM streets ORDER BY id")]
+        async with reader.connect() as db:
+            ids = [row["id"] for row in await reader.rows(db, "SELECT id FROM streets ORDER BY id")]
             statements.clear()
-            rows = reader._expand(db, ids, "2")
+            rows = await reader._expand(db, ids, "2")
         assert len(statements) == 2
         assert any(row["id"].startswith("address:") for row in rows)
         with Catalog(str(local_experiment)).connect() as db:
             assert rows == Catalog(str(local_experiment))._expand(db, ids, "2")
     finally:
-        reader.close()
+        await reader.close()
 
 
-def test_postgres_prefix_clarification_matches_sqlite_and_requires_confirmation(local_experiment):
+@pytest.mark.asyncio
+async def test_postgres_prefix_clarification_matches_sqlite_and_requires_confirmation(local_experiment):
     reader = production_reader()
     try:
-        assert not reader.has_exact_locality_word("наха")
-        assert reader.has_exact_locality_word("нахабино")
-        result = reader.resolve("наха тестовая 7")
+        assert not await reader.has_exact_locality_word("наха")
+        assert await reader.has_exact_locality_word("нахабино")
+        result = await reader.resolve("наха тестовая 7")
         assert result == Catalog(str(local_experiment)).resolve("наха тестовая 7")
         assert result["status"] == "ambiguous"
         assert [row["building_id"] for row in result["candidates"]] == ["n"]
-        assert reader.resolve("Нахабино Тестовая 7")["status"] == "found"
+        assert (await reader.resolve("Нахабино Тестовая 7"))["status"] == "found"
     finally:
-        reader.close()
+        await reader.close()
 
 
-def test_reader_preserves_distinct_codes_for_administrative_variants_and_parent_locality_aliases(local_experiment):
+@pytest.mark.asyncio
+async def test_reader_preserves_distinct_codes_for_administrative_variants_and_parent_locality_aliases(
+    local_experiment,
+):
     sqlite = Catalog(str(local_experiment))
     reader = production_reader()
     try:
-        result = reader.resolve("Москва Самотечная 11")
+        result = await reader.resolve("Москва Самотечная 11")
         assert result == sqlite.resolve("Москва Самотечная 11")
         assert result["status"] == "ambiguous"
         assert {option["building_id"] for option in result["candidates"]} == {"i", "j", "k"}
         codes = {
             code
             for option in result["candidates"]
-            for items in reader.answer(reader.building(option["building_id"]))["data"].values()
+            for items in (await reader.answer(await reader.building(option["building_id"])))["data"].values()
             for code, _ in items
         }
         assert codes == {"MAIN-LOCALITY", "PARENT-LOCALITY-ALIAS", "SOURCE-ADMINISTRATIVE-VARIANT"}
-        assert reader.resolve("Щербинка Самотечная 11")["building_id"] == "j"
-        assert reader.resolve("Москва Самотечная 11к1")["status"] == "not_found"
-        empty = reader.resolve("деревня Улица улица Зеленая 9")
+        assert (await reader.resolve("Щербинка Самотечная 11"))["building_id"] == "j"
+        assert (await reader.resolve("Москва Самотечная 11к1"))["status"] == "not_found"
+        empty = await reader.resolve("деревня Улица улица Зеленая 9")
         assert empty["status"] == "no_codes"
         assert empty["building_id"].startswith("address:")
         assert empty == sqlite.resolve("деревня Улица улица Зеленая 9")
     finally:
-        reader.close()
+        await reader.close()
 
 
-def test_reader_reuses_one_connection_and_serializes_parallel_requests(local_experiment):
+@pytest.mark.asyncio
+async def test_reader_reuses_one_connection_and_serializes_parallel_requests(local_experiment):
     reader = production_reader()
     try:
-        expected = reader.resolve("Москва Перерва 62к1")
-        with reader.connect() as db:
-            pid = db.execute("SELECT pg_backend_pid()").fetchone()[0]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-            results = list(pool.map(reader.resolve, ["Москва Перерва 62к1"] * 16))
+        expected = await reader.resolve("Москва Перерва 62к1")
+        async with reader.connect() as db:
+            pid = (await reader.rows(db, "SELECT pg_backend_pid()"))[0]["pg_backend_pid"]
+        results = await asyncio.gather(*(reader.resolve("Москва Перерва 62к1") for _ in range(16)))
         assert all(result == expected for result in results)
-        with reader.connect() as db:
-            assert db.execute("SELECT pg_backend_pid()").fetchone()[0] == pid
-            assert db.connection.autocommit
-            assert db.connection.pgconn.transaction_status == psycopg.pq.TransactionStatus.IDLE
+        async with reader.connect() as db:
+            assert (await reader.rows(db, "SELECT pg_backend_pid()"))[0]["pg_backend_pid"] == pid
+            assert db.autocommit
+            assert db.pgconn.transaction_status == psycopg.pq.TransactionStatus.IDLE
     finally:
-        reader.close()
+        await reader.close()
 
 
-def test_reader_is_read_only_and_recovers_after_rejected_write(local_experiment):
+@pytest.mark.asyncio
+async def test_reader_is_read_only_and_recovers_after_rejected_write(local_experiment):
     reader = production_reader()
     try:
-        with pytest.raises(psycopg.errors.ReadOnlySqlTransaction), reader.connect() as db:
-            db.execute("DELETE FROM codes")
-        assert reader.resolve("Москва Перерва 62к1")["data"]["2"][0][0] == "CODE-A"
+        with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+            async with reader.connect() as db:
+                await db.execute("DELETE FROM codes")
+        assert (await reader.resolve("Москва Перерва 62к1"))["data"]["2"][0][0] == "CODE-A"
     finally:
-        reader.close()
+        await reader.close()
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(("statement_ms", "operation_seconds"), [(50, 2), (2000, 0.15)])
-def test_server_and_client_deadlines_close_connection_and_allow_recovery(
+async def test_server_and_client_deadlines_close_connection_and_allow_recovery(
     local_experiment, statement_ms, operation_seconds
 ):
     reader = production_reader(statement_timeout_ms=statement_ms, operation_timeout_seconds=operation_seconds)
     try:
-        # Warm connection/metadata before measuring only the deliberately blocked command.
-        reader.resolve("Москва Перерва 62к1")
+        await reader.resolve("Москва Перерва 62к1")
         started = time.monotonic()
-        with pytest.raises((psycopg.OperationalError, TimeoutError)), reader.connect() as db:
-            db.execute("SELECT pg_sleep(1)")
+        with pytest.raises((psycopg.OperationalError, TimeoutError)):
+            async with reader.connect() as db:
+                await db.execute("SELECT pg_sleep(1)")
         assert time.monotonic() - started < 0.8
-        assert reader.resolve("Москва Перерва 62к1")["status"] == "found"
+        assert (await reader.resolve("Москва Перерва 62к1"))["status"] == "found"
     finally:
-        reader.close()
+        await reader.close()
 
 
-def test_busy_reader_does_not_close_another_active_operation(local_experiment):
+@pytest.mark.asyncio
+async def test_busy_reader_does_not_close_another_active_operation(local_experiment):
     reader = production_reader(lock_timeout_seconds=0.05)
-    held, release = threading.Event(), threading.Event()
+    held, release = asyncio.Event(), asyncio.Event()
 
-    def hold():
-        with reader.connect():
+    async def hold():
+        async with reader.connect() as db:
             held.set()
-            assert release.wait(2)
+            await release.wait()
+            assert not db.closed
 
+    task = asyncio.create_task(hold())
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            task = pool.submit(hold)
-            assert held.wait(2)
-            with pytest.raises(TimeoutError, match="busy"):
-                reader.resolve("Москва Перерва 62к1")
-            release.set()
-            task.result(timeout=2)
-        assert reader.resolve("Москва Перерва 62к1")["status"] == "found"
+        await asyncio.wait_for(held.wait(), 2)
+        with pytest.raises(TimeoutError, match="busy"):
+            await reader.resolve("Москва Перерва 62к1")
+        release.set()
+        await task
+        assert (await reader.resolve("Москва Перерва 62к1"))["status"] == "found"
     finally:
         release.set()
-        reader.close()
+        await task
+        await reader.close()
 
 
-def test_reader_reconnects_after_postgres_terminates_its_session(local_experiment):
+@pytest.mark.asyncio
+async def test_reader_reconnects_after_postgres_terminates_its_session(local_experiment):
     reader = production_reader()
     try:
-        with reader.connect() as db:
-            pid = db.execute("SELECT pg_backend_pid()").fetchone()[0]
+        async with reader.connect() as db:
+            pid = (await (await db.execute("SELECT pg_backend_pid()")).fetchone())["pg_backend_pid"]
         with importer.connect() as admin:
             assert admin.execute("SELECT pg_terminate_backend(%s) AS stopped", (pid,)).fetchone()["stopped"]
         with suppress(psycopg.OperationalError):
-            reader.resolve("Москва Перерва 62к1")
-        assert reader.resolve("Москва Перерва 62к1")["status"] == "found"
-        with reader.connect() as db:
-            assert db.execute("SELECT pg_backend_pid()").fetchone()[0] != pid
+            await reader.resolve("Москва Перерва 62к1")
+        assert (await reader.resolve("Москва Перерва 62к1"))["status"] == "found"
+        async with reader.connect() as db:
+            assert (await (await db.execute("SELECT pg_backend_pid()")).fetchone())["pg_backend_pid"] != pid
     finally:
-        reader.close()
+        await reader.close()
 
 
-def test_reader_rejects_another_dataset_revision(local_experiment):
+@pytest.mark.asyncio
+async def test_slow_sql_keeps_the_event_loop_available(local_experiment):
+    reader = production_reader()
+    ticks = 0
+    started = asyncio.Event()
+
+    async def query():
+        async with reader.connect() as db:
+            started.set()
+            await db.execute("SELECT pg_sleep(0.25)")
+
+    task = asyncio.create_task(query())
+    try:
+        await started.wait()
+        while not task.done():
+            ticks += 1
+            await asyncio.sleep(0.02)
+        await task
+        assert ticks >= 3
+    finally:
+        await task
+        await reader.close()
+
+
+@pytest.mark.asyncio
+async def test_cancellation_closes_active_session_and_allows_recovery(local_experiment):
+    reader = production_reader()
+    started = asyncio.Event()
+
+    async def query():
+        async with reader.connect() as db:
+            started.set()
+            await db.execute("SELECT pg_sleep(10)")
+
+    task = asyncio.create_task(query())
+    try:
+        await started.wait()
+        connection = reader._connection
+        await asyncio.sleep(0.03)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert connection.closed
+        assert reader._connection is None
+        assert not reader._lock.locked()
+        assert (await reader.resolve("Москва Перерва 62к1"))["status"] == "found"
+    finally:
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        await reader.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_waiter_preserves_active_session(local_experiment):
+    reader = production_reader()
+    async with reader.connect() as db:
+        task = asyncio.create_task(reader.resolve("Москва Перерва 62к1"))
+        await asyncio.sleep(0.02)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not db.closed
+        assert (await reader.rows(db, "SELECT 1 AS alive"))[0]["alive"] == 1
+    assert (await reader.resolve("Москва Перерва 62к1"))["status"] == "found"
+    await reader.close()
+
+
+@pytest.mark.asyncio
+async def test_reader_rejects_another_dataset_revision(local_experiment):
     reader = production_reader(revision="different-revision")
     try:
         with pytest.raises(ValueError, match="revision"):
-            reader.resolve("Москва Перерва 62к1")
+            await reader.resolve("Москва Перерва 62к1")
     finally:
-        reader.close()
+        await reader.close()
 
 
-def test_http_postgres_cache_without_sqlite_catalog_and_building_endpoint(local_experiment, monkeypatch, tmp_path):
-    from litestar.testing import TestClient
+@pytest.mark.asyncio
+async def test_http_postgres_cache_without_sqlite_catalog_and_building_endpoint(
+    local_experiment, monkeypatch, tmp_path
+):
+    from litestar.testing import AsyncTestClient
     from pydantic import SecretStr
 
     from src.code_service.config import settings
@@ -378,28 +478,29 @@ def test_http_postgres_cache_without_sqlite_catalog_and_building_endpoint(local_
     fallback = AsyncMock(return_value={"data": {}})
     monkeypatch.setattr(search, "get_data_from_db", fallback)
     search.result_cache.entries.clear()
-    with TestClient(app) as client:
-        first = client.get("/api/v2/codes/msg", params={"message": "Москва Перерва 62к1"}).json()
-        reader = search.get_catalog()
-        second = client.get("/api/v2/codes/msg", params={"message": "Москва Перерва 62к1"}).json()
+    async with AsyncTestClient(app) as client:
+        first = (await client.get("/api/v2/codes/msg", params={"message": "Москва Перерва 62к1"})).json()
+        reader = await search.get_catalog()
+        second = (await client.get("/api/v2/codes/msg", params={"message": "Москва Перерва 62к1"})).json()
         assert first == second
         assert first["engine"] == "v2"
         assert len(search.result_cache.entries) == 1
-        assert search.get_catalog() is reader
-        building = client.get("/api/v2/buildings/a").json()
+        assert await search.get_catalog() is reader
+        building = (await client.get("/api/v2/buildings/a")).json()
         assert building["data"] == first["data"]
-        assert client.get("/api/v2/buildings/missing").status_code == 404
+        assert (await client.get("/api/v2/buildings/missing")).status_code == 404
         fallback.assert_not_called()
         monkeypatch.setattr(settings, "catalog_database_url", SecretStr("postgresql://unused@127.0.0.1:1/unavailable"))
         monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
-        assert client.get("/api/v2/buildings/a").status_code == 503
-        answer = client.get("/api/v2/codes/msg", params={"message": "Москва Перерва 62к1"}).json()
+        assert (await client.get("/api/v2/buildings/a")).status_code == 503
+        answer = (await client.get("/api/v2/codes/msg", params={"message": "Москва Перерва 62к1"})).json()
         assert answer["engine"] == "v1"
         assert answer["fallback_reason"] == "unavailable"
         fallback.assert_awaited_once()
 
 
-def test_runtime_postgres_reader_reloads_configured_candidate_budget(local_experiment, monkeypatch):
+@pytest.mark.asyncio
+async def test_runtime_postgres_reader_reloads_configured_candidate_budget(local_experiment, monkeypatch):
     from pydantic import SecretStr
 
     from src.code_service.config import settings
@@ -409,16 +510,16 @@ def test_runtime_postgres_reader_reloads_configured_candidate_budget(local_exper
     monkeypatch.setattr(settings, "catalog_database_url", SecretStr(os.environ["CATALOG_BENCHMARK_DSN"]))
     monkeypatch.setattr(settings, "catalog_revision", "unknown")
     monkeypatch.setattr(settings, "search_candidate_limit", 5)
-    close_catalog()
+    await close_catalog()
     try:
-        first = get_catalog()
+        first = await get_catalog()
         assert first.candidate_limit == 5
-        assert first.resolve("Москва Перерва 62к1")["building_id"] == "a"
+        assert (await first.resolve("Москва Перерва 62к1"))["building_id"] == "a"
         monkeypatch.setattr(settings, "search_candidate_limit", 200)
-        second = get_catalog()
+        second = await get_catalog()
         assert second is not first
         assert second.candidate_limit == 200
         assert first._connection is None
-        assert second.resolve("Москва Перерва 62к1")["building_id"] == "a"
+        assert (await second.resolve("Москва Перерва 62к1"))["building_id"] == "a"
     finally:
-        close_catalog()
+        await close_catalog()
