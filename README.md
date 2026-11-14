@@ -34,7 +34,7 @@ flowchart LR
 Отложенный повтор геолокации пропускает новые сообщения вперёд. Очистка очереди сохраняет защиту от дублей;
 резервные копии и контроль ресурсов описаны в [инструкции эксплуатации](docs/src/content/docs/operations.md).
 Этапы поиска и сетевые маршруты описаны в [измерениях запросов](docs/src/content/docs/telemetry.md),
-ближайшие задачи — в [плане dev](docs/src/content/docs/roadmap.md).
+ближайшие задачи — в [плане dev](docs/src/content/docs/research/roadmap.md).
 
 ```mermaid
 erDiagram
@@ -235,6 +235,6 @@ docker compose up --build -d
 API опубликован только на localhost. Лимиты памяти и процессов контейнеров, ресурсы очереди и ротация журналов настраиваются в `.env`.
 
 Методика и результаты сравнения поиска: [эксперименты](docs/src/content/docs/research/search-experiments.md).
-Проверки значимых слов, кварталов, корпусов и совместимого fallback: [разбор исправлений](docs/src/content/docs/research/search-name-identity.md).
+Проверки значимых слов, кварталов, корпусов и совместимого fallback: [разбор исправлений](docs/src/content/docs/research/search-name-identity.mdx).
 Сохранность вариантов и геопоиск: [проверка поиска](docs/src/content/docs/research/search-prefix-performance.md).
-Стоимость широких запросов и обслуживание: [проверка PostgreSQL](docs/src/content/docs/catalog-street-layout.md).
+Стоимость широких запросов и обслуживание: [проверка PostgreSQL](docs/src/content/docs/catalog-street-layout.mdx).

@@ -48,7 +48,7 @@ description: Исторический отчёт; результаты отно�
 
 ## Где посмотреть настройки и повторить
 
-- `src/code_service/v2/opensearch.py`: `MAPPING` задаёт анализатор и поля; `search_body` строит запрос.
+- `src/code_service/services/v2/opensearch.py`: `MAPPING` задаёт анализатор и поля; `search_body` строит запрос.
 - `.env`: `OPENSEARCH_FUZZINESS`, `OPENSEARCH_PREFIX_LENGTH`, `SEARCH_CANDIDATE_LIMIT` управляют запросом API.
   После изменения нужен перезапуск API. Порог сходства и допустимая разница оценок задаются отдельно.
 - `tools/evaluation/benchmark_search.py`: фиксированная матрица, детерминированная выборка и проверка неизменности исходников между прогонами.

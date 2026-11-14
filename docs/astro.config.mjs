@@ -29,7 +29,6 @@ export default defineConfig({
           { label: "Архитектура C4", slug: "architecture" },
           { label: "Процессы по шагам", slug: "processes" },
           { label: "Схема БД", slug: "database" },
-          { label: "Аудит и решения", slug: "architecture-audit" },
         ] },
         { label: "Работа бота", items: [
           { label: "Поиск v2", slug: "search-v2" },
@@ -43,8 +42,8 @@ export default defineConfig({
           { label: "CI/CD и откат", slug: "cicd" },
           { label: "Хранение и диск", slug: "storage-safety" },
           { label: "Стенд dev", slug: "dev-stand" },
+          { label: "Разработка и проверки", slug: "development" },
           { label: "Индексы PostgreSQL", slug: "catalog-street-layout" },
-          { label: "План и v3", slug: "roadmap" },
         ] },
         { label: "Исследования и история", items: [{ autogenerate: { directory: "research" } }] },
       ],
