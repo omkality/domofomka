@@ -2,7 +2,6 @@ import asyncio
 import logging
 import re
 import sqlite3
-import traceback
 from collections.abc import Callable
 
 import aiosqlite
@@ -64,16 +63,16 @@ async def scan_data_from_db(msg: str, *, accept_source: Callable[[str, str, str,
         async with aiosqlite.connect(settings.db_name) as connection:
             await connection.create_function("street_or_city_exists", 3, street_or_city_exists)
 
-            query = f"""
+            query = """
                 SELECT *
                 FROM codes
-                WHERE street_or_city_exists('{longest_word}', city, street)
+                WHERE street_or_city_exists(?, city, street)
             """
 
             data = []
             connection.row_factory = aiosqlite.Row
 
-            async with connection.execute(query) as cursor:
+            async with connection.execute(query, (longest_word,)) as cursor:
                 async for row in cursor:
                     if address_exists(msg, row["city"], row["street"], row["house"], row["street_type"]):
                         data.append(row)
@@ -105,5 +104,5 @@ async def scan_data_from_db(msg: str, *, accept_source: Callable[[str, str, str,
         return result
 
     except Exception:
-        logger.error(f"Database error: {traceback.format_exc()}")
+        logger.exception("Legacy SQLite search failed")
         raise

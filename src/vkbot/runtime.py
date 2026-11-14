@@ -15,7 +15,8 @@ from src.infrastructure.telemetry import (
     settings as telemetry_settings,
     span,
 )
-from src.vkbot.processor import Processor, RateGate, RateSession
+from src.vkbot.http import RateGate, RateSession
+from src.vkbot.processor import Processor
 from src.vkbot.queue import QueueStore, event_record, retry_delay, safe_error
 from src.vkbot.recovery import Reconciler
 

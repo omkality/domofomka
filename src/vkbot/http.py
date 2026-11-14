@@ -1,4 +1,5 @@
 import os
+import threading
 import time
 from typing import Any
 from urllib.parse import urlsplit
@@ -8,7 +9,7 @@ from requests.exceptions import ConnectionError, ConnectTimeout, ProxyError, Tim
 
 from src.infrastructure.network import network_settings
 from src.infrastructure.proxy import proxy_health
-from src.infrastructure.telemetry import active, span
+from src.infrastructure.telemetry import active, measured, span
 
 
 class TimeoutSession(Session):
@@ -105,3 +106,28 @@ class TimeoutSession(Session):
                 with span("network.retry_wait", target="vk"):
                     time.sleep((attempt + 1) * network_settings.vk_retry_delay_seconds)
         raise RuntimeError("Request attempts exhausted")
+
+
+class RateGate:
+    def __init__(self, interval: float):
+        self.interval = interval
+        self.lock = threading.Lock()
+        self.last = 0.0
+
+    @measured("vk.rate_limit_wait")
+    def wait(self) -> None:
+        with self.lock:
+            remaining = self.interval - (time.monotonic() - self.last)
+            if remaining > 0:
+                time.sleep(remaining)
+            self.last = time.monotonic()
+
+class RateSession(TimeoutSession):
+    def __init__(self, gate: RateGate, *, longpoll: bool = False):
+        super().__init__(longpoll=longpoll)
+        self.gate = gate
+
+    def send(self, request: Any, **kwargs: Any) -> Any:
+        # Gate actual HTTP attempts, including retries inside TimeoutSession.
+        self.gate.wait()
+        return super().send(request, **kwargs)
