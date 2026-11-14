@@ -20,11 +20,31 @@ for (const slug of ["index", "architecture", "processes", "database", "research/
 }
 let checkedLinks = 0;
 let checkedAnchors = 0;
+let checkedAssets = 0;
 const errors = [];
 const ids = new Map();
 const base = (process.env.DOCS_BASE_PATH || "/").replace(/\/$/, "");
 for (const file of built.filter((item) => item.endsWith(".html"))) {
   const html = await readFile(file, "utf8");
+  for (const tag of html.matchAll(/<(?:script|link|img|astro-island)\b[^>]*>/g)) {
+    for (const match of tag[0].matchAll(/\b(?:href|src|component-url|renderer-url|before-hydration-url)="([^"]+)"/g)) {
+      const href = match[1];
+      if (/^(?:[a-z]+:|\/\/|#)/i.test(href)) continue;
+      let pathname = decodeURIComponent(href.split(/[?#]/, 1)[0]);
+      if (base && pathname.startsWith("/") && !pathname.startsWith(base + "/")) {
+        errors.push(`Ресурс вне базового пути ${path.relative(output, file)} → ${href}`);
+        continue;
+      }
+      if (base && pathname.startsWith(base + "/")) pathname = pathname.slice(base.length);
+      const target = pathname.startsWith("/") ? path.join(output, pathname) : path.resolve(path.dirname(file), pathname);
+      try {
+        if (!(await stat(target)).isFile()) throw new Error("Ресурс не является файлом");
+      } catch {
+        errors.push(`Отсутствует ресурс ${path.relative(output, file)} → ${href}`);
+      }
+      checkedAssets++;
+    }
+  }
   for (const match of html.matchAll(/<a\b[^>]*\bhref="([^"]+)"/g)) {
     const href = match[1];
     if (/^(?:[a-z]+:|\/\/)/i.test(href)) continue;
@@ -50,4 +70,4 @@ for (const file of built.filter((item) => item.endsWith(".html"))) {
   }
 }
 if (errors.length) throw new Error(errors.join("\n"));
-console.log(JSON.stringify({ static_files: built.length, checked_links: checkedLinks, checked_anchors: checkedAnchors, bytes, budget_bytes: limit, server_node_required: false }));
+console.log(JSON.stringify({ static_files: built.length, checked_links: checkedLinks, checked_anchors: checkedAnchors, checked_assets: checkedAssets, bytes, budget_bytes: limit, server_node_required: false }));
