@@ -14,9 +14,20 @@ const built = await files(output);
 const bytes = (await Promise.all(built.map(async (file) => (await stat(file)).size))).reduce((a, b) => a + b, 0);
 const limit = 32 * 1024 * 1024;
 if (bytes > limit) throw new Error(`Документация превышает бюджет 32 МиБ: ${bytes} байт`);
-for (const slug of ["index", "architecture", "processes", "database", "research/architecture-audit", "cicd"]) {
+for (const slug of ["index", "architecture", "processes", "database", "releases", "research/architecture-audit", "cicd"]) {
   const file = path.join(output, slug === "index" ? "index.html" : `${slug}/index.html`);
   if (!(await readFile(file, "utf8")).includes("domofomka")) throw new Error(`Нет страницы ${slug}`);
+}
+const releaseInfo = JSON.parse(await readFile(path.join(output, "release-info.json"), "utf8"));
+const generated = JSON.parse(await readFile("src/generated/releases.json", "utf8"));
+if (releaseInfo.tag !== generated.latest.tag || releaseInfo.sourceRevision !== generated.sourceRevision) {
+  throw new Error("Release metadata differs from the checked build");
+}
+for (const slug of ["index", "database", "releases"]) {
+  const html = await readFile(path.join(output, slug === "index" ? "index.html" : `${slug}/index.html`), "utf8");
+  if (!html.includes(`data-release-tag="${releaseInfo.tag}"`) || !html.includes(`data-docs-revision="${releaseInfo.sourceRevision}"`)) {
+    throw new Error(`Missing current release or source revision on ${slug}`);
+  }
 }
 let checkedLinks = 0;
 let checkedAnchors = 0;

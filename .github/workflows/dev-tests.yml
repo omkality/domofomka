@@ -45,6 +45,7 @@ jobs:
       ASTRO_TELEMETRY_DISABLED: '1'
       DOCS_BASE_PATH: /domofomka
       DOCS_SITE_URL: https://omkality.github.io
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -133,7 +134,7 @@ jobs:
       - name: Check code, SQL and explicit environment configuration
         run: |
           uv run --frozen --all-groups black --check src tests tools ops
-          uv run --frozen --all-groups mypy --config-file=mypy.ini src tools ops
+          uv run --frozen --all-groups mypy --config-file=mypy.ini src tools ops tests/fixtures tests/conftest.py
           uv run --frozen --all-groups sqlfluff lint src/infrastructure/database --disable-progress-bar
           uv run --frozen --all-groups python -m tools.configuration.environment --check-examples
       - name: Build runtime images without development dependencies

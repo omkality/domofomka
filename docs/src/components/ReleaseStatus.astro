@@ -1,0 +1,17 @@
+---
+import releases from "../generated/releases.json";
+const date = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeZone: "Europe/Moscow" });
+---
+
+<aside class="release-status" data-release-tag={releases.latest.tag} data-docs-revision={releases.sourceRevision}>
+  <p><strong>Опубликованная версия: <a href={releases.latest.url}>{releases.latest.tag}</a></strong>
+    · {date.format(new Date(releases.latest.publishedAt))}</p>
+  <p>Документация собрана из <code>{releases.sourceRef}</code>,
+    коммит <a href={`https://github.com/${releases.repository}/commit/${releases.sourceRevision}`}>{releases.sourceRevision.slice(0, 7)}</a>.
+    <a href={`${import.meta.env.BASE_URL.replace(/\/$/, "")}/releases/`}>История выпусков</a>.</p>
+</aside>
+
+<style>
+  .release-status { border-inline-start: 3px solid var(--sl-color-accent); padding: .4rem 1rem; margin-block: 1.5rem; background: var(--sl-color-gray-6); }
+  .release-status p { margin-block: .3rem; }
+</style>
