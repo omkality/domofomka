@@ -501,8 +501,13 @@ if os.environ.get('SEARCH_BACKEND','sqlite')=='postgres':
         probe_bot = """
 from src.vkbot.config import settings
 from src.vkbot.runtime import Runtime
+from src.infrastructure.network import network_settings
+import psycopg
+from psycopg.rows import dict_row
 r=Runtime(settings)
-with r.store.connect() as db:
+with psycopg.connect(r.store.dsn, row_factory=dict_row,
+    connect_timeout=network_settings.queue_db_connect_timeout_seconds,
+    options=f'-c statement_timeout={network_settings.queue_db_statement_timeout_ms}') as db:
     assert db.execute('SELECT NOT pg_try_advisory_lock(20261021,%s) AS active',(r.store.group_id,)).fetchone()['active']
 """
         if legacy:

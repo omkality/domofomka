@@ -1,15 +1,23 @@
 import json
 import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 from requests.exceptions import ReadTimeout
 
 from src.vkbot.processor import LookupUnavailable, Processor, RateGate, RateSession, code_answer
-from src.vkbot.queue import event_record
+from src.vkbot.queue import QueueStore, event_record
 from src.vkbot.recovery import Reconciler
 from src.vkbot.runtime import Runtime, validate_environment
+
+
+def queue_mock(**options: Any):
+    store = MagicMock(spec=QueueStore, **options)
+    store.telemetry = False
+    return store
 
 
 @pytest.fixture
@@ -33,9 +41,9 @@ def settings() -> SimpleNamespace:
     )
 
 
-@pytest.fixture
-def processor(settings: SimpleNamespace) -> Processor:
-    store = MagicMock()
+@pytest_asyncio.fixture
+async def processor(settings: SimpleNamespace) -> Processor:
+    store = queue_mock()
     store.renew.return_value = True
     store.consume_fault.return_value = False
     store.get_state.return_value = 0
@@ -44,7 +52,8 @@ def processor(settings: SimpleNamespace) -> Processor:
     p.vk.groups.isMember.return_value = 1
     p.vk.messages.send.return_value = 77
     p.vk.messages.getById.return_value = {"items": [{"conversation_message_id": 12}]}
-    return p
+    yield p
+    await p.close()
 
 
 def test_message_identity_matches_longpoll_and_history() -> None:
@@ -67,7 +76,8 @@ def test_outgoing_messages_are_not_reprocessed() -> None:
         event_record(1, "message_new", {"message": {"peer_id": 1, "from_id": 1, "out": 1}})
 
 
-def test_failed_send_is_retried_with_persistent_random_id(processor: Processor) -> None:
+@pytest.mark.asyncio
+async def test_failed_send_is_retried_with_persistent_random_id(processor: Processor) -> None:
     job = {
         "id": 123,
         "owner": "lease",
@@ -78,21 +88,23 @@ def test_failed_send_is_retried_with_persistent_random_id(processor: Processor) 
     }
     processor.vk.messages.send.side_effect = [ReadTimeout(), 77]
     with pytest.raises(ReadTimeout):
-        processor.deliver(job)
+        await processor.deliver(job)
     processor.store.finish.assert_not_called()
-    processor.deliver(job)
+    await processor.deliver(job)
     assert [c.kwargs["random_id"] for c in processor.vk.messages.send.call_args_list] == [123, 123]
     processor.store.finish.assert_called_once()
 
 
-def test_saved_send_result_does_not_send_again(processor: Processor) -> None:
+@pytest.mark.asyncio
+async def test_saved_send_result_does_not_send_again(processor: Processor) -> None:
     job = {"id": 123, "params": {"peer_id": 100}, "method": "send", "context": {"data": {}}, "result": 77}
-    processor.deliver(job)
+    await processor.deliver(job)
     processor.vk.messages.send.assert_not_called()
     processor.store.finish.assert_called_once_with(job, (12, {"data": {}}))
 
 
-def test_timeout_after_vk_acceptance_preserves_same_send_identity(processor: Processor) -> None:
+@pytest.mark.asyncio
+async def test_timeout_after_vk_acceptance_preserves_same_send_identity(processor: Processor) -> None:
     job = {"id": 123, "params": {"peer_id": 100, "message": "reply"}, "method": "send", "context": None, "result": None}
     faults = {"vk-send-after": 1}
 
@@ -104,25 +116,27 @@ def test_timeout_after_vk_acceptance_preserves_same_send_identity(processor: Pro
 
     processor.store.consume_fault.side_effect = consume
     with pytest.raises(TimeoutError):
-        processor.deliver(job)
+        await processor.deliver(job)
     processor.store.save_result.assert_not_called()
-    processor.deliver(job)
+    await processor.deliver(job)
     assert processor.vk.messages.send.call_count == 2
     assert all(c.kwargs["random_id"] == 123 for c in processor.vk.messages.send.call_args_list)
 
 
-def test_received_click_can_retry_identical_edit(processor: Processor) -> None:
+@pytest.mark.asyncio
+async def test_received_click_can_retry_identical_edit(processor: Processor) -> None:
     params = {"peer_id": 100, "conversation_message_id": 12, "message": "codes", "keyboard": "{}"}
     job = {"id": 55, "method": "edit", "params": params, "context": None}
     processor.vk.messages.edit.side_effect = [ReadTimeout(), 1]
     with pytest.raises(ReadTimeout):
-        processor.deliver(job)
-    processor.deliver(job)
+        await processor.deliver(job)
+    await processor.deliver(job)
     assert processor.vk.messages.edit.call_args_list[0] == processor.vk.messages.edit.call_args_list[1]
     processor.store.finish.assert_called_once()
 
 
-def test_callback_uses_durable_context_without_redis(processor: Processor) -> None:
+@pytest.mark.asyncio
+async def test_callback_uses_durable_context_without_redis(processor: Processor) -> None:
     result = {"address": "address", "data": {"1": [["code", "yaeda"]]}}
     processor.store.message_context.return_value = result
     job = {
@@ -137,34 +151,36 @@ def test_callback_uses_durable_context_without_redis(processor: Processor) -> No
             "event_id": "a",
         },
     }
-    processor.plan(job)
+    await processor.plan(job)
     effects = processor.store.plan.call_args.args[1]
     assert effects[0]["method"] == "edit"
     assert "YAEDA:" in effects[0]["params"]["message"]
     processor.vk.messages.getByConversationMessageId.assert_not_called()
 
 
-def test_missing_old_context_rebuilds_from_original_message(processor: Processor) -> None:
+@pytest.mark.asyncio
+async def test_missing_old_context_rebuilds_from_original_message(processor: Processor) -> None:
     processor.store.message_context.return_value = None
     processor.vk.messages.getByConversationMessageId.return_value = {
         "items": [{"text": "address\nПодъезд 1\nold codes"}]
     }
-    processor.lookup = MagicMock(return_value={"address": "address", "data": {"1": [["code", "delivery"]]}})
+    processor.lookup = AsyncMock(return_value={"address": "address", "data": {"1": [["code", "delivery"]]}})
     job = {
         "peer_id": 100,
         "occurred_at": 100,
         "kind": "message_event",
         "payload": {"conversation_message_id": 12, "payload": {"entrance": "1", "ent_slice": ["1"]}},
     }
-    processor.plan(job)
+    await processor.plan(job)
     processor.lookup.assert_called_once_with("address")
     assert processor.store.plan.call_args.args[1][0]["method"] == "edit"
 
 
-def test_lease_loss_prevents_dispatch(processor: Processor) -> None:
+@pytest.mark.asyncio
+async def test_lease_loss_prevents_dispatch(processor: Processor) -> None:
     processor.store.renew.return_value = False
     with pytest.raises(RuntimeError):
-        processor.deliver({"params": {}, "method": "send"})
+        await processor.deliver({"params": {}, "method": "send"})
     processor.vk.messages.send.assert_not_called()
 
 
@@ -184,39 +200,42 @@ def test_unknown_code_type_does_not_crash_formatting() -> None:
     assert "OTHER:" in code_answer({"address": "a", "data": {"1": [["x", "other"]]}}, "1")
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("geo", [None, {"latitude": 55.9, "longitude": 37.8}])
-def test_single_entrance_codes_are_sent_without_a_button(processor, geo):
+async def test_single_entrance_codes_are_sent_without_a_button(processor, geo):
     result = {
         "address": "Королев, улица Мичурина, дом 1А",
         "data": {"3": [["TEST-Y", "yaeda"], ["TEST-D", "delivery"]]},
     }
-    processor.lookup = MagicMock(return_value=result)
+    processor.lookup = AsyncMock(return_value=result)
     message = {"id": 1, "text": "мичурина 1а"}
     if geo:
         message = {"id": 1, "geo": {"coordinates": geo}}
-    processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": message}})
+    await processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": message}})
     effects = processor.store.plan.call_args.args[1]
     assert len(effects) == 1
     effect = effects[0]
     assert effect["params"]["message"] == code_answer(result, "3")
     assert json.loads(effect["params"]["keyboard"])["buttons"] == []
     assert effect.get("context") is None
-    processor.deliver(dict(effect, id=123, result=None))
+    await processor.deliver(dict(effect, id=123, result=None))
     processor.vk.messages.getById.assert_not_called()
 
 
-def test_last_batch_with_one_of_many_entrances_still_requires_selection(processor):
+@pytest.mark.asyncio
+async def test_last_batch_with_one_of_many_entrances_still_requires_selection(processor):
     result = {"address": "Адрес", "data": {str(i): [["TEST", "test"]] for i in range(11)}}
-    processor.lookup = MagicMock(return_value=result)
-    processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"text": "адрес"}}})
+    processor.lookup = AsyncMock(return_value=result)
+    await processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"text": "адрес"}}})
     effects = processor.store.plan.call_args.args[1]
     assert len(effects) == 2
     assert effects[1]["params"]["message"] == result["address"]
     assert json.loads(effects[1]["params"]["keyboard"])["buttons"][0][0]["action"]["label"] == "10"
 
 
-def test_recovery_uses_watermark_and_preserves_untracked_new_requests(settings: SimpleNamespace) -> None:
-    store = MagicMock(group_id=1)
+@pytest.mark.asyncio
+async def test_recovery_uses_watermark_and_preserves_untracked_new_requests(settings: SimpleNamespace) -> None:
+    store = queue_mock(group_id=1)
     store.get_state.side_effect = lambda key, default=None: {"tracking_started": 100, "reconcile_watermark": 200}.get(
         key, default
     )
@@ -234,24 +253,26 @@ def test_recovery_uses_watermark_and_preserves_untracked_new_requests(settings: 
         ],
     }
     store.ingest.return_value = 1
-    assert Reconciler(vk, store, settings).run() == 1
+    assert (await Reconciler(vk, store, settings).run()) == 1
     records = store.ingest.call_args.args[0]
     assert len(records) == 1
     assert records[0]["payload"]["message"]["id"] == 2
     assert records[0].get("status", "pending") == "pending"
 
 
-def test_recovery_does_not_advance_checkpoint_on_failure(settings: SimpleNamespace) -> None:
-    store = MagicMock(group_id=1)
+@pytest.mark.asyncio
+async def test_recovery_does_not_advance_checkpoint_on_failure(settings: SimpleNamespace) -> None:
+    store = queue_mock(group_id=1)
     store.get_state.return_value = time.time()
     vk = MagicMock()
     vk.messages.getConversations.side_effect = ReadTimeout()
     with pytest.raises(ReadTimeout):
-        Reconciler(vk, store, settings).run()
+        await Reconciler(vk, store, settings).run()
     store.set_state.assert_not_called()
 
 
-def test_fast_distinct_click_is_not_discarded(processor: Processor) -> None:
+@pytest.mark.asyncio
+async def test_fast_distinct_click_is_not_discarded(processor: Processor) -> None:
     processor.store.get_state.return_value = 100
     processor.store.message_context.return_value = {"address": "a", "data": {"2": [["c", "yaeda"]]}}
     job = {
@@ -260,7 +281,7 @@ def test_fast_distinct_click_is_not_discarded(processor: Processor) -> None:
         "kind": "message_event",
         "payload": {"conversation_message_id": 12, "payload": {"entrance": "2", "ent_slice": ["2"]}},
     }
-    processor.plan(job)
+    await processor.plan(job)
     assert len(processor.store.plan.call_args.args[1]) == 1
 
 
@@ -271,7 +292,7 @@ def test_wrong_community_token_stops_before_queue_or_workers(
 
     runtime = object.__new__(Runtime)
     runtime.settings = settings
-    runtime.store = MagicMock(group_id=223949627)
+    runtime.store = queue_mock(group_id=223949627)
     runtime.gate = RateGate(0)
     client = MagicMock()
     client.method.side_effect = ValueError("token belongs to another community")
@@ -282,19 +303,20 @@ def test_wrong_community_token_stops_before_queue_or_workers(
     runtime.store.connect.assert_not_called()
 
 
-def test_expired_callback_ack_does_not_abort_durable_processing(
+@pytest.mark.asyncio
+async def test_expired_callback_ack_does_not_abort_durable_processing(
     settings: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = object.__new__(Runtime)
     runtime.settings = settings
     runtime.gate = RateGate(0)
-    runtime.store = MagicMock()
+    runtime.store = queue_mock()
     runtime.store.get_state.return_value = 0
     runtime.store.callback_feedback.return_value = {"feedback": "silent"}
     client = MagicMock()
     client.get_api.return_value.messages.sendMessageEventAnswer.side_effect = ReadTimeout()
     monkeypatch.setattr("src.vkbot.runtime.VkApi", MagicMock(return_value=client))
-    runtime._acknowledge(
+    await runtime._acknowledge(
         [
             {
                 "kind": "message_event",
@@ -306,11 +328,12 @@ def test_expired_callback_ack_does_not_abort_durable_processing(
     client.get_api.return_value.messages.sendMessageEventAnswer.assert_called_once()
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("feedback", "text"),
     [("silent", None), ("wait", "Подождите 4 сек."), ("pending", "Запрос сохранён, повторно нажимать не нужно.")],
 )
-def test_callback_feedback_only_shows_text_when_needed(
+async def test_callback_feedback_only_shows_text_when_needed(
     settings: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, feedback: str, text: str | None
 ) -> None:
     import json
@@ -318,12 +341,12 @@ def test_callback_feedback_only_shows_text_when_needed(
     runtime = object.__new__(Runtime)
     runtime.settings = settings
     runtime.gate = RateGate(0)
-    runtime.store = MagicMock()
+    runtime.store = queue_mock()
     runtime.store.get_state.return_value = 0
     runtime.store.callback_feedback.return_value = {"feedback": feedback, "wait_seconds": 4}
     client = MagicMock()
     monkeypatch.setattr("src.vkbot.runtime.VkApi", MagicMock(return_value=client))
-    runtime._acknowledge(
+    await runtime._acknowledge(
         [
             {
                 "kind": "message_event",
@@ -339,8 +362,9 @@ def test_callback_feedback_only_shows_text_when_needed(
         assert json.loads(params["event_data"])["text"] == text
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("error_code", [6, 9, 29])
-def test_vk_limit_on_callback_ack_pauses_all_requests_without_immediate_retry(settings, monkeypatch, error_code):
+async def test_vk_limit_on_callback_ack_pauses_all_requests_without_immediate_retry(settings, monkeypatch, error_code):
     class Limited(Exception):
         code = error_code
 
@@ -348,14 +372,14 @@ def test_vk_limit_on_callback_ack_pauses_all_requests_without_immediate_retry(se
     runtime = object.__new__(Runtime)
     runtime.settings = settings
     runtime.gate = RateGate(0)
-    runtime.store = MagicMock()
+    runtime.store = queue_mock()
     runtime.store.get_state.return_value = 0
     runtime.store.callback_feedback.return_value = {"feedback": "silent"}
     client = MagicMock()
     client.get_api.return_value.messages.sendMessageEventAnswer.side_effect = Limited()
     monkeypatch.setattr("src.vkbot.runtime.VkApi", MagicMock(return_value=client))
     monkeypatch.setattr("src.vkbot.runtime.time.time", lambda: 100)
-    runtime._acknowledge(
+    await runtime._acknowledge(
         [
             {
                 "kind": "message_event",
@@ -369,18 +393,19 @@ def test_vk_limit_on_callback_ack_pauses_all_requests_without_immediate_retry(se
     runtime.store.set_state.assert_called_once_with("vk_paused_until", 130)
 
 
-def test_callback_feedback_rate_limit_does_not_call_vk(
+@pytest.mark.asyncio
+async def test_callback_feedback_rate_limit_does_not_call_vk(
     settings: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = object.__new__(Runtime)
     runtime.settings = settings
     runtime.gate = RateGate(0)
-    runtime.store = MagicMock()
+    runtime.store = queue_mock()
     runtime.store.get_state.return_value = 0
     runtime.store.callback_feedback.return_value = None
     client = MagicMock()
     monkeypatch.setattr("src.vkbot.runtime.VkApi", MagicMock(return_value=client))
-    runtime._acknowledge([{"kind": "message_event", "event_key": "callback:100:x"}])
+    await runtime._acknowledge([{"kind": "message_event", "event_key": "callback:100:x"}])
     client.get_api.return_value.messages.sendMessageEventAnswer.assert_not_called()
 
 
@@ -399,13 +424,14 @@ def test_rate_gate_applies_to_each_actual_http_retry(monkeypatch: pytest.MonkeyP
     assert gate.wait.call_count == 2
 
 
-def test_acknowledgement_flood_response_pauses_vk_and_stops_batch(
+@pytest.mark.asyncio
+async def test_acknowledgement_flood_response_pauses_vk_and_stops_batch(
     settings: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = object.__new__(Runtime)
     runtime.settings = settings
     runtime.gate = RateGate(0)
-    runtime.store = MagicMock()
+    runtime.store = queue_mock()
     runtime.store.get_state.return_value = 0
     runtime.store.callback_feedback.return_value = {"feedback": "silent"}
     error = RuntimeError("rate limited")
@@ -421,27 +447,29 @@ def test_acknowledgement_flood_response_pauses_vk_and_stops_batch(
         }
         for i in range(2)
     ]
-    runtime._acknowledge(events)
+    await runtime._acknowledge(events)
     client.get_api.return_value.messages.sendMessageEventAnswer.assert_called_once()
     assert runtime.store.set_state.call_args.args[0] == "vk_paused_until"
 
 
-def test_geolocation_failure_plans_text_fallback_instead_of_blocking_peer(processor: Processor) -> None:
-    processor.lookup = MagicMock(side_effect=LookupUnavailable())
+@pytest.mark.asyncio
+async def test_geolocation_failure_plans_text_fallback_instead_of_blocking_peer(processor: Processor) -> None:
+    processor.lookup = AsyncMock(side_effect=LookupUnavailable())
     job = {
         "kind": "message_new",
         "peer_id": 100,
         "payload": {"message": {"id": 42, "text": "", "geo": {"coordinates": {"latitude": 1, "longitude": 2}}}},
     }
-    processor.plan(job)
+    await processor.plan(job)
     effects = processor.store.plan.call_args.args[1]
     assert effects[0]["method"] == "send"
     assert "адрес текстом" in effects[0]["params"]["message"]
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["message_new", "geo_retry"])
-def test_geo_access_failure_finishes_with_notice_instead_of_enqueuing_retries(processor, kind):
-    processor._get = MagicMock()
+async def test_geo_access_failure_finishes_with_notice_instead_of_enqueuing_retries(processor, kind):
+    processor._get = AsyncMock(return_value=MagicMock())
     processor._get.return_value.status_code = 503
     processor._get.return_value.json.return_value = {"extra": {"geocoding_retryable": False}}
     job = {
@@ -449,7 +477,7 @@ def test_geo_access_failure_finishes_with_notice_instead_of_enqueuing_retries(pr
         "peer_id": 100,
         "payload": {"message": {"id": 42, "text": "", "geo": {"coordinates": {"latitude": 1, "longitude": 2}}}},
     }
-    processor.plan(job)
+    await processor.plan(job)
     effects = processor.store.plan.call_args.args[1]
     assert len(effects) == 1
     assert "временно недоступно" in effects[0]["params"]["message"]
@@ -457,58 +485,66 @@ def test_geo_access_failure_finishes_with_notice_instead_of_enqueuing_retries(pr
     processor.store.defer_geo_retry.assert_not_called()
 
 
-def test_access_error_marker_does_not_disable_text_retries(processor):
-    processor._get = MagicMock()
+@pytest.mark.asyncio
+async def test_access_error_marker_does_not_disable_text_retries(processor):
+    processor._get = AsyncMock(return_value=MagicMock())
     processor._get.return_value.status_code = 503
     processor._get.return_value.json.return_value = {"extra": {"geocoding_retryable": False}}
     with pytest.raises(LookupUnavailable):
-        processor.lookup("Москва Тестовая 1")
+        await processor.lookup("Москва Тестовая 1")
 
 
-def test_text_lookup_failure_keeps_durable_retry_behavior(processor: Processor) -> None:
-    processor.lookup = MagicMock(side_effect=LookupUnavailable())
+@pytest.mark.asyncio
+async def test_text_lookup_failure_keeps_durable_retry_behavior(processor: Processor) -> None:
+    processor.lookup = AsyncMock(side_effect=LookupUnavailable())
     with pytest.raises(LookupUnavailable):
-        processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"id": 42, "text": "address"}}})
+        await processor.plan(
+            {"kind": "message_new", "peer_id": 100, "payload": {"message": {"id": 42, "text": "address"}}}
+        )
     processor.store.plan.assert_not_called()
 
 
-def test_lookup_passes_internal_query_to_http_client(processor: Processor) -> None:
-    processor._get = MagicMock()
+@pytest.mark.asyncio
+async def test_lookup_passes_internal_query_to_http_client(processor: Processor) -> None:
+    processor._get = AsyncMock(return_value=MagicMock())
     response = processor._get.return_value
     response.status_code = 200
     response.json.return_value = {"address": "a", "data": {}}
-    assert processor.lookup("address") == {"address": "a", "data": {}}
+    assert (await processor.lookup("address")) == {"address": "a", "data": {}}
     processor._get.assert_called_once_with("http://api:8000/api/v1/codes/msg", {"message": "address"}, timeout=None)
 
 
-def test_lookup_status_failure_is_retryable_without_requests_dependency(processor: Processor) -> None:
-    processor._get = MagicMock()
+@pytest.mark.asyncio
+async def test_lookup_status_failure_is_retryable_without_requests_dependency(processor: Processor) -> None:
+    processor._get = AsyncMock(return_value=MagicMock())
     processor._get.return_value.status_code = 503
     with pytest.raises(LookupUnavailable):
-        processor.lookup(geo={"latitude": 1, "longitude": 2})
+        await processor.lookup(geo={"latitude": 1, "longitude": 2})
 
 
-def test_known_house_without_codes_explains_result(processor: Processor) -> None:
-    processor.lookup = MagicMock(return_value={"status": "no_codes", "address": "Known house", "data": {}})
-    processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"id": 1, "text": "house"}}})
+@pytest.mark.asyncio
+async def test_known_house_without_codes_explains_result(processor: Processor) -> None:
+    processor.lookup = AsyncMock(return_value={"status": "no_codes", "address": "Known house", "data": {}})
+    await processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"id": 1, "text": "house"}}})
     effect = processor.store.plan.call_args.args[1][0]
     assert "Known house" in effect["params"]["message"]
     assert effect["method"] == "send"
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("entrance_count", [1, 13])
-def test_ambiguous_choice_edits_the_same_message(processor: Processor, entrance_count: int) -> None:
+async def test_ambiguous_choice_edits_the_same_message(processor: Processor, entrance_count: int) -> None:
     processor.store.message_context.return_value = {
         "candidates": [{"building_id": "gar:test", "address": "Known house"}]
     }
-    processor._get = MagicMock()
+    processor._get = AsyncMock(return_value=MagicMock())
     response = processor._get.return_value
     response.status_code = 200
     response.json.return_value = {
         "address": "Known house",
         "data": {str(i): [["TEST", "test"]] for i in range(1, entrance_count + 1)},
     }
-    processor.plan(
+    await processor.plan(
         {
             "kind": "message_event",
             "peer_id": 100,
@@ -536,7 +572,8 @@ def test_ambiguous_choice_edits_the_same_message(processor: Processor, entrance_
     assert len(effects) == 1
 
 
-def test_address_choices_can_be_paged_without_repeating_lookup(processor: Processor) -> None:
+@pytest.mark.asyncio
+async def test_address_choices_can_be_paged_without_repeating_lookup(processor: Processor) -> None:
     from src.vkbot.processor import address_choices
 
     result = {
@@ -548,7 +585,7 @@ def test_address_choices_can_be_paged_without_repeating_lookup(processor: Proces
     assert "City 0" not in text
     assert "choice_page" in keyboard
     processor.store.message_context.return_value = result
-    processor.plan(
+    await processor.plan(
         {
             "kind": "message_event",
             "peer_id": 100,
@@ -560,12 +597,14 @@ def test_address_choices_can_be_paged_without_repeating_lookup(processor: Proces
     assert effect["params"]["conversation_message_id"] == 42
 
 
-def test_long_query_does_not_poison_retry_queue(processor: Processor) -> None:
-    assert processor.lookup("x" * 501)["status"] == "invalid_query"
+@pytest.mark.asyncio
+async def test_long_query_does_not_poison_retry_queue(processor: Processor) -> None:
+    assert (await processor.lookup("x" * 501))["status"] == "invalid_query"
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize(("limit", "length", "rejected"), [(20, 21, True), (600, 501, False)])
-def test_bot_query_length_uses_environment_setting(processor, monkeypatch, limit, length, rejected):
+async def test_bot_query_length_uses_environment_setting(processor, monkeypatch, limit, length, rejected):
     for key, value in {
         "VK_GROUP_TOKEN": "unused",
         "VK_GROUP_ID": "223949627",
@@ -587,10 +626,10 @@ def test_bot_query_length_uses_environment_setting(processor, monkeypatch, limit
         domofomka_api_port=8000,
         queue_database_url="postgresql://unused",
     )
-    processor._get = MagicMock()
+    processor._get = AsyncMock(return_value=MagicMock())
     processor._get.return_value.status_code = 200
     processor._get.return_value.json.return_value = {"status": "not_found"}
-    answer = processor.lookup("x" * length)
+    answer = await processor.lookup("x" * length)
     assert (answer["status"] == "invalid_query") is rejected
     assert processor._get.called is not rejected
 
@@ -621,10 +660,11 @@ def test_choice_pages_have_rejection_and_fit_button_budget(count):
     assert seen == list(range(count))
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("context", [None, {"status": "ambiguous", "candidates": [{"building_id": "a"}]}])
-def test_rejecting_addresses_clears_buttons_in_the_same_message(processor, context):
+async def test_rejecting_addresses_clears_buttons_in_the_same_message(processor, context):
     processor.store.message_context.return_value = context
-    processor.plan(
+    await processor.plan(
         {
             "kind": "message_event",
             "peer_id": 100,
@@ -640,39 +680,42 @@ def test_rejecting_addresses_clears_buttons_in_the_same_message(processor, conte
     assert effect["context"]["status"] == "dismissed"
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("action", [{"dismiss_choices": True}, {"choice_page": 1}, {"select_building": 0}])
 @pytest.mark.parametrize("context", [{"status": "found", "data": {"3": []}}, {"data": {"3": []}}])
-def test_old_choice_ignores_completed_context_without_close_marker(processor, action, context):
-    processor._get = MagicMock()
+async def test_old_choice_ignores_completed_context_without_close_marker(processor, action, context):
+    processor._get = AsyncMock(return_value=MagicMock())
     processor.store.message_context.return_value = context
     processor.store.choices_closed.return_value = False
-    processor.plan(
+    await processor.plan(
         {"kind": "message_event", "peer_id": 100, "payload": {"conversation_message_id": 42, "payload": action}}
     )
     assert processor.store.plan.call_args.args[1] == []
     processor._get.assert_not_called()
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("action", [{"dismiss_choices": True}, {"choice_page": 1}, {"select_building": 0}])
-def test_old_choices_cannot_reopen_a_finalized_menu(processor, action):
+async def test_old_choices_cannot_reopen_a_finalized_menu(processor, action):
     processor.store.message_context.return_value = {"status": "ambiguous", "candidates": [{"building_id": "a"}]}
     processor.store.choices_closed.return_value = True
-    processor.plan(
+    await processor.plan(
         {"kind": "message_event", "peer_id": 100, "payload": {"conversation_message_id": 42, "payload": action}}
     )
     assert processor.store.plan.call_args.args[1] == []
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("count", [10, 11, 17, 26, 100])
-def test_every_entrance_is_kept_in_direct_responses(processor, count):
-    processor.lookup = MagicMock(
+async def test_every_entrance_is_kept_in_direct_responses(processor, count):
+    processor.lookup = AsyncMock(
         return_value={
             "status": "found",
             "address": "Адрес",
             "data": {str(i): [["CODE", "test"]] for i in range(1, count + 1)},
         }
     )
-    processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"id": 1, "text": "адрес"}}})
+    await processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"id": 1, "text": "адрес"}}})
     effects = processor.store.plan.call_args.args[1]
     labels = []
     for effect in effects:
@@ -690,10 +733,11 @@ def test_inline_keyboard_rejects_overflow_before_sending_to_vk():
         inline_keyboard([str(i) for i in range(11)])
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["incomplete_query", "no_codes_ambiguous"])
-def test_incomplete_or_empty_address_search_does_not_emit_buttons(processor, status):
-    processor.lookup = MagicMock(return_value={"status": status, "data": {}})
-    processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"id": 1, "text": "город"}}})
+async def test_incomplete_or_empty_address_search_does_not_emit_buttons(processor, status):
+    processor.lookup = AsyncMock(return_value={"status": status, "data": {}})
+    await processor.plan({"kind": "message_new", "peer_id": 100, "payload": {"message": {"id": 1, "text": "город"}}})
     effects = processor.store.plan.call_args.args[1]
     assert len(effects) == 1
     assert "целиком одним сообщением" in effects[0]["params"]["message"]

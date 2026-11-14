@@ -5,6 +5,7 @@ import uuid
 from collections.abc import Generator
 
 import pytest
+import pytest_asyncio
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -18,8 +19,8 @@ def migrated_database() -> str | None:
     return dsn
 
 
-@pytest.fixture
-def queue_factory(migrated_database):
+@pytest_asyncio.fixture
+async def queue_factory(migrated_database):
     """Создать очередь в своём сообществе и удалить только её строки после теста."""
     from src.vkbot.queue import QueueStore
 
@@ -27,32 +28,32 @@ def queue_factory(migrated_database):
         pytest.skip("Set TEST_QUEUE_DATABASE_URL to run real PostgreSQL integration tests")
     created = []
 
-    def create(*, telemetry=False, lease_seconds=3):
+    async def create(*, telemetry=False, lease_seconds=3):
         """Выдать независимую очередь с нужным режимом диагностики."""
         group = 1_000_000_000 + uuid.uuid4().int % 1_000_000_000
         queue = QueueStore(migrated_database, group, lease_seconds=lease_seconds, telemetry=telemetry)
         queue.environment = "development"
-        queue.initialize()
+        await queue.initialize()
         created.append(queue)
         return queue
 
     yield create
     for queue in created:
-        with queue.connect() as conn:
+        async with queue.connect() as conn:
             for table in ("request_log", "bot_outbox", "bot_inbox", "bot_state", "bot_message_context", "bot_receipts"):
-                conn.execute(f"DELETE FROM {table} WHERE group_id=%s", (queue.group_id,))
+                await conn.execute(f"DELETE FROM {table} WHERE group_id=%s", (queue.group_id,))
 
 
-@pytest.fixture
-def store(queue_factory):
+@pytest_asyncio.fixture
+async def store(queue_factory):
     """Выдать очередь без диагностики с короткой арендой заданий."""
-    return queue_factory()
+    return await queue_factory()
 
 
-@pytest.fixture
-def observed_store(queue_factory):
+@pytest_asyncio.fixture
+async def observed_store(queue_factory):
     """Выдать очередь с записью этапов обработки и сетевых попыток."""
-    return queue_factory(telemetry=True, lease_seconds=120)
+    return await queue_factory(telemetry=True, lease_seconds=120)
 
 
 @pytest.fixture

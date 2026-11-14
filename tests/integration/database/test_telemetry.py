@@ -23,7 +23,8 @@ from src.vkbot.maintenance import compact
 from src.vkbot.queue import event_record
 
 
-def test_async_threads_share_capture_but_preserve_parentage_and_errors():
+@pytest.mark.asyncio
+async def test_async_threads_share_capture_but_preserve_parentage_and_errors():
     def threaded():
         with span("thread"):
             raise TimeoutError("secret must not enter diagnostics")
@@ -33,7 +34,7 @@ def test_async_threads_share_capture_but_preserve_parentage_and_errors():
             await asyncio.to_thread(threaded)
 
     with Capture() as capture:
-        asyncio.run(run())
+        await run()
     child, parent = capture.rows
     assert child["parent_id"] == parent["id"]
     assert child["status"] == "error"
@@ -192,45 +193,49 @@ def incoming(store):
     )
 
 
-def test_automatic_code_is_logged_as_code_without_button_context(observed_store):
+@pytest.mark.asyncio
+async def test_automatic_code_is_logged_as_code_without_button_context(observed_store):
     store = observed_store
-    store.ingest([incoming(store)])
-    store.plan(
-        store.claim("bot_inbox"),
+    await store.ingest([incoming(store)])
+    await store.plan(
+        (await store.claim("bot_inbox")),
         [{"method": "send", "params": {"peer_id": 10, "message": "House and codes"}, "automatic_code": True}],
     )
-    store.finish(store.claim("bot_outbox"))
-    with store.connect() as conn:
-        outcome = conn.execute("SELECT outcome FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()[
-            "outcome"
-        ]
+    await store.finish(await store.claim("bot_outbox"))
+    async with store.connect() as conn:
+        outcome = (
+            await (
+                await conn.execute("SELECT outcome FROM request_log WHERE group_id=%s", (store.group_id,))
+            ).fetchone()
+        )["outcome"]
     assert outcome["automatic_code"] is True
     assert outcome["effects"][0]["role"] == "code"
     assert outcome["delivery_status"] == "accepted_by_vk"
 
 
-def test_postgres_keeps_attempts_partial_delivery_and_survives_queue_cleanup(observed_store):
+@pytest.mark.asyncio
+async def test_postgres_keeps_attempts_partial_delivery_and_survives_queue_cleanup(observed_store):
     store = observed_store
-    store.ingest([incoming(store)])
-    job = store.claim("bot_inbox")
+    await store.ingest([incoming(store)])
+    job = await store.claim("bot_inbox")
     with Capture() as capture, span("search.v1", kind="search", engine="v1") as detail:
         detail["result"] = {"status": "found", "address": "House"}
-    database.persist(store, "bot_inbox", job, capture.packet(), "development")
-    database.persist(store, "bot_inbox", job, capture.packet(), "development")
-    store.plan(
+    await database.persist(store, "bot_inbox", job, capture.packet(), "development")
+    await database.persist(store, "bot_inbox", job, capture.packet(), "development")
+    await store.plan(
         job,
         [
             {"method": "send", "params": {"peer_id": 10, "message": "first"}},
             {"method": "send", "params": {"peer_id": 10, "message": "second"}},
         ],
     )
-    first = store.claim("bot_outbox")
-    store.finish(first)
-    with store.connect() as conn:
-        row = conn.execute("SELECT * FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()
+    first = await store.claim("bot_outbox")
+    await store.finish(first)
+    async with store.connect() as conn:
+        row = await (await conn.execute("SELECT * FROM request_log WHERE group_id=%s", (store.group_id,))).fetchone()
         assert row["outcome"]["delivery_status"] == "partial"
         assert row["outcome"]["outbox_done"] == 1
-        summary = conn.execute("SELECT * FROM request_summary WHERE id=%s", (row["id"],)).fetchone()
+        summary = await (await conn.execute("SELECT * FROM request_summary WHERE id=%s", (row["id"],))).fetchone()
         assert summary["v1_executed"] is True
         assert summary["v2_executed"] is False
         assert summary["v1_result"] == "found"
@@ -238,189 +243,220 @@ def test_postgres_keeps_attempts_partial_delivery_and_survives_queue_cleanup(obs
         assert summary["v1_total_ms"] >= 0
         assert summary["v2_total_ms"] is None
         assert (
-            conn.execute(
-                "SELECT count(*) AS n FROM search_runs s JOIN request_spans p ON p.id=s.span_id WHERE p.request_id=%s",
-                (row["id"],),
-            ).fetchone()["n"]
-            == 1
-        )
-    second = store.claim("bot_outbox")
-    store.finish(second)
-    with store.connect() as conn:
-        conn.execute("UPDATE bot_inbox SET completed_at=1 WHERE group_id=%s", (store.group_id,))
-        conn.execute("UPDATE bot_outbox SET completed_at=1 WHERE group_id=%s", (store.group_id,))
-    compact(store, 10, 10, 10)
-    with store.connect() as conn:
-        row = conn.execute("SELECT * FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()
+            await (
+                await conn.execute(
+                    "SELECT count(*) AS n FROM search_runs s "
+                    "JOIN request_spans p ON p.id=s.span_id WHERE p.request_id=%s",
+                    (row["id"],),
+                )
+            ).fetchone()
+        )["n"] == 1
+    second = await store.claim("bot_outbox")
+    await store.finish(second)
+    async with store.connect() as conn:
+        await conn.execute("UPDATE bot_inbox SET completed_at=1 WHERE group_id=%s", (store.group_id,))
+        await conn.execute("UPDATE bot_outbox SET completed_at=1 WHERE group_id=%s", (store.group_id,))
+    await compact(store, 10, 10, 10)
+    async with store.connect() as conn:
+        row = await (await conn.execute("SELECT * FROM request_log WHERE group_id=%s", (store.group_id,))).fetchone()
         assert row["outcome"]["delivery_status"] == "accepted_by_vk"
         assert row["outcome"]["outbox_done"] == 2
         assert (
-            conn.execute("SELECT count(*) AS n FROM bot_inbox WHERE group_id=%s", (store.group_id,)).fetchone()["n"]
-            == 0
-        )
+            await (
+                await conn.execute("SELECT count(*) AS n FROM bot_inbox WHERE group_id=%s", (store.group_id,))
+            ).fetchone()
+        )["n"] == 0
 
 
-def test_postgres_analytics_error_does_not_rollback_ingest(observed_store, monkeypatch):
+@pytest.mark.asyncio
+async def test_postgres_analytics_error_does_not_rollback_ingest(observed_store, monkeypatch):
     monkeypatch.setattr(database, "refresh", MagicMock(side_effect=RuntimeError("analytics failed")))
-    assert observed_store.ingest([incoming(observed_store)]) == 1
-    assert observed_store.claim("bot_inbox") is not None
+    assert (await observed_store.ingest([incoming(observed_store)])) == 1
+    assert (await observed_store.claim("bot_inbox")) is not None
 
 
-def test_postgres_budget_does_not_block_queue_and_size_eviction_cascades(observed_store, monkeypatch):
+@pytest.mark.asyncio
+async def test_postgres_budget_does_not_block_queue_and_size_eviction_cascades(observed_store, monkeypatch):
     store = observed_store
     monkeypatch.setattr(settings, "telemetry_max_storage_bytes", 1)
-    assert store.ingest([incoming(store)]) == 1
-    with store.connect() as conn:
-        assert not conn.execute("SELECT id FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()
+    assert (await store.ingest([incoming(store)])) == 1
+    async with store.connect() as conn:
+        assert not (
+            await (await conn.execute("SELECT id FROM request_log WHERE group_id=%s", (store.group_id,))).fetchone()
+        )
     monkeypatch.setattr(settings, "telemetry_max_storage_bytes", 33554432)
-    job = store.claim("bot_inbox")
+    job = await store.claim("bot_inbox")
     with Capture() as capture, span("search.v2", kind="search", engine="v2"):
         pass
-    database.persist(store, "bot_inbox", job, capture.packet(), "development")
-    store.plan(job, [])
-    with store.connect() as conn:
+    await database.persist(store, "bot_inbox", job, capture.packet(), "development")
+    await store.plan(job, [])
+    async with store.connect() as conn:
         rid = database.identity(store.group_id, job["id"])
-        conn.execute("UPDATE request_log SET updated_at=to_timestamp(1) WHERE id=%s", (rid,))
+        await conn.execute("UPDATE request_log SET updated_at=to_timestamp(1) WHERE id=%s", (rid,))
     # Old history survives indefinitely while there is room in the budget.
-    assert database.maintain(store, 10)["requests_removed"] == 0
-    with store.connect() as conn:
-        assert conn.execute("SELECT id FROM request_spans WHERE request_id=%s", (rid,)).fetchone()
+    assert (await database.maintain(store, 10))["requests_removed"] == 0
+    async with store.connect() as conn:
+        assert await (await conn.execute("SELECT id FROM request_spans WHERE request_id=%s", (rid,))).fetchone()
     monkeypatch.setattr(settings, "telemetry_max_storage_bytes", 1)
-    assert database.maintain(store, 10)["requests_removed"] == 1
-    with store.connect() as conn:
-        assert not conn.execute("SELECT id FROM request_spans WHERE request_id=%s", (rid,)).fetchone()
+    assert (await database.maintain(store, 10))["requests_removed"] == 1
+    async with store.connect() as conn:
+        assert not (await (await conn.execute("SELECT id FROM request_spans WHERE request_id=%s", (rid,))).fetchone())
 
 
-def test_full_budget_replaces_old_completed_diagnostics_without_removing_queue(observed_store, monkeypatch):
+@pytest.mark.asyncio
+async def test_full_budget_replaces_old_completed_diagnostics_without_removing_queue(observed_store, monkeypatch):
     store = observed_store
-    store.ingest([incoming(store)])
-    job = store.claim("bot_inbox")
-    store.plan(job, [])
+    await store.ingest([incoming(store)])
+    job = await store.claim("bot_inbox")
+    await store.plan(job, [])
     with Capture() as capture, span("finished"):
         pass
-    database.persist(store, "bot_inbox", job, capture.packet(), "development")
-    with store.connect() as conn:
-        used = database.budget_used(conn, store.group_id)
+    await database.persist(store, "bot_inbox", job, capture.packet(), "development")
+    async with store.connect() as conn:
+        used = await database.budget_used(conn, store.group_id)
     monkeypatch.setattr(settings, "telemetry_max_storage_bytes", used + 2000)
     second = incoming(store)
     second["event_key"] += ":second"
-    assert store.ingest([second]) == 1
-    with store.connect() as conn:
-        assert not conn.execute(
-            "SELECT id FROM request_log WHERE id=%s", (database.identity(store.group_id, job["id"]),)
-        ).fetchone()
-        assert conn.execute("SELECT status FROM bot_inbox WHERE id=%s", (job["id"],)).fetchone()["status"] == "done"
-        assert (
-            conn.execute("SELECT count(*) AS n FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()["n"]
-            == 1
+    assert (await store.ingest([second])) == 1
+    async with store.connect() as conn:
+        assert not (
+            await (
+                await conn.execute(
+                    "SELECT id FROM request_log WHERE id=%s", (database.identity(store.group_id, job["id"]),)
+                )
+            ).fetchone()
         )
-        assert not conn.execute(
-            "SELECT id FROM request_spans WHERE request_id=%s", (database.identity(store.group_id, job["id"]),)
-        ).fetchone()
+        assert (await (await conn.execute("SELECT status FROM bot_inbox WHERE id=%s", (job["id"],))).fetchone())[
+            "status"
+        ] == "done"
+        assert (
+            await (
+                await conn.execute("SELECT count(*) AS n FROM request_log WHERE group_id=%s", (store.group_id,))
+            ).fetchone()
+        )["n"] == 1
+        assert not (
+            await (
+                await conn.execute(
+                    "SELECT id FROM request_spans WHERE request_id=%s", (database.identity(store.group_id, job["id"]),)
+                )
+            ).fetchone()
+        )
 
 
-def test_budget_never_evicts_diagnostics_of_unfinished_work(observed_store, monkeypatch):
+@pytest.mark.asyncio
+async def test_budget_never_evicts_diagnostics_of_unfinished_work(observed_store, monkeypatch):
     store = observed_store
-    store.ingest([incoming(store)])
-    with store.connect() as conn:
-        original = conn.execute("SELECT id FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()["id"]
+    await store.ingest([incoming(store)])
+    async with store.connect() as conn:
+        original = (
+            await (await conn.execute("SELECT id FROM request_log WHERE group_id=%s", (store.group_id,))).fetchone()
+        )["id"]
     monkeypatch.setattr(settings, "telemetry_max_storage_bytes", 1)
-    with store.connect() as conn:
-        conn.execute("UPDATE request_log SET updated_at=to_timestamp(1) WHERE id=%s", (original,))
-    assert database.maintain(store, 10)["requests_removed"] == 0
+    async with store.connect() as conn:
+        await conn.execute("UPDATE request_log SET updated_at=to_timestamp(1) WHERE id=%s", (original,))
+    assert (await database.maintain(store, 10))["requests_removed"] == 0
     monkeypatch.setattr(settings, "telemetry_max_storage_bytes", 4000)
     second = incoming(store)
     second["event_key"] += ":second"
-    assert store.ingest([second]) == 1
-    with store.connect() as conn:
-        assert conn.execute("SELECT id FROM request_log WHERE id=%s", (original,)).fetchone()
+    assert (await store.ingest([second])) == 1
+    async with store.connect() as conn:
+        assert await (await conn.execute("SELECT id FROM request_log WHERE id=%s", (original,))).fetchone()
         assert (
-            conn.execute("SELECT count(*) AS n FROM bot_inbox WHERE group_id=%s", (store.group_id,)).fetchone()["n"]
-            == 2
-        )
+            await (
+                await conn.execute("SELECT count(*) AS n FROM bot_inbox WHERE group_id=%s", (store.group_id,))
+            ).fetchone()
+        )["n"] == 2
 
 
-def test_sql_timeout_in_diagnostics_preserves_queue_transaction(observed_store, monkeypatch):
+@pytest.mark.asyncio
+async def test_sql_timeout_in_diagnostics_preserves_queue_transaction(observed_store, monkeypatch):
     store = observed_store
     monkeypatch.setattr(settings, "telemetry_db_timeout_ms", 10)
 
-    def slow(conn, *args: object):
-        conn.execute("SELECT pg_sleep(0.05)")
+    async def slow(conn, *args: object):
+        await conn.execute("SELECT pg_sleep(0.05)")
 
     monkeypatch.setattr(database, "refresh", slow)
-    assert store.ingest([incoming(store)]) == 1
-    with store.connect() as conn:
+    assert (await store.ingest([incoming(store)])) == 1
+    async with store.connect() as conn:
         assert (
-            conn.execute("SELECT status FROM bot_inbox WHERE group_id=%s", (store.group_id,)).fetchone()["status"]
-            == "pending"
-        )
-        assert conn.execute("SHOW statement_timeout").fetchone()["statement_timeout"] == "15s"
+            await (await conn.execute("SELECT status FROM bot_inbox WHERE group_id=%s", (store.group_id,))).fetchone()
+        )["status"] == "pending"
+        assert (await (await conn.execute("SHOW statement_timeout")).fetchone())["statement_timeout"] == "15s"
 
 
-def test_missing_api_measurements_stay_partial_after_successful_delivery(observed_store):
+@pytest.mark.asyncio
+async def test_missing_api_measurements_stay_partial_after_successful_delivery(observed_store):
     store = observed_store
-    store.ingest([incoming(store)])
-    job = store.claim("bot_inbox")
+    await store.ingest([incoming(store)])
+    job = await store.claim("bot_inbox")
     with Capture() as capture:
         note(api_measurements="missing")
-    database.persist(store, "bot_inbox", job, capture.packet(), "development")
-    store.plan(job, [{"method": "send", "params": {"peer_id": 10, "message": "answer"}}])
-    outgoing = store.claim("bot_outbox")
-    store.finish(outgoing)
+    await database.persist(store, "bot_inbox", job, capture.packet(), "development")
+    await store.plan(job, [{"method": "send", "params": {"peer_id": 10, "message": "answer"}}])
+    outgoing = await store.claim("bot_outbox")
+    await store.finish(outgoing)
     with Capture() as delivered, span("outbox.deliver"):
         pass
-    database.persist(store, "bot_outbox", outgoing, delivered.packet(), "development")
-    with store.connect() as conn:
-        row = conn.execute(
-            "SELECT telemetry_state,outcome FROM request_log WHERE group_id=%s", (store.group_id,)
+    await database.persist(store, "bot_outbox", outgoing, delivered.packet(), "development")
+    async with store.connect() as conn:
+        row = await (
+            await conn.execute("SELECT telemetry_state,outcome FROM request_log WHERE group_id=%s", (store.group_id,))
         ).fetchone()
         assert row["telemetry_state"] == "partial"
         assert row["outcome"]["delivery_status"] == "accepted_by_vk"
 
 
-def test_skipped_delivery_is_not_counted_as_vk_acceptance(observed_store):
+@pytest.mark.asyncio
+async def test_skipped_delivery_is_not_counted_as_vk_acceptance(observed_store):
     store = observed_store
-    store.ingest([incoming(store)])
-    job = store.claim("bot_inbox")
-    store.plan(job, [{"method": "send", "params": {"peer_id": 10, "message": "obsolete"}}])
-    outgoing = store.claim("bot_outbox")
-    store.finish(outgoing)
+    await store.ingest([incoming(store)])
+    job = await store.claim("bot_inbox")
+    await store.plan(job, [{"method": "send", "params": {"peer_id": 10, "message": "obsolete"}}])
+    outgoing = await store.claim("bot_outbox")
+    await store.finish(outgoing)
     with Capture() as capture:
         note(decision="delivery_obsolete")
-    database.persist(store, "bot_outbox", outgoing, capture.packet(), "development")
-    with store.connect() as conn:
-        row = conn.execute("SELECT outcome FROM request_log WHERE group_id=%s", (store.group_id,)).fetchone()["outcome"]
+    await database.persist(store, "bot_outbox", outgoing, capture.packet(), "development")
+    async with store.connect() as conn:
+        row = (
+            await (
+                await conn.execute("SELECT outcome FROM request_log WHERE group_id=%s", (store.group_id,))
+            ).fetchone()
+        )["outcome"]
         assert row["outbox_done"] == 0
         assert row["outbox_skipped"] == 1
         assert row["delivery_status"] == "cancelled"
 
 
-def test_schema_failure_disables_only_telemetry(observed_store, monkeypatch):
+@pytest.mark.asyncio
+async def test_schema_failure_disables_only_telemetry(observed_store, monkeypatch):
     store = observed_store
 
-    def unavailable(conn):
-        conn.execute("THIS IS NOT SQL")
+    async def unavailable(conn):
+        await conn.execute("THIS IS NOT SQL")
 
     monkeypatch.setattr(database, "verify_schema", unavailable)
-    store.initialize()
+    await store.initialize()
     assert store.telemetry is False
-    assert store.ingest([incoming(store)]) == 1
+    assert (await store.ingest([incoming(store)])) == 1
 
 
-def test_maintenance_repairs_state_when_process_dies_before_diagnostic_flush(observed_store):
+@pytest.mark.asyncio
+async def test_maintenance_repairs_state_when_process_dies_before_diagnostic_flush(observed_store):
     store = observed_store
-    store.ingest([incoming(store)])
-    job = store.claim("bot_inbox")
+    await store.ingest([incoming(store)])
+    job = await store.claim("bot_inbox")
     with Capture():
-        store.plan(job, [{"method": "send", "params": {"peer_id": 10, "message": "answer"}}])
+        await store.plan(job, [{"method": "send", "params": {"peer_id": 10, "message": "answer"}}])
     # Simulate losing the capture after commit: no persist() call.
-    outgoing = store.claim("bot_outbox")
+    outgoing = await store.claim("bot_outbox")
     with Capture():
-        store.finish(outgoing)
-    database.maintain(store, 10)
-    with store.connect() as conn:
-        row = conn.execute(
-            "SELECT telemetry_state,outcome FROM request_log WHERE group_id=%s", (store.group_id,)
+        await store.finish(outgoing)
+    await database.maintain(store, 10)
+    async with store.connect() as conn:
+        row = await (
+            await conn.execute("SELECT telemetry_state,outcome FROM request_log WHERE group_id=%s", (store.group_id,))
         ).fetchone()
         assert row["telemetry_state"] == "partial"
         assert row["outcome"]["delivery_status"] == "accepted_by_vk"

@@ -37,6 +37,7 @@ class NetworkSettings(BaseSettings):
     internal_api_geo_timeout_seconds: float = Field(default=30, gt=0)
 
     queue_db_connect_timeout_seconds: int = Field(default=5, gt=0)
+    queue_db_max_concurrent: int = Field(default=4, ge=1, le=16)
     queue_db_statement_timeout_ms: int = Field(default=15000, gt=0)
     queue_db_lock_timeout_ms: int = Field(default=5000, gt=0)
     migration_statement_timeout_ms: int = Field(default=120000, ge=1000, le=600000)

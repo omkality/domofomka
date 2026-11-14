@@ -3,6 +3,7 @@
 import time
 from typing import Any
 
+from src.vkbot.http import call_vk
 from src.vkbot.queue import QueueStore, event_record
 
 
@@ -15,11 +16,11 @@ class Reconciler:
         self.store = store
         self.settings = settings
 
-    def run(self) -> int:
+    async def run(self) -> int:
         """Добавить отсутствующие входящие сообщения и сохранить watermark сверки."""
         upper = time.time()
-        tracking = self.store.get_state("tracking_started", upper)
-        watermark = self.store.get_state("reconcile_watermark")
+        tracking = await self.store.get_state("tracking_started", upper)
+        watermark = await self.store.get_state("reconcile_watermark")
         lower = (
             watermark - self.settings.recovery_overlap_seconds
             if watermark is not None
@@ -28,7 +29,7 @@ class Reconciler:
         added = 0
         offset = 0
         while True:
-            page = self.vk.messages.getConversations(count=200, offset=offset)
+            page = await call_vk(self.vk.messages.getConversations, count=200, offset=offset)
             items = page.get("items", [])
             for item in items:
                 conversation = item["conversation"]
@@ -37,7 +38,7 @@ class Reconciler:
                 if item.get("last_message", {}).get("date", 0) < lower:
                     continue
                 peer = conversation["peer"]["id"]
-                history = self._history(peer, lower)
+                history = await self._history(peer, lower)
                 replies = {m["reply_message"]["id"] for m in history if m.get("out") and m.get("reply_message")}
                 last_out = max((m["date"] for m in history if m.get("out")), default=0)
                 records = []
@@ -54,7 +55,7 @@ class Reconciler:
                     if historical_answer or message["id"] in replies:
                         record["status"] = "done"
                     records.append(record)
-                added += self.store.ingest(records)
+                added += await self.store.ingest(records)
             offset += len(items)
             if (
                 not items
@@ -63,15 +64,15 @@ class Reconciler:
             ):
                 break
         # Failed or partial scans must never advance this checkpoint.
-        self.store.set_state("reconcile_watermark", upper)
+        await self.store.set_state("reconcile_watermark", upper)
         return added
 
-    def _history(self, peer: int, lower: float) -> list[dict]:
+    async def _history(self, peer: int, lower: float) -> list[dict]:
         """Прочитать ограниченную историю диалога до заданного watermark."""
         offset = 0
         messages = []
         while True:
-            page = self.vk.messages.getHistory(peer_id=peer, count=200, offset=offset)
+            page = await call_vk(self.vk.messages.getHistory, peer_id=peer, count=200, offset=offset)
             batch = page.get("items", [])
             messages.extend(m for m in batch if m["date"] >= lower)
             offset += len(batch)

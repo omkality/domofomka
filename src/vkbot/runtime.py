@@ -17,7 +17,7 @@ from src.infrastructure.telemetry import (
     settings as telemetry_settings,
     span,
 )
-from src.vkbot.http import RateGate, RateSession
+from src.vkbot.http import RateGate, RateSession, call_vk
 from src.vkbot.processor import Processor
 from src.vkbot.queue import QueueStore, event_record, retry_delay, safe_error
 from src.vkbot.recovery import Reconciler
@@ -72,10 +72,10 @@ class Runtime:
     async def run(self) -> None:
         """Удерживать единственный runtime сообщества и выполнять его фоновые задачи."""
         await asyncio.to_thread(self.verify_token)
-        await asyncio.to_thread(self.store.initialize)
+        await self.store.initialize()
         # One collector/runtime per community. This is an operator-controlled
         # standby, not an automatic two-server failover implementation.
-        guard = await self.store.connect_async(autocommit=True)
+        guard = await self.store.open_guard()
         async with guard:
             row = await (
                 await guard.execute(
@@ -103,20 +103,17 @@ class Runtime:
 
         while True:
             try:
-                result = await asyncio.to_thread(
-                    compact,
+                result = await compact(
                     self.store,
                     self.settings.queue_retention_days * 86400,
                     self.settings.queue_context_retention_days * 86400,
                     self.settings.queue_maintenance_batch,
                 )
-                snapshot = await asyncio.to_thread(health, self.store)
+                snapshot = await health(self.store)
                 if self.store.telemetry:
                     from src.vkbot.telemetry import maintain
 
-                    snapshot["telemetry"] = await asyncio.to_thread(
-                        maintain, self.store, self.settings.queue_maintenance_batch
-                    )
+                    snapshot["telemetry"] = await maintain(self.store, self.settings.queue_maintenance_batch)
                 logger.info("Queue maintenance result=%s health=%s", result, snapshot)
                 import shutil
 
@@ -152,19 +149,24 @@ class Runtime:
             await asyncio.sleep(self.settings.queue_guard_interval_seconds)
             await (await connection.execute("SELECT 1")).fetchone()
 
-    def _longpoll(self) -> VkBotLongPoll:
-        """Получить события Long Poll с ограниченными сетевыми бюджетами."""
-        vk = VkApi(token=self.settings.vk_group_token, api_version="5.199", session=RateSession(self.gate))
-        poll = VkBotLongPoll(vk=vk, group_id=self.store.group_id, wait=network_settings.vk_longpoll_wait_seconds)
-        poll.session.close()
-        # Long Poll supplies its own wait+10 timeout; API calls share the rate gate.
-        poll.session = RateSession(self.gate, longpoll=True)
-        cursor = self.store.get_state("longpoll_ts")
+    async def _longpoll(self) -> VkBotLongPoll:
+        """Подготовить sync Long Poll и восстановить асинхронно сохранённый курсор."""
+
+        def create() -> VkBotLongPoll:
+            """Запросить сервер Long Poll в потоке синхронного VK SDK."""
+            vk = VkApi(token=self.settings.vk_group_token, api_version="5.199", session=RateSession(self.gate))
+            poll = VkBotLongPoll(vk=vk, group_id=self.store.group_id, wait=network_settings.vk_longpoll_wait_seconds)
+            poll.session.close()
+            poll.session = RateSession(self.gate, longpoll=True)
+            return poll
+
+        poll = await call_vk(create)
+        cursor = await self.store.get_state("longpoll_ts")
         if cursor is not None:
             poll.ts = cursor
         return poll
 
-    def _acknowledge(self, records: list[dict]) -> None:
+    async def _acknowledge(self, records: list[dict]) -> None:
         # Ephemeral acknowledgement is best effort and only follows durable ingest.
         """Подтвердить записанное callback-нажатие без повторной рассылки уведомлений."""
         session = RateSession(self.gate)
@@ -173,9 +175,9 @@ class Runtime:
             for record in records:
                 if record["kind"] != "message_event":
                     continue
-                if self.store.get_state("vk_paused_until", 0) > time.time():
+                if (await self.store.get_state("vk_paused_until", 0)) > time.time():
                     break
-                receipt = self.store.callback_feedback(record["event_key"])
+                receipt = await self.store.callback_feedback(record["event_key"])
                 if receipt is None:
                     continue
                 obj = record["payload"]
@@ -187,17 +189,19 @@ class Runtime:
                     params["event_data"] = json.dumps({"type": "show_snackbar", "text": text}, ensure_ascii=False)
                 try:
                     if self.store.telemetry is True:
-                        self._observed_job(
-                            lambda job, params=params: vk.messages.sendMessageEventAnswer(**params),
+                        await self._observed_job(
+                            lambda job, params=params: call_vk(vk.messages.sendMessageEventAnswer, **params),
                             "callback_ack",
                             {"id": receipt["inbox_id"], "inbox_id": receipt["inbox_id"], "attempts": 1},
                         )
                     else:
-                        vk.messages.sendMessageEventAnswer(**params)
+                        await call_vk(vk.messages.sendMessageEventAnswer, **params)
                 except Exception as exc:
                     logger.info("Callback acknowledgement unavailable error=%s", safe_error(exc))
                     if getattr(exc, "code", None) in {6, 9, 29}:
-                        self.store.set_state("vk_paused_until", time.time() + self.settings.vk_error_pause_seconds)
+                        await self.store.set_state(
+                            "vk_paused_until", time.time() + self.settings.vk_error_pause_seconds
+                        )
                         break
         finally:
             session.close()
@@ -208,7 +212,7 @@ class Runtime:
         while True:
             try:
                 if poll is None:
-                    poll = await asyncio.to_thread(self._longpoll)
+                    poll = await self._longpoll()
                 events = await asyncio.to_thread(poll.check)
                 records = []
                 for event in events:
@@ -223,8 +227,7 @@ class Runtime:
                 # Do not fetch the next batch until this batch AND cursor are durable.
                 while True:
                     try:
-                        count = await asyncio.to_thread(
-                            self.store.ingest,
+                        count = await self.store.ingest(
                             records,
                             str(poll.ts),
                             callback_window=self.settings.anti_spam_time,
@@ -238,7 +241,7 @@ class Runtime:
                         logger.error("Inbox persistence unavailable error=%s", safe_error(exc))
                         await asyncio.sleep(network_settings.bot_restart_delay_seconds)
                 if any(record["kind"] == "message_event" for record in records):
-                    await asyncio.to_thread(self._acknowledge, records)
+                    await self._acknowledge(records)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -247,47 +250,47 @@ class Runtime:
 
     async def _reconcile(self) -> None:
         """Периодически добавлять отсутствующие сообщения из истории."""
-        processor = await asyncio.to_thread(Processor, self.settings, self.store, self.gate)
+        processor = Processor(self.settings, self.store, self.gate)
         reconciler = Reconciler(processor.vk, self.store, self.settings)
         try:
             while True:
                 try:
-                    added = await asyncio.to_thread(reconciler.run)
+                    added = await reconciler.run()
                     logger.info("History reconciliation complete inserted=%d", added)
                 except Exception as exc:
                     logger.warning("History reconciliation deferred error=%s", safe_error(exc))
                 await asyncio.sleep(self.settings.recovery_interval_seconds)
         finally:
-            processor.close()
+            await processor.close()
 
     async def _heartbeat(self, table: str, job: dict) -> None:
         """Продлевать аренду, пока worker выполняет текущую операцию."""
         while True:
             await asyncio.sleep(max(self.settings.queue_heartbeat_min_seconds, self.settings.queue_lease_seconds / 3))
-            if not await asyncio.to_thread(self.store.renew, table, job):
+            if not await self.store.renew(table, job):
                 return
 
     async def _worker(self, table: str, index: int) -> None:
         """Обрабатывать разрешённые задания очереди, сохраняя исход попытки."""
-        processor = await asyncio.to_thread(Processor, self.settings, self.store, self.gate)
+        processor = Processor(self.settings, self.store, self.gate)
         try:
             while True:
                 try:
-                    if await asyncio.to_thread(self.store.get_state, "paused", False):
+                    if await self.store.get_state("paused", False):
                         await asyncio.sleep(self.settings.queue_poll_seconds)
                         continue
-                    paused_until = await asyncio.to_thread(self.store.get_state, "vk_paused_until", 0)
+                    paused_until = await self.store.get_state("vk_paused_until", 0)
                     if time.time() < paused_until:
                         await asyncio.sleep(self.settings.queue_poll_seconds)
                         continue
-                    job = await asyncio.to_thread(self.store.claim, table)
+                    job = await self.store.claim(table)
                     if not job:
                         await asyncio.sleep(self.settings.queue_poll_seconds)
                         continue
                     heartbeat = asyncio.create_task(self._heartbeat(table, job))
                     try:
                         operation = processor.plan if table == "bot_inbox" else processor.deliver
-                        await asyncio.to_thread(self._observed_job, operation, table, job)
+                        await self._observed_job(operation, table, job)
                         logger.info("Queue job complete queue=%s id=%s worker=%s", table, job["id"], index)
                     except Exception as exc:
                         code = getattr(exc, "code", None)
@@ -306,10 +309,9 @@ class Runtime:
                             self.settings.queue_retry_base_seconds,
                             self.settings.queue_retry_max_seconds,
                         )
-                        await asyncio.to_thread(self.store.fail, table, job, safe_error(exc), delay, permanent)
+                        await self.store.fail(table, job, safe_error(exc), delay, permanent)
                         if code in {5, 6, 9, 27, 29}:
-                            await asyncio.to_thread(
-                                self.store.set_state,
+                            await self.store.set_state(
                                 "vk_paused_until",
                                 time.time() + max(self.settings.vk_error_pause_seconds, delay),
                             )
@@ -330,12 +332,12 @@ class Runtime:
                     logger.error("Queue worker unavailable queue=%s error=%s", table, safe_error(exc))
                     await asyncio.sleep(network_settings.bot_restart_delay_seconds)
         finally:
-            processor.close()
+            await processor.close()
 
-    def _observed_job(self, operation: Any, table: str, job: dict) -> None:
+    async def _observed_job(self, operation: Any, table: str, job: dict) -> None:
         """Измерить попытку задания и сохранить диагностику после рабочей операции."""
         if not self.store.telemetry:
-            operation(job)
+            await operation(job)
             return
         from src.vkbot.telemetry import persist
 
@@ -355,9 +357,9 @@ class Runtime:
                     attempt=job["attempts"],
                     app_revision=telemetry_settings.app_revision,
                 ):
-                    operation(job)
+                    await operation(job)
             finally:
                 try:
-                    persist(self.store, table, job, capture.packet(), self.settings.app_environment)
+                    await persist(self.store, table, job, capture.packet(), self.settings.app_environment)
                 except Exception as exc:
                     logger.warning("Telemetry persistence unavailable error=%s", type(exc).__name__)

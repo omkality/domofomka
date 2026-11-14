@@ -1,5 +1,6 @@
 """Durable inbox/outbox. All identifiers are scoped to a VK community."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -7,13 +8,15 @@ import math
 import random
 import time
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import psycopg
 from psycopg.rows import DictRow, dict_row
 from psycopg.types.json import Jsonb
 
-from src.infrastructure.database.schema import require_schema
+from src.infrastructure.database.schema import require_schema_async
 from src.infrastructure.network import network_settings
 from src.infrastructure.telemetry import active, measured
 
@@ -83,10 +86,11 @@ class QueueStore:
         self.message_rate_interval_seconds = message_rate_interval_seconds
         self.message_rate_burst = message_rate_burst
         self.hint_interval_seconds = hint_interval_seconds
+        self._database_slots = asyncio.Semaphore(network_settings.queue_db_max_concurrent)
 
-    def _queue_lock(self, conn: psycopg.Connection[DictRow]) -> None:
+    async def _queue_lock(self, conn: psycopg.AsyncConnection[DictRow]) -> None:
         """Сериализовать изменение связанных очередей одного сообщества."""
-        conn.execute(
+        await conn.execute(
             r"""
             SELECT
               pg_advisory_xact_lock(20261106, %s)
@@ -94,14 +98,15 @@ class QueueStore:
             (self.group_id,),
         )
 
-    def _trim_pending(self, conn: psycopg.Connection[DictRow], peer: int) -> set[int]:
+    async def _trim_pending(self, conn: psycopg.AsyncConnection[DictRow], peer: int) -> set[int]:
         """Оставить актуальный хвост неначатых запросов одного пользователя."""
         if self.max_pending_messages_per_peer is None:
             return set()
         # Only whole, unstarted requests can be removed. An attempted or partly
         # delivered outbox must retain its stable random_id and remaining pages.
-        rows = conn.execute(
-            r"""
+        rows = await (
+            await conn.execute(
+                r"""
             WITH waiting_ids AS (
               SELECT
                 id
@@ -242,11 +247,12 @@ class QueueStore:
               i.id = o.id
             RETURNING i.id
             """,
-            (self.group_id, peer, self.group_id, peer, self.max_pending_messages_per_peer, time.time()),
+                (self.group_id, peer, self.group_id, peer, self.max_pending_messages_per_peer, time.time()),
+            )
         ).fetchall()
         ids = {r["id"] for r in rows}
         if ids:
-            conn.execute(
+            await conn.execute(
                 r"""
                 UPDATE bot_outbox
                 SET
@@ -259,14 +265,15 @@ class QueueStore:
                 (time.time(), list(ids), self.group_id),
             )
             for inbox_id in ids:
-                self._observe(conn, inbox_id)
+                await self._observe(conn, inbox_id)
         return ids
 
-    def _reply_gate(self, conn: psycopg.Connection[DictRow], peer: int) -> float:
+    async def _reply_gate(self, conn: psycopg.AsyncConnection[DictRow], peer: int) -> float:
         """Рассчитать допуск следующего исходящего действия пользователя."""
         name = f"reply_gate:{peer}"
-        row = conn.execute(
-            r"""
+        row = await (
+            await conn.execute(
+                r"""
             SELECT
               value
             FROM
@@ -274,15 +281,17 @@ class QueueStore:
             WHERE
               group_id = %s AND name = %s
             """,
-            (self.group_id, name),
+                (self.group_id, name),
+            )
         ).fetchone()
         return float(row["value"]) if row else 0
 
-    def _claim_message_budget(self, conn: psycopg.Connection[DictRow], row: dict, now: float) -> bool:
+    async def _claim_message_budget(self, conn: psycopg.AsyncConnection[DictRow], row: dict, now: float) -> bool:
         """До внешних вызовов; очередь сериализует бюджет отдельно для каждого peer."""
         name = f"message_rate:{row['peer_id']}"
-        saved = conn.execute(
-            r"""
+        saved = await (
+            await conn.execute(
+                r"""
             SELECT
               value
             FROM
@@ -290,7 +299,8 @@ class QueueStore:
             WHERE
               group_id = %s AND name = %s
             """,
-            (self.group_id, name),
+                (self.group_id, name),
+            )
         ).fetchone()
         state = saved["value"] if saved else {}
         previous = state.get("updated_at", now)
@@ -303,9 +313,11 @@ class QueueStore:
         if limited or state.get("delayed") or row["payload"].get("_message_rate_delayed"):
             if limited:
                 # Keep the trailing-request intent even when queue compaction removes its old row.
-                self._state(conn, name, {"tokens": tokens, "updated_at": timestamp, "delayed": True})
-            latest = conn.execute(
-                r"""
+                await self._state(conn, name, {"tokens": tokens, "updated_at": timestamp, "delayed": True})
+            latest = (
+                await (
+                    await conn.execute(
+                        r"""
                 SELECT
                   id
                 FROM
@@ -327,10 +339,13 @@ class QueueStore:
                 LIMIT
                   1
                 """,
-                (self.group_id, row["peer_id"]),
-            ).fetchone()["id"]
-            cancelled = conn.execute(
-                r"""
+                        (self.group_id, row["peer_id"]),
+                    )
+                ).fetchone()
+            )["id"]
+            cancelled = await (
+                await conn.execute(
+                    r"""
                 UPDATE bot_inbox
                 SET
                   status = 'done',
@@ -345,13 +360,14 @@ class QueueStore:
                   AND id <> %s
                 RETURNING id
                 """,
-                (now, self.group_id, row["peer_id"], latest),
+                    (now, self.group_id, row["peer_id"], latest),
+                )
             ).fetchall()
             for cancelled_row in cancelled:
-                self._observe(conn, cancelled_row["id"])
+                await self._observe(conn, cancelled_row["id"])
             if limited or latest != row["id"]:
                 eligible = timestamp + (1 - tokens) * self.message_rate_interval_seconds if limited else now
-                conn.execute(
+                await conn.execute(
                     r"""
                     UPDATE bot_inbox
                     SET
@@ -363,15 +379,16 @@ class QueueStore:
                     (eligible, latest),
                 )
                 return False
-        self._state(conn, name, {"tokens": max(0, tokens - 1), "updated_at": timestamp})
+        await self._state(conn, name, {"tokens": max(0, tokens - 1), "updated_at": timestamp})
         return True
 
-    def _allow_hint(self, conn: psycopg.Connection[DictRow], job: dict, index: int, effect: dict) -> bool:
+    async def _allow_hint(self, conn: psycopg.AsyncConnection[DictRow], job: dict, index: int, effect: dict) -> bool:
         """Проверить, не повторяет ли подсказка уже ожидающую или недавнюю отправку."""
         name = f"message_hint:{job['peer_id']}"
         signature = hashlib.sha256(effect["params"]["message"].encode()).hexdigest()
-        saved = conn.execute(
-            r"""
+        saved = await (
+            await conn.execute(
+                r"""
             SELECT
               value
             FROM
@@ -379,12 +396,14 @@ class QueueStore:
             WHERE
               group_id = %s AND name = %s
             """,
-            (self.group_id, name),
+                (self.group_id, name),
+            )
         ).fetchone()
         state = saved["value"] if saved else {}
         if state.get("signature") == signature:
-            previous = conn.execute(
-                r"""
+            previous = await (
+                await conn.execute(
+                    r"""
                 SELECT
                   status,
                   completed_at
@@ -395,7 +414,8 @@ class QueueStore:
                   AND effect_index = %s
                   AND group_id = %s
                 """,
-                (state["inbox_id"], state["effect_index"], self.group_id),
+                    (state["inbox_id"], state["effect_index"], self.group_id),
+                )
             ).fetchone()
             if previous and (
                 previous["status"] in {"pending", "processing"}
@@ -404,7 +424,7 @@ class QueueStore:
                     and time.time() < (previous["completed_at"] or 0) + self.hint_interval_seconds
                 )
             ):
-                conn.execute(
+                await conn.execute(
                     r"""
                     UPDATE bot_inbox
                     SET payload = jsonb_set(payload, '{_hint_suppressed}', 'true')
@@ -414,35 +434,36 @@ class QueueStore:
                     (job["id"],),
                 )
                 return False
-        self._state(
+        await self._state(
             conn,
             name,
             {"signature": signature, "inbox_id": job["id"], "effect_index": index, "updated_at": time.time()},
         )
         return True
 
-    def _reserve_reply(self, conn: psycopg.Connection[DictRow], peer: int, now: float) -> None:
+    async def _reserve_reply(self, conn: psycopg.AsyncConnection[DictRow], peer: int, now: float) -> None:
         """Зарезервировать интервал исходящего ответа в текущей транзакции."""
         if self.reply_interval_seconds:
-            self._state(
+            await self._state(
                 conn,
                 f"reply_gate:{peer}",
-                max(self._reply_gate(conn, peer), now + self.reply_interval_seconds),
+                max((await self._reply_gate(conn, peer)), now + self.reply_interval_seconds),
             )
 
-    def _observe(self, conn: psycopg.Connection[DictRow], inbox_id: int) -> None:
+    async def _observe(self, conn: psycopg.AsyncConnection[DictRow], inbox_id: int) -> None:
         # A measured worker flushes once after the operation. Ingest, failures
         # outside that scope and callers without Capture still snapshot here.
         """Сохранить диагностическую сводку задания вне измеряемой попытки."""
         if self.telemetry and not active():
             from src.vkbot.telemetry import guarded, refresh, register
 
-            def update() -> None:
+            async def update() -> None:
                 """Сохранить связанную сводку внутри текущей транзакции."""
-                if register(conn, self.group_id, inbox_id, self.environment):
-                    refresh(conn, self.group_id, inbox_id)
-                    parent = conn.execute(
-                        r"""
+                if await register(conn, self.group_id, inbox_id, self.environment):
+                    await refresh(conn, self.group_id, inbox_id)
+                    parent = await (
+                        await conn.execute(
+                            r"""
                         SELECT
                           payload ->> '_geo_source_id' AS id
                         FROM
@@ -451,19 +472,27 @@ class QueueStore:
                           id = %s
                           AND group_id = %s
                         """,
-                        (inbox_id, self.group_id),
+                            (inbox_id, self.group_id),
+                        )
                     ).fetchone()
                     if parent and parent["id"]:
-                        refresh(conn, self.group_id, int(parent["id"]))
+                        await refresh(conn, self.group_id, int(parent["id"]))
 
-            guarded(conn, update)
+            await guarded(conn, update)
 
-    def connect(self) -> psycopg.Connection[DictRow]:
+    @asynccontextmanager
+    async def connect(self) -> AsyncIterator[psycopg.AsyncConnection[DictRow]]:
         """Открыть соединение очереди с ограничениями подключения, SQL и блокировок."""
-        return psycopg.connect(self.dsn, **self._connection_options())
+        async with asyncio.timeout(network_settings.queue_db_connect_timeout_seconds):
+            await self._database_slots.acquire()
+        try:
+            async with await psycopg.AsyncConnection.connect(self.dsn, **self._connection_options()) as conn:
+                yield conn
+        finally:
+            self._database_slots.release()
 
     def _connection_options(self) -> dict:
-        """Использовать одинаковые бюджеты для sync- и async-соединений Psycopg."""
+        """Использовать одинаковые бюджеты очереди и отдельной guard-сессии."""
         return {
             "connect_timeout": network_settings.queue_db_connect_timeout_seconds,
             "row_factory": dict_row,
@@ -473,25 +502,25 @@ class QueueStore:
             ),
         }
 
-    async def connect_async(self, *, autocommit: bool = False) -> psycopg.AsyncConnection[DictRow]:
+    async def open_guard(self) -> psycopg.AsyncConnection[DictRow]:
         """Открыть асинхронное соединение для задач жизненного цикла runtime."""
-        return await psycopg.AsyncConnection.connect(self.dsn, autocommit=autocommit, **self._connection_options())
+        return await psycopg.AsyncConnection.connect(self.dsn, autocommit=True, **self._connection_options())
 
-    def initialize(self) -> None:
+    async def initialize(self) -> None:
         """Проверить схему и подготовить состояние сообщества без DDL."""
-        with self.connect() as conn:
-            require_schema(conn)
+        async with self.connect() as conn:
+            await require_schema_async(conn)
             if self.telemetry:
                 from src.vkbot.telemetry import verify_schema
 
                 try:
-                    with conn.transaction():
-                        verify_schema(conn)
+                    async with conn.transaction():
+                        await verify_schema(conn)
                 except Exception as exc:
                     self.telemetry = False
                     logging.getLogger(__name__).warning("Telemetry schema unavailable error=%s", type(exc).__name__)
             for table in ("bot_inbox", "bot_outbox"):
-                conn.execute(
+                await conn.execute(
                     rf"""
                     UPDATE {table}
                     SET completed_at = %s
@@ -502,7 +531,7 @@ class QueueStore:
                     """,
                     (time.time(), self.group_id),
                 )
-            conn.execute(
+            await conn.execute(
                 r"""
                 INSERT INTO bot_state
                 VALUES (%s, 'tracking_started', %s) ON CONFLICT DO NOTHING
@@ -510,9 +539,10 @@ class QueueStore:
                 (self.group_id, Jsonb(time.time())),
             )
             if self.max_pending_messages_per_peer is not None:
-                self._queue_lock(conn)
-                peers = conn.execute(
-                    r"""
+                await self._queue_lock(conn)
+                peers = await (
+                    await conn.execute(
+                        r"""
                     SELECT
                       peer_id
                     FROM
@@ -530,16 +560,18 @@ class QueueStore:
                       group_id = %s
                       AND status = 'pending'
                     """,
-                    (self.group_id, self.group_id),
+                        (self.group_id, self.group_id),
+                    )
                 ).fetchall()
                 for row in peers:
-                    self._trim_pending(conn, row["peer_id"])
+                    await self._trim_pending(conn, row["peer_id"])
 
-    def get_state(self, name: str, default: Any = None) -> Any:
+    async def get_state(self, name: str, default: Any = None) -> Any:
         """Прочитать именованное состояние сообщества с указанным значением по умолчанию."""
-        with self.connect() as conn:
-            row = conn.execute(
-                r"""
+        async with self.connect() as conn:
+            row = await (
+                await conn.execute(
+                    r"""
                 SELECT
                   value
                 FROM
@@ -547,18 +579,19 @@ class QueueStore:
                 WHERE
                   group_id = %s AND name = %s
                 """,
-                (self.group_id, name),
+                    (self.group_id, name),
+                )
             ).fetchone()
             return row["value"] if row else default
 
-    def set_state(self, name: str, value: Any) -> None:
+    async def set_state(self, name: str, value: Any) -> None:
         """Записать именованное состояние сообщества отдельной транзакцией."""
-        with self.connect() as conn:
-            self._state(conn, name, value)
+        async with self.connect() as conn:
+            await self._state(conn, name, value)
 
-    def _state(self, conn: psycopg.Connection[DictRow], name: str, value: Any) -> None:
+    async def _state(self, conn: psycopg.AsyncConnection[DictRow], name: str, value: Any) -> None:
         """Обновить именованное состояние в текущей транзакции."""
-        conn.execute(
+        await conn.execute(
             r"""
             INSERT INTO bot_state
             VALUES (%s, %s, %s) ON CONFLICT (group_id, name) DO
@@ -568,7 +601,7 @@ class QueueStore:
             (self.group_id, name, Jsonb(value)),
         )
 
-    def ingest(
+    async def ingest(
         self,
         records: list[dict],
         cursor: str | None = None,
@@ -578,14 +611,15 @@ class QueueStore:
     ) -> int:
         """Атомарно сохранить новые события, дедупликацию и курсор Long Poll."""
         added = 0
-        with self.connect() as conn:
+        async with self.connect() as conn:
             # Serializes receipt compaction with both collector and history replay.
-            self._queue_lock(conn)
+            await self._queue_lock(conn)
             peers = set()
             for record in records:
                 assert record["group_id"] == self.group_id
-                if conn.execute(
-                    r"""
+                if await (
+                    await conn.execute(
+                        r"""
                     SELECT
                       1
                     FROM
@@ -593,11 +627,13 @@ class QueueStore:
                     WHERE
                       group_id = %s AND event_key = %s
                     """,
-                    (self.group_id, record["event_key"]),
+                        (self.group_id, record["event_key"]),
+                    )
                 ).fetchone():
                     continue
-                row = conn.execute(
-                    r"""
+                row = await (
+                    await conn.execute(
+                        r"""
                     INSERT INTO bot_inbox (
                       group_id,
                       event_key,
@@ -612,20 +648,21 @@ class QueueStore:
                       group_id, event_key
                     ) DO NOTHING RETURNING id
                     """,
-                    (
-                        self.group_id,
-                        record["event_key"],
-                        record["peer_id"],
-                        record["kind"],
-                        Jsonb(record["payload"]),
-                        record["occurred_at"],
-                        record["created_at"],
-                        record.get("status", "pending"),
-                    ),
+                        (
+                            self.group_id,
+                            record["event_key"],
+                            record["peer_id"],
+                            record["kind"],
+                            Jsonb(record["payload"]),
+                            record["occurred_at"],
+                            record["created_at"],
+                            record.get("status", "pending"),
+                        ),
+                    )
                 ).fetchone()
                 if row and record["kind"] == "message_event":
                     try:
-                        self._register_callback(
+                        await self._register_callback(
                             conn,
                             record,
                             row["id"],
@@ -634,7 +671,7 @@ class QueueStore:
                             ack_interval,
                         )
                     except (KeyError, ValueError, TypeError) as exc:
-                        conn.execute(
+                        await conn.execute(
                             r"""
                             UPDATE bot_inbox SET status = 'failed', last_error = %s
                             WHERE
@@ -645,7 +682,7 @@ class QueueStore:
                 added += bool(row)
                 if row and record["kind"] == "message_new":
                     peers.add(record["peer_id"])
-                    conn.execute(
+                    await conn.execute(
                         r"""
                         UPDATE bot_inbox
                         SET
@@ -664,7 +701,7 @@ class QueueStore:
                         (time.time(), self.group_id, record["peer_id"], row["id"]),
                     )
                 if row and record.get("status") == "done":
-                    conn.execute(
+                    await conn.execute(
                         r"""
                         UPDATE bot_inbox SET completed_at = %s
                         WHERE
@@ -673,16 +710,16 @@ class QueueStore:
                         (time.time(), row["id"]),
                     )
                 if row and self.telemetry:
-                    self._observe(conn, row["id"])
+                    await self._observe(conn, row["id"])
             for peer in sorted(peers):
-                self._trim_pending(conn, peer)
+                await self._trim_pending(conn, peer)
             if cursor is not None:
-                self._state(conn, "longpoll_ts", str(cursor))
+                await self._state(conn, "longpoll_ts", str(cursor))
         return added
 
-    def _register_callback(
+    async def _register_callback(
         self,
-        conn: psycopg.Connection[DictRow],
+        conn: psycopg.AsyncConnection[DictRow],
         record: dict,
         inbox_id: int,
         window: float,
@@ -708,14 +745,16 @@ class QueueStore:
             target = "page:" + str(int(action["choice_page"]))
         signature = f"{int(obj['conversation_message_id'])}:{target}"
         name = f"callback_gate:{record['peer_id']}"
-        conn.execute(
+        await conn.execute(
             r"""
             INSERT INTO bot_state VALUES (%s, %s, '{}') ON CONFLICT DO NOTHING
             """,
             (self.group_id, name),
         )
-        state = conn.execute(
-            r"""
+        state = (
+            await (
+                await conn.execute(
+                    r"""
             SELECT
               value
             FROM
@@ -724,13 +763,16 @@ class QueueStore:
               group_id = %s AND name = %s
             FOR UPDATE
             """,
-            (self.group_id, name),
-        ).fetchone()["value"]
+                    (self.group_id, name),
+                )
+            ).fetchone()
+        )["value"]
         now = time.time()
         previous = None
         if state.get("canonical_id"):
-            previous = conn.execute(
-                r"""
+            previous = await (
+                await conn.execute(
+                    r"""
                 SELECT
                   i.status,
                   i.last_error,
@@ -774,7 +816,8 @@ class QueueStore:
                   i.id = %s
                   AND i.group_id = %s
                 """,
-                (state["canonical_id"], self.group_id),
+                    (state["canonical_id"], self.group_id),
+                )
             ).fetchone()
         pending = bool(previous and (previous["status"] in ("pending", "processing") or previous["active"]))
         failed = bool(previous and (previous["status"] == "failed" or previous["failed"]))
@@ -789,8 +832,10 @@ class QueueStore:
             state.update(signature=signature, canonical_id=inbox_id, accepted_at=now)
             state.pop("completed_at", None)
             # A known pending failure in this peer can delay a newly accepted click.
-            blocked = conn.execute(
-                r"""
+            blocked = (
+                await (
+                    await conn.execute(
+                        r"""
                 SELECT
                   exists(
                     SELECT
@@ -807,8 +852,10 @@ class QueueStore:
                       AND last_error IS NOT NULL
                   ) AS blocked
                 """,
-                (self.group_id, record["peer_id"]),
-            ).fetchone()["blocked"]
+                        (self.group_id, record["peer_id"]),
+                    )
+                ).fetchone()
+            )["blocked"]
             if blocked:
                 notice = "pending"
         feedback = "skip"
@@ -828,7 +875,7 @@ class QueueStore:
             "ack_reserved": False,
         }
         stored = dict(obj, _queue_receipt=receipt)
-        conn.execute(
+        await conn.execute(
             r"""
             UPDATE bot_inbox SET payload = %s, status = %s, completed_at = %s
             WHERE
@@ -841,14 +888,15 @@ class QueueStore:
                 inbox_id,
             ),
         )
-        self._state(conn, name, state)
+        await self._state(conn, name, state)
 
-    def callback_feedback(self, event_key: str) -> dict | None:
+    async def callback_feedback(self, event_key: str) -> dict | None:
         # Reserve once before touching VK; ephemeral acks are never retried.
         """Однократно зарезервировать краткое подтверждение сохранённого нажатия."""
-        with self.connect() as conn:
-            row = conn.execute(
-                r"""
+        async with self.connect() as conn:
+            row = await (
+                await conn.execute(
+                    r"""
                 SELECT
                   id,
                   payload
@@ -860,7 +908,8 @@ class QueueStore:
                 FOR
                 UPDATE
                 """,
-                (self.group_id, event_key),
+                    (self.group_id, event_key),
+                )
             ).fetchone()
             if not row:
                 return None
@@ -869,7 +918,7 @@ class QueueStore:
             if receipt.get("ack_reserved") or receipt.get("feedback", "skip") == "skip":
                 return None
             receipt["ack_reserved"] = True
-            conn.execute(
+            await conn.execute(
                 r"""
                 UPDATE bot_inbox SET payload = %s
                 WHERE
@@ -886,20 +935,20 @@ class QueueStore:
             raise ValueError("Invalid queue table")
         return table
 
-    def claim(self, table: str) -> dict | None:
+    async def claim(self, table: str) -> dict | None:
         """Взять доступное задание с арендой и учётом порядка пользователя."""
         table = self._table(table)
         now = time.time()
         owner = str(uuid.uuid4())
-        with self.connect() as conn:
+        async with self.connect() as conn:
             if (
                 self.max_pending_messages_per_peer is not None
                 or self.reply_interval_seconds
                 or self.message_rate_interval_seconds
             ):
-                self._queue_lock(conn)
+                await self._queue_lock(conn)
             if table == "bot_inbox":
-                conn.execute(
+                await conn.execute(
                     r"""
                     UPDATE bot_inbox i
                     SET
@@ -923,7 +972,7 @@ class QueueStore:
                     """,
                     (now, self.group_id),
                 )
-                conn.execute(
+                await conn.execute(
                     r"""
                     UPDATE bot_inbox
                     SET
@@ -937,8 +986,9 @@ class QueueStore:
                     (json.dumps({"type": "GeoRetryExpired"}), self.group_id, now),
                 )
             while True:
-                row = conn.execute(
-                    rf"""
+                row = await (
+                    await conn.execute(
+                        rf"""
                     SELECT
                       q.*
                     FROM
@@ -967,11 +1017,12 @@ class QueueStore:
                     LIMIT
                       1
                     """,
-                    (self.group_id, now, now),
+                        (self.group_id, now, now),
+                    )
                 ).fetchone()
                 if not row:
                     return None
-                removed = self._trim_pending(conn, row["peer_id"])
+                removed = await self._trim_pending(conn, row["peer_id"])
                 if row["id" if table == "bot_inbox" else "inbox_id"] in removed:
                     continue
                 if (
@@ -979,16 +1030,16 @@ class QueueStore:
                     and row["kind"] == "message_new"
                     and row["attempts"] == 0
                     and self.message_rate_interval_seconds
-                    and not self._claim_message_budget(conn, row, now)
+                    and not (await self._claim_message_budget(conn, row, now))
                 ):
                     # The delayed user's row is now in the future; immediately try another user.
                     continue
                 break
             now = time.time()
             if table == "bot_outbox" and self.reply_interval_seconds:
-                eligible = self._reply_gate(conn, row["peer_id"])
+                eligible = await self._reply_gate(conn, row["peer_id"])
                 if eligible > now:
-                    conn.execute(
+                    await conn.execute(
                         r"""
                         UPDATE bot_outbox
                         SET
@@ -1002,8 +1053,8 @@ class QueueStore:
                         (eligible, row["id"]),
                     )
                     return None
-                self._reserve_reply(conn, row["peer_id"], now)
-            conn.execute(
+                await self._reserve_reply(conn, row["peer_id"], now)
+            await conn.execute(
                 rf"""
                 UPDATE {table}
                 SET
@@ -1019,13 +1070,14 @@ class QueueStore:
             row.update(owner=owner, attempts=row["attempts"] + 1)
             return row
 
-    def renew(self, table: str, job: dict) -> bool:
+    async def renew(self, table: str, job: dict) -> bool:
         """Продлить ещё действующую аренду задания текущего worker."""
         table = self._table(table)
-        with self.connect() as conn:
+        async with self.connect() as conn:
             return bool(
-                conn.execute(
-                    rf"""
+                await (
+                    await conn.execute(
+                        rf"""
                 UPDATE {table}
                 SET lease_until = %s
                 WHERE
@@ -1035,21 +1087,22 @@ class QueueStore:
                   AND status = 'processing'
                 RETURNING id
                 """,
-                    (time.time() + self.lease_seconds, job["id"], self.group_id, job["owner"]),
+                        (time.time() + self.lease_seconds, job["id"], self.group_id, job["owner"]),
+                    )
                 ).fetchone()
             )
 
     @measured("outbox.persist")
-    def plan(self, job: dict, effects: list[dict], callback_at: float | None = None) -> None:
+    async def plan(self, job: dict, effects: list[dict], callback_at: float | None = None) -> None:
         """Атомарно сохранить эффекты, контекст и завершение входящего задания."""
-        with self.connect() as conn:
+        async with self.connect() as conn:
             if self.max_pending_messages_per_peer is not None or self.hint_interval_seconds:
-                self._queue_lock(conn)
-            self._owned(conn, "bot_inbox", job)
-            if job["kind"] == "geo_retry" and self._geo_superseded(conn, job["peer_id"], job["payload"]):
+                await self._queue_lock(conn)
+            await self._owned(conn, "bot_inbox", job)
+            if job["kind"] == "geo_retry" and (await self._geo_superseded(conn, job["peer_id"], job["payload"])):
                 effects = []
             if any(effect.get("automatic_code") for effect in effects):
-                conn.execute(
+                await conn.execute(
                     r"""
                     UPDATE bot_inbox
                     SET payload = jsonb_set(payload, '{_automatic_code}', 'true')
@@ -1059,7 +1112,11 @@ class QueueStore:
                     (job["id"],),
                 )
             for index, effect in enumerate(effects):
-                if effect.get("hint") and self.hint_interval_seconds and not self._allow_hint(conn, job, index, effect):
+                if (
+                    effect.get("hint")
+                    and self.hint_interval_seconds
+                    and not (await self._allow_hint(conn, job, index, effect))
+                ):
                     continue
                 if effect.get("defer_geo"):
                     retry = effect["defer_geo"]
@@ -1068,7 +1125,7 @@ class QueueStore:
                         _geo_source_id=job["id"],
                         _geo_deadline=time.time() + retry["max_age"],
                     )
-                    conn.execute(
+                    await conn.execute(
                         r"""
                         INSERT INTO bot_inbox (
                           group_id,
@@ -1097,8 +1154,8 @@ class QueueStore:
                     )
                 if effect.get("close_choices"):
                     cmid = int(effect["params"]["conversation_message_id"])
-                    self._state(conn, f"choices_closed:{job['peer_id']}:{cmid}", True)
-                conn.execute(
+                    await self._state(conn, f"choices_closed:{job['peer_id']}:{cmid}", True)
+                await conn.execute(
                     r"""
                     INSERT INTO bot_outbox (inbox_id, group_id, peer_id, effect_index, METHOD, params, context)
                     VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (
@@ -1116,8 +1173,8 @@ class QueueStore:
                     ),
                 )
             if callback_at is not None:
-                self._state(conn, f"callback:{job['peer_id']}", callback_at)
-            conn.execute(
+                await self._state(conn, f"callback:{job['peer_id']}", callback_at)
+            await conn.execute(
                 r"""
                 UPDATE bot_inbox
                 SET
@@ -1132,16 +1189,18 @@ class QueueStore:
                 (time.time(), job["id"]),
             )
             if not effects:
-                self._callback_completed(conn, job["peer_id"], job["id"])
-            self._observe(conn, job["id"])
-            self._trim_pending(conn, job["peer_id"])
+                await self._callback_completed(conn, job["peer_id"], job["id"])
+            await self._observe(conn, job["id"])
+            await self._trim_pending(conn, job["peer_id"])
 
-    def _geo_current(self, conn: psycopg.Connection[DictRow], peer: int, payload: dict) -> bool:
+    async def _geo_current(self, conn: psycopg.AsyncConnection[DictRow], peer: int, payload: dict) -> bool:
         """Проверить актуальность геозапроса внутри рабочей транзакции."""
         if time.time() >= payload["_geo_deadline"]:
             return False
-        return not conn.execute(
-            r"""
+        return not (
+            await (
+                await conn.execute(
+                    r"""
             SELECT
               1
             FROM
@@ -1154,19 +1213,22 @@ class QueueStore:
             LIMIT
               1
             """,
-            (self.group_id, peer, payload["_geo_source_id"]),
-        ).fetchone()
+                    (self.group_id, peer, payload["_geo_source_id"]),
+                )
+            ).fetchone()
+        )
 
-    def geo_retry_current(self, job: dict) -> bool:
+    async def geo_retry_current(self, job: dict) -> bool:
         """Проверить, не заменён ли отложенный геозапрос новым сообщением."""
-        with self.connect() as conn:
-            return self._geo_current(conn, job["peer_id"], job["payload"])
+        async with self.connect() as conn:
+            return await self._geo_current(conn, job["peer_id"], job["payload"])
 
-    def outbox_geo_current(self, job: dict) -> bool:
+    async def outbox_geo_current(self, job: dict) -> bool:
         """Не допустить доставку устаревшего ответа на геометку."""
-        with self.connect() as conn:
-            parent = conn.execute(
-                r"""
+        async with self.connect() as conn:
+            parent = await (
+                await conn.execute(
+                    r"""
                 SELECT
                   kind,
                   payload
@@ -1175,17 +1237,20 @@ class QueueStore:
                 WHERE
                   group_id = %s AND id = %s
                 """,
-                (self.group_id, job["inbox_id"]),
+                    (self.group_id, job["inbox_id"]),
+                )
             ).fetchone()
-            return parent["kind"] != "geo_retry" or not self._geo_superseded(conn, job["peer_id"], parent["payload"])
+            return parent["kind"] != "geo_retry" or not (
+                await self._geo_superseded(conn, job["peer_id"], parent["payload"])
+            )
 
-    def defer_geo_retry(self, job: dict, delay: float) -> None:
+    async def defer_geo_retry(self, job: dict, delay: float) -> None:
         """Сохранить ограниченный повтор геолокации без блокировки нового текста."""
-        with self.connect() as conn:
-            self._owned(conn, "bot_inbox", job)
-            current = self._geo_current(conn, job["peer_id"], job["payload"])
-            expired = not current and not self._geo_superseded(conn, job["peer_id"], job["payload"])
-            conn.execute(
+        async with self.connect() as conn:
+            await self._owned(conn, "bot_inbox", job)
+            current = await self._geo_current(conn, job["peer_id"], job["payload"])
+            expired = not current and not (await self._geo_superseded(conn, job["peer_id"], job["payload"]))
+            await conn.execute(
                 r"""
                 UPDATE bot_inbox
                 SET
@@ -1206,13 +1271,14 @@ class QueueStore:
                     job["id"],
                 ),
             )
-            self._observe(conn, job["id"])
+            await self._observe(conn, job["id"])
 
-    def _geo_superseded(self, conn: psycopg.Connection[DictRow], peer: int, payload: dict) -> bool:
+    async def _geo_superseded(self, conn: psycopg.AsyncConnection[DictRow], peer: int, payload: dict) -> bool:
         """Проверить замену геометки более новым пользовательским запросом."""
         return bool(
-            conn.execute(
-                r"""
+            await (
+                await conn.execute(
+                    r"""
             SELECT
               1
             FROM
@@ -1225,14 +1291,16 @@ class QueueStore:
             LIMIT
               1
             """,
-                (self.group_id, peer, payload["_geo_source_id"]),
+                    (self.group_id, peer, payload["_geo_source_id"]),
+                )
             ).fetchone()
         )
 
-    def _owned(self, conn: psycopg.Connection[DictRow], table: str, job: dict) -> None:
+    async def _owned(self, conn: psycopg.AsyncConnection[DictRow], table: str, job: dict) -> None:
         """Подтвердить владение действующей арендой и заблокировать строку задания."""
-        row = conn.execute(
-            rf"""
+        row = await (
+            await conn.execute(
+                rf"""
             SELECT
               id
             FROM
@@ -1246,16 +1314,17 @@ class QueueStore:
             FOR
             UPDATE
             """,
-            (job["id"], self.group_id, job["owner"], time.time()),
+                (job["id"], self.group_id, job["owner"], time.time()),
+            )
         ).fetchone()
         if not row:
             raise RuntimeError("Queue lease lost")
 
-    def save_result(self, job: dict, result: Any) -> None:
+    async def save_result(self, job: dict, result: Any) -> None:
         """Сохранить промежуточный результат за владельцем аренды."""
-        with self.connect() as conn:
-            self._owned(conn, "bot_outbox", job)
-            conn.execute(
+        async with self.connect() as conn:
+            await self._owned(conn, "bot_outbox", job)
+            await conn.execute(
                 r"""
                 UPDATE bot_outbox SET result = %s
                 WHERE
@@ -1265,20 +1334,20 @@ class QueueStore:
             )
 
     @measured("outbox.finish")
-    def finish(self, job: dict, context: tuple[int, dict] | None = None) -> None:
+    async def finish(self, job: dict, context: tuple[int, dict] | None = None) -> None:
         """Завершить арендованное задание и сохранить подтверждённый результат."""
-        with self.connect() as conn:
+        async with self.connect() as conn:
             if self.reply_interval_seconds:
-                self._queue_lock(conn)
-            self._owned(conn, "bot_outbox", job)
+                await self._queue_lock(conn)
+            await self._owned(conn, "bot_outbox", job)
             if context:
                 cmid, result = context
                 if result.get("_reopen_choices") is True:
                     result = dict(result)
                     result.pop("_reopen_choices")
                     if result.get("status") == "ambiguous" and result.get("candidates"):
-                        self._state(conn, f"choices_closed:{job['peer_id']}:{cmid}", False)
-                conn.execute(
+                        await self._state(conn, f"choices_closed:{job['peer_id']}:{cmid}", False)
+                await conn.execute(
                     r"""
                     INSERT INTO bot_message_context (group_id, peer_id, conversation_message_id, RESULT, updated_at)
                     VALUES (%s, %s, %s, %s, %s) ON CONFLICT (
@@ -1291,7 +1360,7 @@ class QueueStore:
                     """,
                     (self.group_id, job["peer_id"], cmid, Jsonb(result), time.time()),
                 )
-            conn.execute(
+            await conn.execute(
                 r"""
                 UPDATE bot_outbox
                 SET
@@ -1305,15 +1374,16 @@ class QueueStore:
                 """,
                 (time.time(), job["id"]),
             )
-            self._callback_completed(conn, job["peer_id"], job["inbox_id"])
-            self._reserve_reply(conn, job["peer_id"], time.time())
-            self._observe(conn, job["inbox_id"])
+            await self._callback_completed(conn, job["peer_id"], job["inbox_id"])
+            await self._reserve_reply(conn, job["peer_id"], time.time())
+            await self._observe(conn, job["inbox_id"])
 
-    def _callback_completed(self, conn: psycopg.Connection[DictRow], peer: int, inbox_id: int) -> None:
+    async def _callback_completed(self, conn: psycopg.AsyncConnection[DictRow], peer: int, inbox_id: int) -> None:
         """Обновить состояние ограничения после завершения канонического нажатия."""
         name = f"callback_gate:{peer}"
-        row = conn.execute(
-            r"""
+        row = await (
+            await conn.execute(
+                r"""
             SELECT
               value
             FROM
@@ -1322,12 +1392,14 @@ class QueueStore:
               group_id = %s AND name = %s
             FOR UPDATE
             """,
-            (self.group_id, name),
+                (self.group_id, name),
+            )
         ).fetchone()
         if not row or row["value"].get("canonical_id") != inbox_id:
             return
-        pending = conn.execute(
-            r"""
+        pending = await (
+            await conn.execute(
+                r"""
             SELECT
               1
             FROM
@@ -1341,21 +1413,23 @@ class QueueStore:
             LIMIT
               1
             """,
-            (inbox_id,),
+                (inbox_id,),
+            )
         ).fetchone()
         if not pending:
             state = row["value"]
             state["completed_at"] = time.time()
-            self._state(conn, name, state)
+            await self._state(conn, name, state)
 
-    def fail(self, table: str, job: dict, error: str, delay: float, permanent: bool = False) -> None:
+    async def fail(self, table: str, job: dict, error: str, delay: float, permanent: bool = False) -> None:
         """Сохранить ошибку и назначить повтор либо окончательный статус задания."""
         table = self._table(table)
-        with self.connect() as conn:
+        async with self.connect() as conn:
             if self.reply_interval_seconds:
-                self._queue_lock(conn)
-            changed = conn.execute(
-                rf"""
+                await self._queue_lock(conn)
+            changed = (
+                await conn.execute(
+                    rf"""
                 UPDATE {table}
                 SET
                   status = %s,
@@ -1369,24 +1443,26 @@ class QueueStore:
                   AND owner = %s
                   AND status = 'processing'
                 """,
-                (
-                    "failed" if permanent else "pending",
-                    time.time() + delay,
-                    error[:300],
-                    job["id"],
-                    self.group_id,
-                    job["owner"],
-                ),
+                    (
+                        "failed" if permanent else "pending",
+                        time.time() + delay,
+                        error[:300],
+                        job["id"],
+                        self.group_id,
+                        job["owner"],
+                    ),
+                )
             ).rowcount
             if changed and table == "bot_outbox":
-                self._reserve_reply(conn, job["peer_id"], time.time())
-            self._observe(conn, job["id"] if table == "bot_inbox" else job["inbox_id"])
+                await self._reserve_reply(conn, job["peer_id"], time.time())
+            await self._observe(conn, job["id"] if table == "bot_inbox" else job["inbox_id"])
 
-    def message_context(self, peer: int, cmid: int) -> dict | None:
+    async def message_context(self, peer: int, cmid: int) -> dict | None:
         """Прочитать сохранённый результат и навигацию сообщения."""
-        with self.connect() as conn:
-            row = conn.execute(
-                r"""
+        async with self.connect() as conn:
+            row = await (
+                await conn.execute(
+                    r"""
                 SELECT
                   RESULT
                 FROM
@@ -1396,19 +1472,21 @@ class QueueStore:
                   AND peer_id = %s
                   AND conversation_message_id = %s
                 """,
-                (self.group_id, peer, cmid),
+                    (self.group_id, peer, cmid),
+                )
             ).fetchone()
             return row["result"] if row else None
 
-    def choices_closed(self, peer: int, cmid: int) -> bool:
+    async def choices_closed(self, peer: int, cmid: int) -> bool:
         """Проверить, закрыт ли список адресов данного сообщения."""
-        return self.get_state(f"choices_closed:{peer}:{cmid}", False) is True
+        return (await self.get_state(f"choices_closed:{peer}:{cmid}", False)) is True
 
-    def consume_fault(self, name: str) -> bool:
+    async def consume_fault(self, name: str) -> bool:
         """Израсходовать одно разрешённое dev-срабатывание подстановки отказа."""
-        with self.connect() as conn:
-            row = conn.execute(
-                r"""
+        async with self.connect() as conn:
+            row = await (
+                await conn.execute(
+                    r"""
                 SELECT
                   value
                 FROM
@@ -1417,22 +1495,24 @@ class QueueStore:
                   group_id = %s AND name = %s
                 FOR UPDATE
                 """,
-                (self.group_id, "fault:" + name),
+                    (self.group_id, "fault:" + name),
+                )
             ).fetchone()
             if not row or not row["value"]:
                 return False
             count = int(row["value"])
             if count > 0:
-                self._state(conn, "fault:" + name, count - 1)
+                await self._state(conn, "fault:" + name, count - 1)
             return True
 
-    def stats(self) -> dict:
+    async def stats(self) -> dict:
         """Собрать количества заданий по состояниям текущего сообщества."""
         result = {}
-        with self.connect() as conn:
+        async with self.connect() as conn:
             for table in ("bot_inbox", "bot_outbox"):
-                result[table] = conn.execute(
-                    rf"""
+                result[table] = await (
+                    await conn.execute(
+                        rf"""
                     SELECT
                       status,
                       count(*) AS COUNT
@@ -1443,15 +1523,16 @@ class QueueStore:
                     GROUP BY
                       status
                     """,
-                    (self.group_id,),
+                        (self.group_id,),
+                    )
                 ).fetchall()
-            result["last_reconciliation"] = self.get_state("reconcile_watermark")
+            result["last_reconciliation"] = await self.get_state("reconcile_watermark")
         return result
 
-    def retry_failed(self, geo_max_age: float = 1800) -> None:
+    async def retry_failed(self, geo_max_age: float = 1800) -> None:
         """Вернуть допустимые ошибочные задания в очередь для ручного повтора."""
-        with self.connect() as conn:
-            conn.execute(
+        async with self.connect() as conn:
+            await conn.execute(
                 r"""
                 UPDATE bot_inbox
                 SET payload = jsonb_set(payload, '{_geo_deadline}', %s)
@@ -1463,7 +1544,7 @@ class QueueStore:
                 (Jsonb(time.time() + geo_max_age), self.group_id),
             )
             for table in ("bot_inbox", "bot_outbox"):
-                conn.execute(
+                await conn.execute(
                     rf"""
                     UPDATE {table}
                     SET

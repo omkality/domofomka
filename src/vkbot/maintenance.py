@@ -5,21 +5,22 @@ import time
 from src.vkbot.queue import QueueStore
 
 
-def compact(store: QueueStore, retention_seconds: float, context_seconds: float, batch: int) -> dict:
+async def compact(store: QueueStore, retention_seconds: float, context_seconds: float, batch: int) -> dict:
     """Удалить допустимые завершённые записи, сохраняя активную работу и дедупликацию."""
     if retention_seconds <= 0 or context_seconds <= 0 or not 1 <= batch <= 10000:
         raise ValueError("Invalid maintenance limits")
     now = time.time()
-    with store.connect() as db:
-        db.execute(
+    async with store.connect() as db:
+        await db.execute(
             r"""
             SELECT
               pg_advisory_xact_lock(20261106, %s)
             """,
             (store.group_id,),
         )
-        rows = db.execute(
-            r"""
+        rows = await (
+            await db.execute(
+                r"""
             SELECT
               i.id,
               i.event_key,
@@ -50,25 +51,28 @@ def compact(store: QueueStore, retention_seconds: float, context_seconds: float,
             LIMIT
               %s
             """,
-            (store.group_id, now - retention_seconds, now - retention_seconds, batch),
+                (store.group_id, now - retention_seconds, now - retention_seconds, batch),
+            )
         ).fetchall()
         ids = [r["id"] for r in rows]
         for row in rows:
-            db.execute(
+            await db.execute(
                 r"""
                 INSERT INTO bot_receipts VALUES (%s, %s) ON CONFLICT DO NOTHING
                 """,
                 (store.group_id, row["event_key"]),
             )
-        outgoing = db.execute(
-            r"""
+        outgoing = (
+            await db.execute(
+                r"""
             DELETE FROM bot_outbox
             WHERE
               group_id = %s AND inbox_id = any(%s)
             """,
-            (store.group_id, ids),
+                (store.group_id, ids),
+            )
         ).rowcount
-        db.execute(
+        await db.execute(
             r"""
             DELETE FROM bot_inbox
             WHERE
@@ -77,7 +81,7 @@ def compact(store: QueueStore, retention_seconds: float, context_seconds: float,
             (store.group_id, ids),
         )
         for peer in {row["peer_id"] for row in rows}:
-            db.execute(
+            await db.execute(
                 r"""
                 DELETE
                 FROM bot_state AS s
@@ -108,10 +112,17 @@ def compact(store: QueueStore, retention_seconds: float, context_seconds: float,
                       AND status <> 'done'
                   )
                 """,
-                (store.group_id, [f"message_rate:{peer}", f"message_hint:{peer}"], now - context_seconds, peer, peer),
+                (
+                    store.group_id,
+                    [f"message_rate:{peer}", f"message_hint:{peer}"],
+                    now - context_seconds,
+                    peer,
+                    peer,
+                ),
             )
-        contexts = db.execute(
-            r"""
+        contexts = await (
+            await db.execute(
+                r"""
             WITH expired AS (
               SELECT
                 c.group_id,
@@ -162,10 +173,11 @@ def compact(store: QueueStore, retention_seconds: float, context_seconds: float,
               c.peer_id,
               c.conversation_message_id
             """,
-            (store.group_id, now - context_seconds, batch),
+                (store.group_id, now - context_seconds, batch),
+            )
         ).fetchall()
         for c in contexts:
-            db.execute(
+            await db.execute(
                 r"""
                 DELETE FROM bot_state
                 WHERE
@@ -176,19 +188,20 @@ def compact(store: QueueStore, retention_seconds: float, context_seconds: float,
     return {"inbox_removed": len(ids), "outbox_removed": outgoing, "contexts_removed": len(contexts)}
 
 
-def health(store: QueueStore) -> dict:
+async def health(store: QueueStore) -> dict:
     """Собрать состояние очереди, возраст задач и доступные ресурсы."""
     now = time.time()
-    with store.connect() as db:
-        size = db.execute(r"""
+    async with store.connect() as db:
+        size = (await (await db.execute(r"""
             SELECT
               pg_database_size(current_database()) AS bytes
-            """).fetchone()["bytes"]
+            """)).fetchone())["bytes"]
         result = {"database_bytes": size, "queues": {}}
         for table in ("bot_inbox", "bot_outbox"):
             column = "created_at" if table == "bot_inbox" else "(SELECT created_at FROM bot_inbox WHERE id=q.inbox_id)"
-            rows = db.execute(
-                rf"""
+            rows = await (
+                await db.execute(
+                    rf"""
                 SELECT
                   status,
                   count(*) AS COUNT,
@@ -200,7 +213,8 @@ def health(store: QueueStore) -> dict:
                 GROUP BY
                   status
                 """,
-                (store.group_id,),
+                    (store.group_id,),
+                )
             ).fetchall()
             result["queues"][table] = [
                 {
@@ -210,8 +224,10 @@ def health(store: QueueStore) -> dict:
                 }
                 for r in rows
             ]
-        result["receipt_count"] = db.execute(
-            r"""
+        result["receipt_count"] = (
+            await (
+                await db.execute(
+                    r"""
             SELECT
               count(*) AS n
             FROM
@@ -219,6 +235,8 @@ def health(store: QueueStore) -> dict:
             WHERE
               group_id = %s
             """,
-            (store.group_id,),
-        ).fetchone()["n"]
+                    (store.group_id,),
+                )
+            ).fetchone()
+        )["n"]
     return result

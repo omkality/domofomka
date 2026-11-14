@@ -4,6 +4,8 @@ import ssl
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -11,7 +13,7 @@ import pytest
 from src.code_service.services.geocoding import DadataClient, DadataUnavailable
 from src.infrastructure.network import tls_context
 from src.infrastructure.proxy import proxy_health
-from src.vkbot.processor import Processor
+from src.vkbot.processor import Processor, RateGate
 
 
 @pytest.fixture
@@ -52,20 +54,35 @@ class SlowBody(httpx.AsyncByteStream):
         self.closed = True
 
 
-def test_internal_lookup_deadline_includes_response_body_and_closes_client(clients):
+@pytest.mark.asyncio
+async def test_internal_lookup_deadline_closes_body_and_reuses_client_until_shutdown(clients):
     body = SlowBody()
-    configurations = clients(lambda request: httpx.Response(200, stream=body))
-    processor = object.__new__(Processor)
-    started = time.monotonic()
-    with pytest.raises(TimeoutError):
-        processor._get("http://internal.test/lookup", timeout=0.03)
-    assert time.monotonic() - started < 0.5
-    assert body.closed
-    assert configurations[0]["trust_env"] is False
-    assert configurations[0]["timeout"].connect <= 0.03
+    timeouts = []
+
+    def handler(request):
+        timeouts.append(request.extensions["timeout"]["connect"])
+        return httpx.Response(200, stream=body) if len(timeouts) == 1 else httpx.Response(200, json={"ready": True})
+
+    configurations = clients(handler)
+    processor = Processor(SimpleNamespace(vk_group_token="unused"), MagicMock(), RateGate(0))
+    try:
+        started = time.monotonic()
+        with pytest.raises(TimeoutError):
+            await processor._get("http://internal.test/lookup", timeout=0.03)
+        assert time.monotonic() - started < 0.5
+        assert body.closed
+        assert not processor.client.is_closed
+        assert (await processor._get("http://internal.test/lookup")).json() == {"ready": True}
+        assert len(configurations) == 1
+        assert configurations[0]["trust_env"] is False
+        assert timeouts[0] <= 0.03
+    finally:
+        await processor.close()
+    assert processor.client.is_closed
 
 
-def test_internal_query_is_encoded_and_retains_special_characters(clients):
+@pytest.mark.asyncio
+async def test_internal_query_is_encoded_and_retains_special_characters(clients):
     received = []
 
     def handler(request):
@@ -73,9 +90,12 @@ def test_internal_query_is_encoded_and_retains_special_characters(clients):
         return httpx.Response(200, json={"status": "found"})
 
     clients(handler)
-    processor = object.__new__(Processor)
+    processor = Processor(SimpleNamespace(vk_group_token="unused"), MagicMock(), RateGate(0))
     query = "Москва, Перерва 62к1 & корпус=1"
-    assert processor._get("http://internal.test/lookup", {"message": query}).json() == {"status": "found"}
+    try:
+        assert (await processor._get("http://internal.test/lookup", {"message": query})).json() == {"status": "found"}
+    finally:
+        await processor.close()
     assert received == [query]
 
 

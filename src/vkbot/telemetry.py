@@ -9,15 +9,15 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
-from src.infrastructure.database.schema import require_schema
+from src.infrastructure.database.schema import require_schema_async
 from src.infrastructure.telemetry import settings
 
 logger = logging.getLogger(__name__)
 
 
-def verify_schema(conn: Any) -> None:
+async def verify_schema(conn: Any) -> None:
     """Проверить наличие миграции аналитики до её включения, не исполняя DDL."""
-    require_schema(conn, telemetry=True)
+    await require_schema_async(conn, telemetry=True)
 
 
 def identity(group: int, inbox: int) -> str:
@@ -25,20 +25,20 @@ def identity(group: int, inbox: int) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"domofomka:{group}:inbox:{inbox}"))
 
 
-def guarded(conn: Any, operation: Callable) -> None:
+async def guarded(conn: Any, operation: Callable) -> None:
     """SAVEPOINT не даёт сбою аналитики отменить транзакцию рабочей очереди."""
     try:
-        with conn.transaction():
-            previous = conn.execute("SHOW statement_timeout").fetchone()["statement_timeout"]
-            conn.execute(
+        async with conn.transaction():
+            previous = (await (await conn.execute("SHOW statement_timeout")).fetchone())["statement_timeout"]
+            await conn.execute(
                 r"""
                 SELECT
                   set_config('statement_timeout', %s, true)
                 """,
                 (str(settings.telemetry_db_timeout_ms),),
             )
-            operation()
-            conn.execute(
+            await operation()
+            await conn.execute(
                 r"""
                 SELECT
                   set_config('statement_timeout', %s, true)
@@ -49,25 +49,30 @@ def guarded(conn: Any, operation: Callable) -> None:
         logger.warning("Telemetry incomplete error=%s", type(exc).__name__)
 
 
-def storage_bytes(conn: Any) -> int:
+async def storage_bytes(conn: Any) -> int:
     """Измерить физический объём таблиц диагностики и их индексов."""
-    return conn.execute(
-        r"""
+    return (
+        await (
+            await conn.execute(
+                r"""
         SELECT
           sum(pg_total_relation_size(t::regclass)) AS n
         FROM
           unnest(%s::text[]) AS t
         """,
-        (["request_log", "request_spans", "search_runs", "network_attempts"],),
-    ).fetchone()["n"]
+                (["request_log", "request_spans", "search_runs", "network_attempts"],),
+            )
+        ).fetchone()
+    )["n"]
 
 
-def register(conn: Any, group: int, inbox: int, environment: str) -> bool:
+async def register(conn: Any, group: int, inbox: int, environment: str) -> bool:
     """Создать диагностическую запись для существующего входящего задания."""
-    if conn.execute("SELECT 1 FROM request_log WHERE id=%s", (identity(group, inbox),)).fetchone():
+    if await (await conn.execute("SELECT 1 FROM request_log WHERE id=%s", (identity(group, inbox),))).fetchone():
         return True
-    row = conn.execute(
-        r"""
+    row = await (
+        await conn.execute(
+            r"""
         SELECT
           *
         FROM
@@ -75,21 +80,22 @@ def register(conn: Any, group: int, inbox: int, environment: str) -> bool:
         WHERE
           group_id = %s AND id = %s
         """,
-        (group, inbox),
+            (group, inbox),
+        )
     ).fetchone()
     if not row:
         return False
     message = row["payload"].get("message", {})
     text = message.get("text")
     charge = 2048 + len((text or "")[: settings.telemetry_query_max_chars].encode())
-    if not make_room(conn, group, charge, identity(group, inbox)):
-        dropped(conn, group)
+    if not (await make_room(conn, group, charge, identity(group, inbox))):
+        await dropped(conn, group)
         return False
     parent = row["payload"].get("_geo_source_id")
     source = "internal" if row["kind"] == "geo_retry" else row["payload"].get("_event_source", "unknown")
     # A deterministic pseudonym, not anonymisation. The database remains private.
     user = hashlib.sha256(f"{group}:{row['peer_id']}".encode()).hexdigest()
-    conn.execute(
+    await conn.execute(
         r"""
         INSERT INTO request_log (
           id,
@@ -148,10 +154,12 @@ def register(conn: Any, group: int, inbox: int, environment: str) -> bool:
     return True
 
 
-def budget_used(conn: Any, group: int) -> int:
+async def budget_used(conn: Any, group: int) -> int:
     """Подсчитать начисленный объём диагностики сообщества."""
-    return conn.execute(
-        r"""
+    return (
+        await (
+            await conn.execute(
+                r"""
         SELECT
           coalesce(sum(recorded_bytes), 0) AS n
         FROM
@@ -159,13 +167,15 @@ def budget_used(conn: Any, group: int) -> int:
         WHERE
           group_id = %s
         """,
-        (group,),
-    ).fetchone()["n"]
+                (group,),
+            )
+        ).fetchone()
+    )["n"]
 
 
-def make_room(conn: Any, group: int, charge: int, exclude: uuid.UUID | None = None) -> bool:
+async def make_room(conn: Any, group: int, charge: int, exclude: uuid.UUID | None = None) -> bool:
     """Освободить только необходимую часть старой диагностики завершённых задач."""
-    conn.execute(
+    await conn.execute(
         r"""
         SELECT
           pg_advisory_xact_lock(20261107, %s)
@@ -174,11 +184,12 @@ def make_room(conn: Any, group: int, charge: int, exclude: uuid.UUID | None = No
     )
     if charge > settings.telemetry_max_storage_bytes:
         return False
-    needed = budget_used(conn, group) + charge - settings.telemetry_max_storage_bytes
+    needed = (await budget_used(conn, group)) + charge - settings.telemetry_max_storage_bytes
     if needed <= 0:
         return True
-    rows = conn.execute(
-        r"""
+    rows = await (
+        await conn.execute(
+            r"""
         SELECT
           r.id,
           r.recorded_bytes
@@ -218,7 +229,8 @@ def make_room(conn: Any, group: int, charge: int, exclude: uuid.UUID | None = No
         FOR
         UPDATE OF r SKIP LOCKED
         """,
-        (group, exclude, settings.telemetry_eviction_batch),
+            (group, exclude, settings.telemetry_eviction_batch),
+        )
     ).fetchall()
     selected = []
     for row in rows:
@@ -227,7 +239,7 @@ def make_room(conn: Any, group: int, charge: int, exclude: uuid.UUID | None = No
         if needed <= 0:
             break
     if selected:
-        conn.execute(
+        await conn.execute(
             r"""
             DELETE FROM request_log
             WHERE
@@ -238,10 +250,10 @@ def make_room(conn: Any, group: int, charge: int, exclude: uuid.UUID | None = No
     return needed <= 0
 
 
-def dropped(conn: Any, group: int) -> None:
+async def dropped(conn: Any, group: int) -> None:
     """Отметить пропуск части измерений из-за ограничения бюджета."""
     logger.warning("Telemetry storage budget reached; diagnostic records skipped")
-    conn.execute(
+    await conn.execute(
         r"""
         INSERT INTO bot_state
         VALUES (%s, 'telemetry_dropped', '1'::JSONB) ON CONFLICT (group_id, name) DO
@@ -252,10 +264,11 @@ def dropped(conn: Any, group: int) -> None:
     )
 
 
-def refresh(conn: Any, group: int, inbox: int) -> None:
+async def refresh(conn: Any, group: int, inbox: int) -> None:
     """Обновить диагностическую сводку по фактическому состоянию очереди."""
-    row = conn.execute(
-        r"""
+    row = await (
+        await conn.execute(
+            r"""
         SELECT
           status,
           last_error,
@@ -268,12 +281,14 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
           group_id = %s
           AND id = %s
         """,
-        (group, inbox),
+            (group, inbox),
+        )
     ).fetchone()
     if not row:
         return
-    effects = conn.execute(
-        r"""
+    effects = await (
+        await conn.execute(
+            r"""
         SELECT
           id,
           METHOD,
@@ -289,14 +304,16 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
         ORDER BY
           id
         """,
-        (group, inbox),
+            (group, inbox),
+        )
     ).fetchall()
     receipt = row["payload"].get("_queue_receipt", {})
     action = row["payload"].get("payload", {})
     if isinstance(action, str):
         action = json.loads(action)
-    existing = conn.execute(
-        r"""
+    existing = await (
+        await conn.execute(
+            r"""
         SELECT
           outcome
         FROM
@@ -304,7 +321,8 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
         WHERE
           id = %s
         """,
-        (identity(group, inbox),),
+            (identity(group, inbox),),
+        )
     ).fetchone()
     skipped = (existing or {}).get("outcome", {}).get("skipped_outbox_ids", [])
     disposition = row["payload"].get("_queue_disposition")
@@ -344,8 +362,9 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
             for e in effects[:100]
         ],
     }
-    child = conn.execute(
-        r"""
+    child = await (
+        await conn.execute(
+            r"""
         SELECT
           status,
           id
@@ -354,12 +373,14 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
         WHERE
           group_id = %s AND event_key = %s
         """,
-        (group, "geo-retry:" + row["event_key"]),
+            (group, "geo-retry:" + row["event_key"]),
+        )
     ).fetchone()
     if child:
         state.update(geo_retry_request_id=identity(group, child["id"]), geo_retry_status=child["status"])
-    started = conn.execute(
-        r"""
+    started = await (
+        await conn.execute(
+            r"""
         SELECT
           extract(
             EPOCH
@@ -378,7 +399,8 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
         WHERE
           r.id = %s
         """,
-        (identity(group, inbox),),
+            (identity(group, inbox),),
+        )
     ).fetchone()
     if started and started["t"]:
         state["processing_delay_ms"] = max(0, (float(started["t"]) - float(started["received"])) * 1000)
@@ -393,7 +415,7 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
     if disposition:
         state["delivery_status"] = "cancelled"
     if receipt.get("throttled"):
-        conn.execute(
+        await conn.execute(
             r"""
             UPDATE request_log SET telemetry_state = 'not_applicable'
             WHERE
@@ -401,7 +423,7 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
             """,
             (identity(group, inbox),),
         )
-    conn.execute(
+    await conn.execute(
         r"""
         UPDATE request_log
         SET
@@ -414,15 +436,15 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
     )
 
 
-def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -> None:
+async def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -> None:
     """Сохранить ограниченный пакет этапов попытки без отмены рабочей транзакции."""
     inbox = job["id"] if queue == "bot_inbox" else job["inbox_id"]
-    with store.connect() as conn:
+    async with store.connect() as conn:
 
-        def write() -> None:
+        async def write() -> None:
             # Bound concurrent writers and charge a conservative live-data budget.
             """Записать подготовленное содержимое с сохранением границ текущей операции."""
-            conn.execute(
+            await conn.execute(
                 r"""
                 SELECT
                   pg_advisory_xact_lock(20261107, %s)
@@ -430,12 +452,12 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                 (store.group_id,),
             )
             charge = len(json.dumps(packet, ensure_ascii=False).encode()) + 2048 * len(packet["spans"])
-            if not register(conn, store.group_id, inbox, environment):
+            if not (await register(conn, store.group_id, inbox, environment)):
                 return
             rid = identity(store.group_id, inbox)
-            if not make_room(conn, store.group_id, charge, rid):
-                dropped(conn, store.group_id)
-                conn.execute(
+            if not (await make_room(conn, store.group_id, charge, rid)):
+                await dropped(conn, store.group_id)
+                await conn.execute(
                     r"""
                     UPDATE request_log SET telemetry_state = 'partial'
                     WHERE
@@ -499,8 +521,8 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                             Jsonb(attrs),
                         ),
                     )
-            with conn.cursor() as cursor:
-                cursor.executemany(
+            async with conn.cursor() as cursor:
+                await cursor.executemany(
                     r"""
                     INSERT INTO request_spans (
                       id,
@@ -540,7 +562,7 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                     spans,
                 )
                 if searches:
-                    cursor.executemany(
+                    await cursor.executemany(
                         r"""
                         INSERT INTO search_runs
                         VALUES (
@@ -550,7 +572,7 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                         searches,
                     )
                 if attempts:
-                    cursor.executemany(
+                    await cursor.executemany(
                         r"""
                         INSERT INTO network_attempts
                         VALUES (
@@ -561,7 +583,7 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                     )
             notes = packet["notes"]
             if queue == "bot_outbox" and notes.get("decision") == "delivery_obsolete":
-                conn.execute(
+                await conn.execute(
                     r"""
                     UPDATE request_log
                     SET
@@ -578,7 +600,7 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                     """,
                     (Jsonb([job["id"]]), rid),
                 )
-            conn.execute(
+            await conn.execute(
                 r"""
                 UPDATE request_log
                 SET
@@ -600,7 +622,7 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                 ),
             )
             if notes.get("parent_request_id"):
-                conn.execute(
+                await conn.execute(
                     r"""
                     UPDATE request_log SET parent_request_id = %s
                     WHERE
@@ -608,25 +630,26 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                     """,
                     (notes["parent_request_id"], rid),
                 )
-            refresh(conn, store.group_id, inbox)
+            await refresh(conn, store.group_id, inbox)
 
-        guarded(conn, write)
+        await guarded(conn, write)
 
 
-def maintain(store: Any, batch: int) -> dict:
+async def maintain(store: Any, batch: int) -> dict:
     """Освободить избыточную диагностику и обновить незавершённые сводки."""
-    with store.connect() as conn:
-        conn.execute(
+    async with store.connect() as conn:
+        await conn.execute(
             r"""
             SELECT
               pg_advisory_xact_lock(20261107, %s)
             """,
             (store.group_id,),
         )
-        size = storage_bytes(conn)
+        size = await storage_bytes(conn)
         # Refresh terminal transitions made without a worker (expiry, superseding).
-        changed = conn.execute(
-            r"""
+        changed = await (
+            await conn.execute(
+                r"""
             SELECT
               r.inbox_id
             FROM
@@ -677,11 +700,12 @@ def maintain(store: Any, batch: int) -> dict:
             LIMIT
               %s
             """,
-            (store.group_id, batch),
+                (store.group_id, batch),
+            )
         ).fetchall()
         for row in changed:
-            refresh(conn, store.group_id, row["inbox_id"])
-            conn.execute(
+            await refresh(conn, store.group_id, row["inbox_id"])
+            await conn.execute(
                 r"""
                 UPDATE request_log SET telemetry_state = 'partial'
                 WHERE
@@ -691,8 +715,10 @@ def maintain(store: Any, batch: int) -> dict:
             )
         # Enforce a changed budget even when no new diagnostics arrive. Age alone
         # never removes history. Share the write-path eviction policy and lock.
-        before = conn.execute(
-            r"""
+        before = (
+            await (
+                await conn.execute(
+                    r"""
             SELECT
               count(*) AS n
             FROM
@@ -700,13 +726,17 @@ def maintain(store: Any, batch: int) -> dict:
             WHERE
               group_id = %s
             """,
-            (store.group_id,),
-        ).fetchone()["n"]
-        make_room(conn, store.group_id, 0)
+                    (store.group_id,),
+                )
+            ).fetchone()
+        )["n"]
+        await make_room(conn, store.group_id, 0)
         deleted = (
             before
-            - conn.execute(
-                r"""
+            - (
+                await (
+                    await conn.execute(
+                        r"""
             SELECT
               count(*) AS n
             FROM
@@ -714,17 +744,21 @@ def maintain(store: Any, batch: int) -> dict:
             WHERE
               group_id = %s
             """,
-                (store.group_id,),
-            ).fetchone()["n"]
+                        (store.group_id,),
+                    )
+                ).fetchone()
+            )["n"]
         )
         return {
             "bytes": size,
             "requests_removed": deleted,
-            "estimated_live_bytes": budget_used(conn, store.group_id),
-            "budget_reached": budget_used(conn, store.group_id) >= settings.telemetry_max_storage_bytes,
+            "estimated_live_bytes": (await budget_used(conn, store.group_id)),
+            "budget_reached": (await budget_used(conn, store.group_id)) >= settings.telemetry_max_storage_bytes,
             "dropped_batches": (
-                conn.execute(
-                    r"""
+                (
+                    await (
+                        await conn.execute(
+                            r"""
             SELECT
               value
             FROM
@@ -733,19 +767,22 @@ def maintain(store: Any, batch: int) -> dict:
               group_id = %s
               AND name = 'telemetry_dropped'
             """,
-                    (store.group_id,),
-                ).fetchone()
+                            (store.group_id,),
+                        )
+                    ).fetchone()
+                )
                 or {}
             ).get("value", 0),
         }
 
 
-def report(store: Any) -> dict:
+async def report(store: Any) -> dict:
     """Только агрегаты; текст запросов и идентификаторы пользователей не выводятся."""
-    with store.connect() as conn:
+    async with store.connect() as conn:
         params = (store.group_id,)
-        requests = conn.execute(
-            r"""
+        requests = await (
+            await conn.execute(
+                r"""
             SELECT
               telemetry_state,
               count(*) AS COUNT
@@ -756,10 +793,12 @@ def report(store: Any) -> dict:
             GROUP BY
               telemetry_state
             """,
-            params,
+                params,
+            )
         ).fetchall()
-        searches = conn.execute(
-            r"""
+        searches = await (
+            await conn.execute(
+                r"""
             SELECT
               s.engine,
               s.result,
@@ -784,10 +823,12 @@ def report(store: Any) -> dict:
               s.engine,
               s.result
             """,
-            params,
+                params,
+            )
         ).fetchall()
-        routes = conn.execute(
-            r"""
+        routes = await (
+            await conn.execute(
+                r"""
             SELECT
               n.target,
               n.operation,
@@ -815,14 +856,15 @@ def report(store: Any) -> dict:
               n.route_reason,
               p.status
             """,
-            params,
+                params,
+            )
         ).fetchall()
         return {
             "schema_version": 1,
             "requests": requests,
             "searches": searches,
             "network": routes,
-            "physical_bytes": storage_bytes(conn),
-            "estimated_live_bytes": budget_used(conn, store.group_id),
+            "physical_bytes": (await storage_bytes(conn)),
+            "estimated_live_bytes": (await budget_used(conn, store.group_id)),
             "budget_bytes": settings.telemetry_max_storage_bytes,
         }

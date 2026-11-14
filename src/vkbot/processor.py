@@ -10,7 +10,7 @@ from vk_api import VkApi
 
 from src.infrastructure.network import network_settings, tls_context
 from src.infrastructure.telemetry import active, measured, merge, note, search_result, span
-from src.vkbot.http import RateGate, RateSession
+from src.vkbot.http import RateGate, RateSession, call_vk
 from src.vkbot.keyboard import (
     INLINE_BUTTON_LIMIT,
     get_location_keyboard,
@@ -39,51 +39,44 @@ class Processor:
         self.settings = settings
         self.store = store
         self.vk = VkApi(token=settings.vk_group_token, api_version="5.199", session=RateSession(gate)).get_api()
+        self.client = httpx.AsyncClient(
+            verify=tls_context(), trust_env=False, limits=httpx.Limits(max_connections=1, max_keepalive_connections=1)
+        )
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Закрыть открытые соединения и ресурсы компонента."""
+        await self.client.aclose()
         self.vk._vk.http.close()
 
-    def _get(self, url: str, params: dict | None = None, *, timeout: float | None = None) -> httpx.Response:
+    async def _get(self, url: str, params: dict | None = None, *, timeout: float | None = None) -> httpx.Response:
         """Вызвать внутренний API с общим дедлайном, включая чтение тела."""
         total = timeout if timeout is not None else network_settings.internal_api_timeout_seconds
 
-        async def request() -> httpx.Response:
-            """Выполнить ограниченный HTTP-запрос с выбранным сетевым бюджетом."""
-            async with (
-                asyncio.timeout(total),
-                httpx.AsyncClient(
-                    verify=tls_context(),
-                    trust_env=False,
-                    timeout=httpx.Timeout(
-                        total, connect=min(network_settings.internal_api_connect_timeout_seconds, total)
-                    ),
-                ) as client,
-            ):
-                return await client.get(url, params=params)
+        async with asyncio.timeout(total):
+            return await self.client.get(
+                url,
+                params=params,
+                timeout=httpx.Timeout(total, connect=min(network_settings.internal_api_connect_timeout_seconds, total)),
+            )
 
-        # Планирование выполняется в рабочем потоке. Один бюджет включает получение тела,
-        # а клиент закрывается до завершения его цикла событий.
-        return asyncio.run(request())
-
-    def fault(self, name: str) -> None:
+    async def fault(self, name: str) -> None:
         """Применить разрешённую dev-подстановку ошибки к текущему сценарию."""
-        if self.settings.dev_faults_enabled and self.store.consume_fault(name):
+        if self.settings.dev_faults_enabled and (await self.store.consume_fault(name)):
             raise TimeoutError("Injected dev failure")
 
     @measured("api.lookup")
-    def lookup(self, message: str | None = None, geo: dict | None = None) -> dict:
+    async def lookup(self, message: str | None = None, geo: dict | None = None) -> dict:
         """Получить результат внутреннего поиска с ограниченным сетевым бюджетом."""
         if message and len(message) > getattr(self.settings, "search_max_query_length", 500):
             return {"status": "invalid_query", "data": {}, "engine": "v2"}
         version = getattr(self.settings, "search_api_version", "v1")
         url = f"http://{self.settings.domofomka_api_host}:{self.settings.domofomka_api_port}/api/{version}/codes"
         try:
-            self.fault("api")
+            await self.fault("api")
             params = {"lat": geo["latitude"], "lon": geo["longitude"]} if geo else {"message": message or ""}
             if active():
                 params["observe"] = "true"
-            response = self._get(
+            response = await self._get(
                 url + ("/geo" if geo else "/msg"),
                 params,
                 timeout=network_settings.internal_api_geo_timeout_seconds if geo else None,
@@ -112,20 +105,20 @@ class Processor:
         except (httpx.HTTPError, TimeoutError):
             raise LookupUnavailable("Lookup API is temporarily unavailable") from None
 
-    def plan(self, job: dict) -> None:
+    async def plan(self, job: dict) -> None:
         """Подготовить постоянные эффекты входящего события без немедленной отправки."""
         if job["kind"] in {"message_new", "geo_retry"}:
-            self._message(job)
+            await self._message(job)
         elif job["kind"] == "message_event":
-            self._callback(job)
+            await self._callback(job)
         else:
             raise ValueError("Unsupported inbox event")
 
-    def _message(self, job: dict) -> None:
+    async def _message(self, job: dict) -> None:
         """Подготовить ответ на входящее сообщение, не отправляя его в VK."""
-        if job["kind"] == "geo_retry" and self.store.geo_retry_current(job) is False:
+        if job["kind"] == "geo_retry" and (await self.store.geo_retry_current(job)) is False:
             note(decision="geo_obsolete_or_expired")
-            self.store.defer_geo_retry(job, self.settings.geo_retry_delay_seconds)
+            await self.store.defer_geo_retry(job, self.settings.geo_retry_delay_seconds)
             return
         message = job["payload"]["message"]
         peer = job["peer_id"]
@@ -145,7 +138,7 @@ class Processor:
                     ),
                 }
             )
-        elif not self.vk.groups.isMember(group_id=self.settings.vk_group_id, user_id=peer):
+        elif not (await call_vk(self.vk.groups.isMember, group_id=self.settings.vk_group_id, user_id=peer)):
             note(decision="subscription_required")
             effects.append(
                 {
@@ -156,7 +149,7 @@ class Processor:
         else:
             geo = message.get("geo", {}).get("coordinates")
             try:
-                result = self.lookup(message.get("text"), geo)
+                result = await self.lookup(message.get("text"), geo)
                 note(result=search_result(result))
                 if active():
                     from src.vkbot.telemetry import identity
@@ -167,10 +160,10 @@ class Processor:
                     raise
                 if job["kind"] == "geo_retry":
                     note(decision="geo_deferred_again")
-                    self.store.defer_geo_retry(job, self.settings.geo_retry_delay_seconds)
+                    await self.store.defer_geo_retry(job, self.settings.geo_retry_delay_seconds)
                     return
                 note(decision="geo_deferred_with_notice")
-                self.store.plan(
+                await self.store.plan(
                     job,
                     [
                         {
@@ -270,9 +263,9 @@ class Processor:
                             "automatic_code": len(entrances) == 1,
                         }
                     )
-        self.store.plan(job, effects)
+        await self.store.plan(job, effects)
 
-    def _callback(self, job: dict) -> None:
+    async def _callback(self, job: dict) -> None:
         """Подготовить действие кнопки по сохранённому контексту сообщения."""
         obj = job["payload"]
         payload = obj["payload"]
@@ -281,7 +274,7 @@ class Processor:
         peer = job["peer_id"]
         # Ingest enforces a shared per-user cooldown before any planning.
         cmid = int(obj["conversation_message_id"])
-        result = self.store.message_context(peer, cmid)
+        result = await self.store.message_context(peer, cmid)
         if result:
             note(context_hit=True, result=search_result(result))
         if result and result.get("_request_id"):
@@ -301,7 +294,7 @@ class Processor:
         choice_action = action != "entrance"
         if choice_action and result is None:
             note(decision="choices_expired")
-            self.store.plan(
+            await self.store.plan(
                 job,
                 [
                     {
@@ -324,7 +317,7 @@ class Processor:
         if payload.get("return_to_choices") is True or "entrance_page" in payload:
             navigation = result.get("_address_choice") if result else None
             if not navigation or result.get("status") == "dismissed":
-                self.store.plan(job, [])
+                await self.store.plan(job, [])
                 return
             if payload.get("return_to_choices") is True:
                 note(decision="return_to_address_choices")
@@ -335,7 +328,7 @@ class Processor:
                 note(decision="entrances_page")
                 context = dict(result, _address_choice=dict(navigation, entrance_page=int(payload["entrance_page"])))
                 message, keyboard = building_answer(context), selected_keyboard(context)
-            self.store.plan(
+            await self.store.plan(
                 job,
                 [
                     {
@@ -352,16 +345,16 @@ class Processor:
             )
             return
         if (
-            (choice_action and self.store.choices_closed(peer, cmid) is True)
+            (choice_action and (await self.store.choices_closed(peer, cmid)) is True)
             or (choice_action and result and result.get("status") != "ambiguous" and not result.get("candidates"))
             or (result and result.get("status") == "dismissed")
         ):
             note(decision="choices_already_closed")
-            self.store.plan(job, [])
+            await self.store.plan(job, [])
             return
         if payload.get("dismiss_choices") is True:
             note(decision="none_of_choices")
-            self.store.plan(
+            await self.store.plan(
                 job,
                 [
                     {
@@ -386,7 +379,7 @@ class Processor:
             if not result or result.get("status") != "ambiguous":
                 raise ValueError("No saved address choices")
             message, keyboard = address_choices(result, int(payload["choice_page"]))
-            self.store.plan(
+            await self.store.plan(
                 job,
                 [
                     {
@@ -418,10 +411,10 @@ class Processor:
             base_url = f"http://{self.settings.domofomka_api_host}:{self.settings.domofomka_api_port}"
             url = base_url + "/api/v2/buildings/" + quote(building, safe="")
             with span("api.building_lookup"):
-                response = self._get(url, {"observe": "true"} if active() else None)
+                response = await self._get(url, {"observe": "true"} if active() else None)
             if response.status_code == 404:
                 context = {"status": "not_found", "data": {}, "_address_choice": navigation}
-                self.store.plan(
+                await self.store.plan(
                     job,
                     [
                         {
@@ -471,15 +464,17 @@ class Processor:
                     "automatic_code": len(answer.get("data", {})) == 1,
                 }
             ]
-            self.store.plan(job, effects)
+            await self.store.plan(job, effects)
             return
         if result is None:
             note(context_source="vk_message_recovery")
-            messages = self.vk.messages.getByConversationMessageId(peer_id=peer, conversation_message_ids=cmid)["items"]
+            messages = (
+                await call_vk(self.vk.messages.getByConversationMessageId, peer_id=peer, conversation_message_ids=cmid)
+            )["items"]
             if not messages:
                 raise ValueError("Callback refers to a missing message")
             address = messages[0]["text"].split("\n")[0]
-            result = self.lookup(address.replace(",", "").replace(" дом ", " "))
+            result = await self.lookup(address.replace(",", "").replace(" дом ", " "))
         entrance = str(payload["entrance"])
         if not result or entrance not in result.get("data", {}):
             raise ValueError("Selected entrance is no longer available")
@@ -498,16 +493,16 @@ class Processor:
             },
             "context": result,
         }
-        self.store.plan(job, [effect], callback_at=job["occurred_at"])
+        await self.store.plan(job, [effect], callback_at=job["occurred_at"])
 
-    def deliver(self, job: dict) -> None:
+    async def deliver(self, job: dict) -> None:
         """Исполнить сохранённое действие и подтвердить его только после ответа VK."""
         params = dict(job["params"])
-        if not self.store.renew("bot_outbox", job):
+        if not (await self.store.renew("bot_outbox", job)):
             raise RuntimeError("Queue lease lost before dispatch")
-        if job.get("result") is None and self.store.outbox_geo_current(job) is False:
+        if job.get("result") is None and (await self.store.outbox_geo_current(job)) is False:
             note(decision="delivery_obsolete")
-            self.store.finish(job)
+            await self.store.finish(job)
             return
         if job["method"] == "send":
             # The database sequence is persistent and unique for this queue.
@@ -516,24 +511,24 @@ class Processor:
             params["random_id"] = job["id"]
             result = job.get("result")
             if result is None:
-                self.fault("vk-send")
-                result = self.vk.messages.send(**params)
-                self.fault("vk-send-after")
-                self.store.save_result(job, result)
+                await self.fault("vk-send")
+                result = await call_vk(self.vk.messages.send, **params)
+                await self.fault("vk-send-after")
+                await self.store.save_result(job, result)
             if isinstance(result, dict):
                 result = result["message_id"]
             context = None
             if job.get("context"):
-                messages = self.vk.messages.getById(message_ids=result)["items"]
+                messages = (await call_vk(self.vk.messages.getById, message_ids=result))["items"]
                 if not messages:
                     raise RuntimeError("Sent message not yet available")
                 context = (int(messages[0]["conversation_message_id"]), job["context"])
-            self.store.finish(job, context)
+            await self.store.finish(job, context)
         elif job["method"] == "edit":
-            self.fault("vk-edit")
-            self.vk.messages.edit(**params)
-            self.fault("vk-edit-after")
+            await self.fault("vk-edit")
+            await call_vk(self.vk.messages.edit, **params)
+            await self.fault("vk-edit-after")
             context = (int(params["conversation_message_id"]), job["context"]) if job.get("context") else None
-            self.store.finish(job, context)
+            await self.store.finish(job, context)
         else:
             raise ValueError("Unsupported outbox method")

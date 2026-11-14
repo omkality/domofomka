@@ -1,8 +1,10 @@
 """Ограниченные HTTP-попытки VK, общий RateGate и выбор сетевого маршрута."""
 
+import asyncio
 import os
 import threading
 import time
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -12,6 +14,24 @@ from requests.exceptions import ConnectionError, ConnectTimeout, ProxyError, Tim
 from src.infrastructure.network import network_settings
 from src.infrastructure.proxy import proxy_health
 from src.infrastructure.telemetry import active, measured, span
+
+
+async def call_vk[T](operation: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    """Выполнить sync SDK и дождаться завершения запроса даже при отмене worker."""
+    task = asyncio.create_task(asyncio.to_thread(operation, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not task.cancelled():
+            task.exception()
+        raise
 
 
 class TimeoutSession(Session):

@@ -34,8 +34,8 @@ model {
       history = component 'Сверка истории' { description 'recovery.py: watermark, перекрытие окна и идемпотентная запись отсутствующих событий.' }
       planner = component 'Планирование ответа' { description 'processor.py: запрос к HTTP API, выбор адреса и подъезда, подготовка эффектов без отправки.' }
       presentation = component 'Текст и клавиатуры' { description 'presentation.py и keyboard.py: чистые функции; лимит кнопок, отмена, возврат к адресам.' }
-      sender = component 'Доставка' { description 'processor.py deliver: постоянный random_id для send; повтор того же edit; завершение после подтверждения.' }
-      transport = component 'Транспорт VK' { description 'http.py: SDK vk-api / requests, общий RateGate, ограниченные повторы и маршрутизация.' }
+      sender = component 'Доставка' { description 'Асинхронный processor.py deliver: постоянный random_id для send; повтор того же edit; async-транзакция завершения после подтверждения. Лимит соединений QueueStore задаёт QUEUE_DB_MAX_CONCURRENT.' }
+      transport = component 'Транспорт VK' { description 'http.py: sync SDK vk-api / requests в потоках, общий RateGate, ограниченные повторы и маршрутизация. Отмена worker ждёт завершения начатого запроса SDK.' }
       policy = component 'Лимиты пользователя' { description 'queue.py: ограничения входящих и исходящих задач по peer_id; объединение лишних ожидающих запросов.' }
     }
     api = container 'HTTP-сервис кодов' {
