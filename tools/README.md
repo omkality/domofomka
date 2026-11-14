@@ -29,5 +29,14 @@ uv run --group api python -m tools.operations.dev_acceptance --help
 CLI-фреймворка и универсального «конвейера»: каждый этап можно повторить отдельно.
 Экспериментальные зависимости не добавляются в рабочие образы.
 
-[Оценка поиска](../docs/search-v2.md),
-[CI/CD](../docs/cicd.md), [адресный язык](../docs/address-language.md).
+Отдельное локальное окружение OpenSearch включается явно:
+
+```bash
+docker compose --env-file .env.dev -f tools/experiments/compose.opensearch.yml --profile search-comparison up -d opensearch
+```
+
+Порт `19200` доступен только через localhost. Dashboards не используется и не запускается.
+Это окружение сравнения, его не следует поднимать на маленьких VDS.
+
+[Оценка поиска](../docs/src/content/docs/search-v2.md),
+[CI/CD](../docs/src/content/docs/cicd.mdx), [адресный язык](../docs/src/content/docs/address-language.md).

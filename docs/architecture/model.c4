@@ -1,0 +1,138 @@
+specification {
+  element person { style { shape person color indigo } }
+  element external { style { color gray } }
+  element system { style { color primary } }
+  element container { style { color primary } }
+  element component { style { color secondary } }
+  element database { style { shape cylinder color green } }
+  element table { style { shape cylinder color green } }
+}
+
+model {
+  user = person 'Пользователь'
+  maintainer = person 'Разработчик'
+  vk = external 'VK API и история сообщений' {
+    description 'Long Poll доставляет события. История позволяет восстановить текст и геометки, но не потерянные callback-нажатия.'
+  }
+  dadata = external 'DaData' {
+    description 'Только геокодирование координат. Текстовый поиск работает по собственному каталогу.'
+  }
+  proxy = external 'Tinyproxy через SSH-туннель' {
+    description 'Необязательный маршрут к VK и DaData. CONNECT без расшифровки HTTPS; при ошибке подключения используется прямой маршрут.'
+  }
+  actions = external 'GitHub Actions и GHCR' {
+    description 'Проверяет код и документацию, собирает образы, публикует неизменяемые digest и разворачивает dev. Prod выпускается отдельно.'
+  }
+
+  domofomka = system 'domofomka' {
+    bot = container 'Бот VK' {
+      description 'Один активный сборщик событий на сообщество. Обработчики и доставка отделены постоянной очередью.'
+      collector = component 'Сбор событий' { description 'runtime.py: Long Poll; batch и курсор ts сохраняются атомарно.' }
+      history = component 'Сверка истории' { description 'recovery.py: watermark, перекрытие окна и идемпотентная запись отсутствующих событий.' }
+      planner = component 'Планирование ответа' { description 'processor.py: запрос к HTTP API, выбор адреса и подъезда, подготовка эффектов без отправки.' }
+      presentation = component 'Текст и клавиатуры' { description 'presentation.py и keyboard.py: чистые функции; лимит кнопок, отмена, возврат к адресам.' }
+      sender = component 'Доставка' { description 'processor.py deliver: постоянный random_id для send; повтор того же edit; завершение после подтверждения.' }
+      transport = component 'Транспорт VK' { description 'http.py: SDK vk-api / requests, общий RateGate, ограниченные повторы и маршрутизация.' }
+      policy = component 'Лимиты пользователя' { description 'queue.py: ограничения входящих и исходящих задач по peer_id; объединение лишних ожидающих запросов.' }
+    }
+    api = container 'HTTP-сервис кодов' {
+      description 'Litestar / Granian. Версии разделены пакетами; HTTP-роуты не содержат SQL или ранжирования.'
+      v2 = component 'Поиск v2' { description 'Нормализация → кандидаты → точная проверка города и дома → ранжирование RapidFuzz.' }
+      reader = component 'Чтение каталога' { description 'PostgresCatalog: одно ограниченное соединение на процесс, роль только для чтения, дедлайны и проверка ревизии.' }
+      cache = component 'Ограниченный кеш' { description 'Процессный TTL/LRU с пределами количества и байтов; ключ включает ревизию каталога и параметры поиска.' }
+      v1 = component 'Совместимый поиск v1' { description 'SQLite-индекс кандидатов; при его недоступности — исходный поиск. Fallback v2 дополнительно проверяет идентичность адреса.' }
+      geo = component 'Геокодирование' { description 'HTTPX: единый бюджет времени, DaData, различение пустого результата, временной ошибки и исчерпанного доступа.' }
+    }
+    postgres = database 'PostgreSQL 17' {
+      description 'Один сервер, две БД. Отдельная роль API для чтения каталога; очередь и аналитика находятся в другой БД.'
+      catalog = database 'Каталог v2' {
+        buildings = table 'buildings' { description 'PK id. Нормализованные дома с кодами: адрес, GUID, город, улица, дом, регион и lineage.' }
+        entrances = table 'entrances' { description 'PK (building_id, number). FK building_id → buildings.id. Точные исторические обозначения подъездов.' }
+        sources = table 'code_sources' { description 'PK kind. Тип источника кода, без утверждения о его актуальности.' }
+        codes = table 'codes' { description 'Ключ (building_id, entrance, kind, code). FK на entrances и code_sources. Все исходные варианты кодов сохраняются.' }
+        aliases = table 'aliases / alias_search' { description 'Варианты адресов и поисковые слова. B-tree по дому; GIN по to_tsvector(simple, words).' }
+        streets = table 'streets' { description 'PK id. Слова улицы и местности, has_codes. Полный и частичный GIN; физический порядок street_key.' }
+        houses = table 'street_houses' { description 'PK/FK id → streets.id. Сжатый zlib JSON с номерами домов ГАР, включая дома без кодов.' }
+        provenance = table 'provenance' { description 'PK source_id. FK building_id → buildings.id. Связь с исходными строками SQLite.' }
+        vocabulary = table 'vocabulary' { description 'PK term. Словарь для восстановления опечаток. Ранжирование выполняет RapidFuzz, не pgvector.' }
+        publication = table 'metadata' { description 'PK key. Версия схемы, publication_state и контрольная сумма опубликованного каталога.' }
+      }
+      queue = database 'Очередь и диагностика' {
+        inbox = table 'bot_inbox' { description 'Уникальность (group_id,event_key), lease, число попыток, next_at и статус. Done означает завершение обработки, а не обязательно отправку.' }
+        outbox = table 'bot_outbox' { description 'FK inbox_id. Уникальность (inbox_id,effect_index), параметры send/edit, результат VK, lease и повтор.' }
+        state = table 'bot_state / bot_receipts' { description 'Курсоры Long Poll и восстановления, бюджеты по пользователю, защита от повторов после очистки старой очереди.' }
+        context = table 'bot_message_context' { description 'PK (group_id,peer_id,conversation_message_id). Результат поиска и навигация кнопок; индекс времени очистки.' }
+        diagnostics = table 'request_log / spans' { description 'Запросы, этапы поиска и сетевые попытки. Отдельный бюджет хранения; ошибка записи аналитики не отменяет рабочую транзакцию.' }
+      }
+    }
+    sqlite = database 'SQLite v1 и его индекс' {
+      description 'Файлы подключены только для чтения. Исходные данные v1 и проверка происхождения; полная сборка ГАР не копируется на VDS.'
+    }
+  }
+
+  user -> vk 'Адрес, геометка или кнопка'
+  vk -> domofomka.bot.collector 'Long Poll'
+  domofomka.bot.collector -> domofomka.postgres.queue.inbox 'Событие'
+  domofomka.bot.collector -> domofomka.postgres.queue.state 'Курсор ts'
+  domofomka.bot.history -> vk 'История без отправки сообщений'
+  domofomka.bot.history -> domofomka.postgres.queue.inbox 'Отсутствующие события'
+  domofomka.postgres.queue.inbox -> domofomka.bot.planner 'Задача с lease'
+  domofomka.bot.policy -> domofomka.postgres.queue.state 'Бюджет отдельного пользователя'
+  domofomka.bot.planner -> domofomka.api.v2 'HTTP GET'
+  domofomka.bot.planner -> domofomka.bot.presentation 'Оформить результат'
+  domofomka.bot.planner -> domofomka.postgres.queue.outbox 'Постоянный план'
+  domofomka.bot.planner -> domofomka.postgres.queue.context 'Контекст кнопок'
+  domofomka.postgres.queue.outbox -> domofomka.bot.sender 'Отправка с lease'
+  domofomka.bot.sender -> domofomka.bot.transport 'send / edit'
+  domofomka.bot.transport -> vk 'Ограниченные попытки'
+  domofomka.bot.transport -> proxy 'Необязательный маршрут'
+  proxy -> vk 'HTTPS CONNECT'
+  proxy -> dadata 'HTTPS CONNECT'
+  domofomka.api.v2 -> domofomka.api.cache 'Проверить кеш'
+  domofomka.api.v2 -> domofomka.api.reader 'Получить кандидатов'
+  domofomka.api.reader -> domofomka.postgres.catalog 'B-tree / tsvector GIN'
+  domofomka.api.v2 -> domofomka.api.v1 'Проверенный fallback'
+  domofomka.api.v1 -> domofomka.sqlite 'Чтение'
+  domofomka.api.geo -> proxy 'Необязательный маршрут'
+  domofomka.api.geo -> dadata 'Координаты → адрес'
+  domofomka.api.geo -> domofomka.api.v2 'Тот же текстовый поиск'
+  maintainer -> actions 'Изменение dev'
+  actions -> domofomka.api 'Проверенный образ'
+  actions -> domofomka.bot 'Проверенный образ'
+  domofomka.postgres.catalog.buildings -> domofomka.postgres.catalog.entrances '1 : N'
+  domofomka.postgres.catalog.entrances -> domofomka.postgres.catalog.codes '1 : N'
+  domofomka.postgres.catalog.sources -> domofomka.postgres.catalog.codes '1 : N'
+  domofomka.postgres.catalog.buildings -> domofomka.postgres.catalog.aliases 'Варианты'
+  domofomka.postgres.catalog.buildings -> domofomka.postgres.catalog.provenance 'Происхождение'
+  domofomka.postgres.catalog.streets -> domofomka.postgres.catalog.houses 'Сжатый набор домов'
+  domofomka.postgres.queue.inbox -> domofomka.postgres.queue.outbox '1 : N'
+  domofomka.postgres.queue.inbox -> domofomka.postgres.queue.diagnostics 'Независимый журнал'
+}
+
+views {
+  view index {
+    title 'L1 · Контекст domofomka'
+    include user, maintainer, vk, dadata, proxy, actions, domofomka
+    style domofomka { size xlarge }
+  }
+  view containers of domofomka {
+    title 'L2 · Рабочие приложения и хранилища'
+    include user, vk, dadata, proxy, domofomka.bot, domofomka.api, domofomka.postgres, domofomka.sqlite
+  }
+  view botComponents of domofomka.bot {
+    title 'L3 · Получение, обработка и доставка'
+    include domofomka.bot.*, domofomka.postgres.queue.*, domofomka.api, vk
+  }
+  view searchComponents of domofomka.api {
+    title 'L3 · Текущий поиск без векторной БД'
+    include domofomka.api.*, domofomka.postgres.catalog, domofomka.sqlite, dadata, proxy
+  }
+  view catalogSchema of domofomka.postgres.catalog {
+    title 'Каталог: связи и поисковые структуры'
+    include domofomka.postgres.catalog.*
+  }
+  view queueSchema of domofomka.postgres.queue {
+    title 'Очередь, контекст и диагностика'
+    include domofomka.postgres.queue.*
+  }
+}

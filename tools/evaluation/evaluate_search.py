@@ -30,7 +30,7 @@ search_config = {}
 
 def source_fingerprints() -> dict[str, str]:
     root = Path(__file__).resolve().parents[2]
-    paths = [root / "uv.lock", root / "compose.search.yml"]
+    paths = [root / "uv.lock", root / "tools/experiments/compose.opensearch.yml"]
     for folder in ["src/code_service", "src/infrastructure", "tools/evaluation", "tools/experiments"]:
         paths.extend(p for p in (root / folder).rglob("*") if p.suffix in {".py", ".json"})
     return {

@@ -1,0 +1,108 @@
+views {
+  dynamic view textSearch {
+    title 'Адрес → поиск → ответ'
+    user -> vk 'Отправляет адрес'
+    vk -> domofomka.bot.collector 'Доставляет message_new'
+    domofomka.bot.collector -> domofomka.postgres.queue.inbox 'Сохраняет событие'
+    domofomka.bot.collector -> domofomka.postgres.queue.state 'Сохраняет ts в той же транзакции'
+    domofomka.postgres.queue.inbox -> domofomka.bot.planner 'Выдаёт задачу с lease'
+    domofomka.bot.planner -> domofomka.api.v2 'Запрашивает адрес'
+    domofomka.api.v2 -> domofomka.api.cache 'Проверяет ограниченный кеш'
+    domofomka.api.v2 -> domofomka.api.reader 'Нормализует запрос; получает кандидатов'
+    domofomka.api.reader -> domofomka.postgres.catalog 'GIN и точные номера домов'
+    domofomka.api.v2 -> domofomka.bot.planner 'Возвращает адрес, выбор или отсутствие кодов'
+    domofomka.bot.planner -> domofomka.bot.presentation 'Готовит текст и кнопки'
+    domofomka.bot.planner -> domofomka.postgres.queue.outbox 'Атомарно сохраняет эффекты и завершает inbox'
+    domofomka.postgres.queue.outbox -> domofomka.bot.sender 'Выдаёт действие с lease'
+    domofomka.bot.sender -> domofomka.bot.transport 'Передаёт send с постоянным random_id'
+    domofomka.bot.transport -> vk 'Отправляет ответ'
+    domofomka.bot.sender -> domofomka.postgres.queue.outbox 'Сохраняет подтверждение VK'
+  }
+  dynamic view fallback {
+    title 'Поиск v2 и безопасный fallback v1'
+    domofomka.bot.planner -> domofomka.api.v2 'Передаёт исходный запрос'
+    domofomka.api.v2 -> domofomka.api.reader 'Ищет кандидатов v2'
+    domofomka.api.reader -> domofomka.postgres.catalog 'Читает точные дома и варианты улиц'
+    domofomka.api.v2 -> domofomka.api.v1 'При not_found или недоступности вызывает v1'
+    domofomka.api.v1 -> domofomka.sqlite 'Читает индекс кандидатов; при необходимости исходную базу'
+    domofomka.api.v1 -> domofomka.api.v2 'Возвращает прежний результат'
+    domofomka.api.v2 -> domofomka.api.v2 'Проверяет город, улицу, дом, корпус, строение и букву'
+    domofomka.api.v2 -> domofomka.bot.planner 'Возвращает только совместимый результат'
+  }
+  dynamic view callback {
+    title 'Выбор адреса, подъезда и возврат'
+    user -> vk 'Нажимает кнопку'
+    vk -> domofomka.bot.collector 'Доставляет message_event'
+    domofomka.bot.collector -> domofomka.postgres.queue.inbox 'Сохраняет нажатие до подтверждения'
+    domofomka.bot.policy -> domofomka.postgres.queue.state 'Проверяет cooldown этого пользователя'
+    domofomka.postgres.queue.inbox -> domofomka.bot.planner 'Передаёт принятое нажатие'
+    domofomka.bot.planner -> domofomka.postgres.queue.context 'Читает сохранённый список и страницу'
+    domofomka.bot.planner -> domofomka.bot.presentation 'Готовит выбранный адрес или страницу назад'
+    domofomka.bot.planner -> domofomka.postgres.queue.outbox 'Сохраняет edit'
+    domofomka.postgres.queue.outbox -> domofomka.bot.sender 'Передаёт edit'
+    domofomka.bot.sender -> vk 'Редактирует то же сообщение'
+  }
+  dynamic view recovery {
+    title 'Перезапуск и пропущенные входящие'
+    domofomka.bot.collector -> domofomka.postgres.queue.state 'Читает сохранённый курсор Long Poll'
+    domofomka.bot.history -> domofomka.postgres.queue.state 'Читает watermark и перекрытие окна'
+    domofomka.bot.history -> vk 'Читает недавние диалоги и историю'
+    domofomka.bot.history -> domofomka.postgres.queue.inbox 'Добавляет только отсутствующие события'
+    domofomka.bot.policy -> domofomka.postgres.queue.inbox 'Ограничивает хвост отдельно для каждого пользователя'
+    domofomka.postgres.queue.inbox -> domofomka.bot.planner 'Возобновляет работу после lease'
+    domofomka.postgres.queue.outbox -> domofomka.bot.sender 'Повторяет незавершённое действие'
+    domofomka.bot.sender -> vk 'Сохраняет random_id send или параметры edit'
+    domofomka.bot.sender -> domofomka.postgres.queue.outbox 'Завершает действие после подтверждения'
+  }
+  dynamic view limits {
+    title 'Лимиты и подавление повторных подсказок'
+    vk -> domofomka.bot.collector 'Несколько входящих одного пользователя'
+    domofomka.bot.collector -> domofomka.postgres.queue.inbox 'Сохраняет события'
+    domofomka.bot.policy -> domofomka.postgres.queue.state 'Читает бюджет peer_id'
+    domofomka.bot.policy -> domofomka.postgres.queue.inbox 'Оставляет актуальный хвост; откладывает частые запросы'
+    domofomka.postgres.queue.inbox -> domofomka.bot.planner 'Обрабатывает допущенный запрос'
+    domofomka.bot.planner -> domofomka.api.v2 'Выполняет поиск'
+    domofomka.bot.planner -> domofomka.bot.policy 'Проверяет повтор одинаковой подсказки'
+    domofomka.bot.policy -> domofomka.postgres.queue.inbox 'При подавлении отмечает hint_suppressed; outbox не создаётся' {
+      notes 'Принятое поведение: повтор одинаковой подсказки в течение MESSAGE_HINT_INTERVAL_SECONDS не отправляется. Это не потеря входящего и не ошибка VK. Ответ с кодами этим правилом не подавляется.'
+    }
+  }
+  dynamic view geolocation {
+    title 'Геометка и недоступность DaData'
+    user -> vk 'Присылает координаты'
+    vk -> domofomka.bot.collector 'Доставляет геометку'
+    domofomka.bot.collector -> domofomka.postgres.queue.inbox 'Сохраняет запрос'
+    domofomka.postgres.queue.inbox -> domofomka.bot.planner 'Передаёт задачу'
+    domofomka.bot.planner -> domofomka.api.geo 'Запрашивает адрес'
+    domofomka.api.geo -> dadata 'Координаты → адрес с единым дедлайном'
+    domofomka.api.geo -> domofomka.api.v2 'При успехе использует общий поиск'
+    domofomka.api.geo -> domofomka.bot.planner 'Различает адрес, временный сбой и отказ доступа'
+    domofomka.bot.planner -> domofomka.postgres.queue.inbox 'Временный сбой: откладывает geo_retry с дедлайном' {
+      notes '401/403 и исчерпанный доступ не превращаются в бесконечные повторы. Новое текстовое сообщение заменяет отложенную геометку.'
+    }
+  }
+  dynamic view proxyFallback {
+    title 'Необязательный прокси и прямой маршрут'
+    domofomka.bot.transport -> proxy 'Пробует настроенный маршрут'
+    domofomka.bot.transport -> domofomka.bot.transport 'При ошибке подключения открывает cooldown'
+    domofomka.bot.transport -> vk 'Для безопасного повтора использует прямой маршрут' {
+      notes 'Ошибка API или таймаут чтения не доказывает отказ прокси. Неизвестные мутации не повторяются автоматически; send использует постоянный random_id.'
+    }
+    domofomka.bot.transport -> domofomka.bot.transport 'После паузы допускает одну пробу реальным запросом'
+    domofomka.bot.transport -> proxy 'При успехе возвращается к прокси'
+  }
+  dynamic view deployment {
+    title 'CI/CD dev и откат'
+    maintainer -> actions 'Публикует коммит в dev'
+    actions -> actions 'Проверяет тесты, документацию и зависимости'
+    actions -> actions 'Собирает минимальные образы и проверяет ограничения'
+    actions -> actions 'Публикует точные digest; проверяет актуальность коммита'
+    actions -> domofomka.bot 'Останавливает только прежний dev-бот'
+    actions -> domofomka.api 'Запускает проверенный API-образ'
+    actions -> domofomka.api 'Проверяет HTTP и настоящий результат v2, не маскирующийся v1'
+    actions -> domofomka.bot 'Проверяет токен, сообщество и runtime'
+    actions -> actions 'Сохраняет текущий и предыдущий релиз; при сбое возвращает предыдущий' {
+      notes 'Базы, .env, VPN и рабочие тома не пересоздаются. Prod не выпускается от push dev.'
+    }
+  }
+}

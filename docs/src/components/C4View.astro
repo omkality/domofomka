@@ -1,0 +1,10 @@
+---
+import type { LikeC4ViewId } from "likec4:react";
+import C4Diagram from "./C4Diagram.tsx";
+interface Props { viewId: LikeC4ViewId; }
+const { viewId } = Astro.props;
+---
+<figure class="c4-view not-content">
+  <C4Diagram viewId={viewId} client:only="react" />
+  <figcaption>Откройте диаграмму кликом. В схемах процессов кнопки Next / Previous показывают шаги.</figcaption>
+</figure>
