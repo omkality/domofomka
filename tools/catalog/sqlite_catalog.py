@@ -31,7 +31,7 @@ class SqliteCatalog(Ranker):
 
     def __init__(
         self, path: str, minimum_similarity: float = 0.86, ambiguity_margin: float = 0.06, *, candidate_limit: int = 100
-    ):
+    ) -> None:
         """Задать каталог, пороги ранжирования и предел числа кандидатов."""
         self.path = path
         self.minimum_similarity = minimum_similarity

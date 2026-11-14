@@ -84,7 +84,7 @@ def test_known_street_guard_only_accepts_legacy_with_the_same_complete_name_and_
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
 
     class EmptyCatalog:
-        def __init__(self, *a: object):
+        def __init__(self, *a: object) -> None:
             pass
 
         def load_candidates(self, *a: object):

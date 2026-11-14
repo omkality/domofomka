@@ -14,7 +14,7 @@ from src.infrastructure.database.resources import read_sql
 from tools.catalog.refresh_aliases import refresh
 
 
-def compact(source: Path, output: Path):
+def compact(source: Path, output: Path) -> None:
     """Собрать компактный каталог со сжатыми домами без кодов."""
     work = output.with_suffix(".building.db")
     output.parent.mkdir(parents=True, exist_ok=True)

@@ -21,7 +21,7 @@ VARIANTS = [
 ]
 
 
-def patterns(query):
+def patterns(query: str) -> dict[str, bool]:
     """Определить признаки пользовательских ошибок для стратификации выборки."""
     q = query.casefold().replace("ё", "е")
     return {
@@ -35,15 +35,15 @@ def patterns(query):
     }
 
 
-def make_sample(source, output, limit):
+def make_sample(source: Path, output: Path, limit: int) -> list[dict]:
     """Выбрать детерминированный набор запросов с фиксированным разделением."""
     selected = {}
 
-    def key(row):
+    def key(row: dict) -> tuple:
         """Построить устойчивый ключ сравнения текущей записи."""
         return row["query"], row["expected_address"], row["split"], row["evidence"]
 
-    def read(name):
+    def read(name: str) -> list[dict]:
         """Прочитать данные текущего контрольного или адресного результата."""
         values = [json.loads(line) for line in (source / (name + ".jsonl")).read_text(encoding="utf8").splitlines()]
         return sorted(values, key=lambda r: hashlib.sha256(json.dumps(r, sort_keys=True).encode()).hexdigest())
@@ -78,7 +78,7 @@ def make_sample(source, output, limit):
     return list(selected.values())
 
 
-def summarize(path):
+def summarize(path: Path) -> dict:
     """Подсчитать агрегированные показатели качества и задержки прогона."""
     counts = collections.Counter()
     by_pattern = collections.defaultdict(collections.Counter)

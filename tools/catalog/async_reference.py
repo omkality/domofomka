@@ -10,7 +10,7 @@ from tools.catalog.sqlite_catalog import SqliteCatalog
 class AsyncReferenceReader:
     """Воспроизвести сценарий поиска на синхронном эталоне только в tools/tests."""
 
-    def __init__(self, reader: SqliteCatalog):
+    def __init__(self, reader: SqliteCatalog) -> None:
         """Сохранить эталон с собственными короткоживущими SQL-соединениями."""
         self.reader = reader
 

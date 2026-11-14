@@ -21,7 +21,7 @@ SCHEMA = migration_sql("catalog", "0001-catalog-tables")
 INDEXES = list(sqlparse.split(migration_sql("catalog", "0002-catalog-indexes")))
 
 
-def connect():
+def connect() -> psycopg.Connection[dict]:
     """Открыть соединение с явно выбранной локальной БД подготовки данных."""
     dsn = os.environ.get("CATALOG_BUILD_DSN") or os.environ["CATALOG_BENCHMARK_DSN"]
     info = conninfo_to_dict(dsn)
@@ -36,7 +36,9 @@ def connect():
     return psycopg.connect(dsn, autocommit=True, row_factory=dict_row)
 
 
-def copy_table(source: sqlite3.Connection, target, table: str, select: str, types: list[str]):
+def copy_table(
+    source: sqlite3.Connection, target: psycopg.Connection[dict], table: str, select: str, types: list[str]
+) -> int:
     """Потоково перенести строки таблицы бинарным COPY и измерить длительность."""
     started = time.perf_counter()
     count = 0
@@ -49,7 +51,7 @@ def copy_table(source: sqlite3.Connection, target, table: str, select: str, type
     return count
 
 
-def load(catalog: Path, full_catalog: Path, output: Path):
+def load(catalog: Path, full_catalog: Path, output: Path) -> None:
     """Загрузить подготовленные данные в отдельную локальную БД и проверить публикацию."""
     output.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
@@ -162,7 +164,7 @@ def load(catalog: Path, full_catalog: Path, output: Path):
         print(json.dumps(report, ensure_ascii=False), flush=True)
 
 
-def main():
+def main() -> None:
     """Подготовить новую локальную БД каталога для проверенного экспорта на dev."""
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--catalog", type=Path, default=Path("artifacts/search/serving.db"))

@@ -10,7 +10,7 @@ from pathlib import Path
 from tools.evaluation.evaluate_search import catalogs, initialize, legacy_lookup
 
 
-def evaluate(record):
+def evaluate(record: dict) -> dict:
     """Выполнить контрольный запрос и собрать его результат для сравнения."""
     query = record["query"]
     old = bool(legacy_lookup(query))

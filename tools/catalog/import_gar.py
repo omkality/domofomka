@@ -3,19 +3,22 @@
 No apartments, rooms, plots or personal data. Each worker owns its own database.
 """
 
+from __future__ import annotations
+
 import argparse
 import concurrent.futures
 import json
 import sqlite3
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from pathlib import Path
 
 from src.code_service.services.v2.normalize import house_key, text
 from src.infrastructure.database.resources import read_sql
 
 
-def locality(chain, region):
+def locality(chain: list[tuple[str, str, int]], region: str) -> str:
     # Cities of regional significance may be level 2, not level 5.
     # A district/urban district name is never a substitute for a settlement.
     """Выделить населённый пункт из последовательности адресных объектов."""
@@ -26,7 +29,7 @@ def locality(chain, region):
     return settlement[0] if settlement else federal.get(region, next((n[0] for n in reversed(chain)), ""))
 
 
-def records(path: Path):
+def records(path: Path) -> Iterator[dict[str, str]]:
     """Потоково прочитать записи XML без загрузки файла целиком в память."""
     context = ET.iterparse(path, events=("start", "end"))
     _, root = next(context)
@@ -37,10 +40,10 @@ def records(path: Path):
             root.clear()
 
 
-def region_job(args):
+def region_job(args: tuple[str, str, str]) -> dict:
     """Импортировать один регион в отдельный локальный артефакт."""
-    source, target, region = args
-    target = Path(target) / f"gar-{region}.db"
+    source, output, region = args
+    target = Path(output) / f"gar-{region}.db"
     if target.exists():
         db = sqlite3.connect(target)
         try:
@@ -65,7 +68,7 @@ def region_job(args):
     root = Path(source)
     directory = root / region
 
-    def file(family):
+    def file(family: str) -> Path:
         """Найти региональный файл нужного вида ГАР."""
         return next(directory.glob(f"AS_{family}_2*.XML"))
 

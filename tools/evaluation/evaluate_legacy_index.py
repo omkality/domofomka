@@ -13,7 +13,7 @@ from tools.evaluation import evaluate_search as reference
 paths = []
 
 
-def initialize(source, index):
+def initialize(source: str, index: str) -> None:
     """Подготовить входные данные и читатели процесса сравнения."""
     paths[:] = [source, index]
     with sqlite3.connect(source) as db:
@@ -36,7 +36,7 @@ def initialize(source, index):
             """).fetchall()
 
 
-def evaluate(query):
+def evaluate(query: str) -> dict:
     """Выполнить контрольный запрос и собрать его результат для сравнения."""
     expected = reference.legacy_lookup(query)
     start = time.perf_counter()

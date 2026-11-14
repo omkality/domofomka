@@ -1,10 +1,14 @@
 """Лабораторные ограничения явного населённого пункта; рабочий поиск не меняется."""
 
+from __future__ import annotations
+
 import re
+from collections.abc import Callable, Sequence
 from functools import lru_cache
 from pathlib import Path
 
 from src.code_service.services.v2.normalize import address_words, parse_query, text
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 LOCALITY_PREFIX = re.compile(r"^(?:город|г|пос[её]лок|пос|п|деревня|село|пгт|рп)(?:\.\s*|\s+)", re.I)
 STREET_PREFIX = re.compile(
@@ -12,7 +16,9 @@ STREET_PREFIX = re.compile(
 )
 
 
-def locality_hint(message, known, *, comma_prefix=False, require_street_field=False):
+def locality_hint(
+    message: str, known: Callable[[str], bool], *, comma_prefix: bool = False, require_street_field: bool = False
+) -> str | None:
     """Выделить явное указание местности из контрольного запроса."""
     first = message.strip().split(",", 1)[0]
     marker = LOCALITY_PREFIX.match(first)
@@ -33,7 +39,7 @@ def locality_hint(message, known, *, comma_prefix=False, require_street_field=Fa
 
 
 @lru_cache(maxsize=1)
-def _known_localities(path, mtime):
+def _known_localities(path: str, mtime: int) -> frozenset[str]:
     # Проверяется поле населённого пункта, а не совпадение слова в названии улицы.
     """Загрузить известные названия местностей для ограниченного сравнения."""
     from tools.catalog.sqlite_catalog import SqliteCatalog
@@ -42,12 +48,12 @@ def _known_localities(path, mtime):
         return frozenset(row[0] for row in db.execute("SELECT DISTINCT city_key FROM streets"))
 
 
-def known_locality(catalog, value):
+def known_locality(catalog: SqliteCatalog, value: str) -> bool:
     """Проверить точную местность в подготовленном наборе."""
     return value in _known_localities(catalog.path, Path(catalog.path).stat().st_mtime_ns)
 
 
-def locality_matches(hint, row, aliases=()):
+def locality_matches(hint: str | None, row: dict, aliases: Sequence[str] = ()) -> bool:
     """Проверить совместимость результата с указанной местностью."""
     if not hint:
         return True

@@ -1,5 +1,7 @@
 """Сравнить pg_trgm с текущим читателем только на отдельной локальной копии каталога."""
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -13,6 +15,7 @@ from psycopg.conninfo import conninfo_to_dict
 from rapidfuzz.fuzz import ratio
 from rapidfuzz.process import extract
 
+from src.code_service.services.v2.normalize import Query
 from src.code_service.services.v2.postgres import PostgresCatalog
 from src.infrastructure.event_loop import run_async
 
@@ -22,7 +25,7 @@ class TrigramCatalog(PostgresCatalog):
 
     mode = "word"
 
-    async def trigrams(self, query, coded):
+    async def trigrams(self, query: Query, coded: bool) -> list[dict]:
         """Найти похожие улицы с прежним пределом и стабильным порядком."""
         if not query.words or not query.house:
             return []
@@ -50,11 +53,11 @@ class TrigramCatalog(PostgresCatalog):
             ids = [row["id"] for row in await self.rows(db, statement, (*values, self.candidate_limit * 10))]
             return await self._expand(db, ids, query.house, include_known=not coded)
 
-    async def coded_candidates(self, query, limit=None):
+    async def coded_candidates(self, query: Query, limit: int | None = None) -> list[dict]:
         """Отобрать дома с кодами через триграммы."""
         return await self.trigrams(query, True)
 
-    async def candidates(self, query, limit=None):
+    async def candidates(self, query: Query, limit: int | None = None) -> list[dict]:
         """Отобрать известные дома через триграммы, сохранив конечные ограничения."""
         return await self.trigrams(query, False)
 
@@ -62,7 +65,7 @@ class TrigramCatalog(PostgresCatalog):
 class VocabularyCatalog(PostgresCatalog):
     """Проверить pg_trgm как короткий список для существующего RapidFuzz."""
 
-    async def candidates(self, query, limit=None):
+    async def candidates(self, query: Query, limit: int | None = None) -> list[dict]:
         """Сохранить точный поиск, заменив только извлечение словарных альтернатив."""
         words = query.words.split()
         if not words or not query.house:
@@ -105,7 +108,7 @@ class VocabularyCatalog(PostgresCatalog):
         return await self.fetch(" & ".join(groups), list(dict.fromkeys(terms)), query.house, limit)
 
 
-def summary(values):
+def summary(values: list[float]) -> dict[str, float]:
     """Свести длительности без публикации пользовательских запросов."""
     ordered = sorted(values)
     return {
@@ -115,7 +118,7 @@ def summary(values):
     }
 
 
-async def main():
+async def main() -> None:
     """Измерить неизменяемый корпус и сохранить закрытые ответы и публичные агрегаты."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path, required=True)

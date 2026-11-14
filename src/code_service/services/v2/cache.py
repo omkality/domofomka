@@ -10,7 +10,7 @@ from collections.abc import Callable, Hashable
 class LookupCache:
     """Ограниченный процессный TTL/LRU-кеш результатов поиска."""
 
-    def __init__(self, clock: Callable[[], float] = time.monotonic):
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         """Создать пустой TTL/LRU-кеш с подменяемыми часами."""
         self.clock = clock
         self.lock = threading.Lock()

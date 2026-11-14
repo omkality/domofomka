@@ -1,11 +1,14 @@
 """Разобрать сохранённые ответы без угадывания намерения и без объединения адресов."""
 
+from __future__ import annotations
+
 import argparse
 import collections
 import hashlib
 import json
 import re
 import unicodedata
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 
@@ -14,11 +17,11 @@ from tools.catalog.sqlite_catalog import SqliteCatalog
 from tools.evaluation.quality_suite import address_fields, literal_words
 
 
-def context_score(label, result, identity):
+def context_score(label: dict, result: dict, identity: Callable[[str], dict | None]) -> dict:
     """Исходные ограничения обязательны для всех вариантов; поздняя коррекция — целевой вариант."""
     options = [result] if result["status"] in {"found", "no_codes"} else result.get("candidates", [])
 
-    def matches(option, constraints):
+    def matches(option: dict, constraints: dict) -> bool:
         """Проверить выполнение текущих ограничений адресного случая."""
         building = identity(option["building_id"]) if option.get("building_id") else None
         if not building and option.get("address"):
@@ -53,7 +56,7 @@ def context_score(label, result, identity):
     }
 
 
-def score_context_run(args):
+def score_context_run(args: argparse.Namespace) -> None:
     """Сравнить результаты вариантов контекста на фиксированных случаях."""
     args.output.mkdir(parents=True, exist_ok=False)
     frozen = json.loads((args.run / "frozen-input.json").read_text(encoding="utf8"))
@@ -61,7 +64,7 @@ def score_context_run(args):
     counts = collections.defaultdict(collections.Counter)
 
     @lru_cache(maxsize=4096)
-    def identity(identifier):
+    def identity(identifier: str) -> dict | None:
         """Получить устойчивую идентичность сравниваемого адреса."""
         row = catalog.building(identifier)
         if row:
@@ -113,12 +116,12 @@ def score_context_run(args):
     print(json.dumps(summary, ensure_ascii=False))
 
 
-def folded(value):
+def folded(value: str | None) -> str:
     """Нормализовать строку для сопоставления форм написания."""
     return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value or "").casefold().replace("ё", "е")).strip()
 
 
-def literal_identity(row):
+def literal_identity(row: dict | None) -> tuple | None:
     """Построить буквальную идентичность адреса для разбора расхождений."""
     try:
         kind = address_fields(row["display"])["kind"]
@@ -127,7 +130,7 @@ def literal_identity(row):
     return tuple(folded(row.get(key)) for key in ("city", "street", "house", "region", "lineage")) + (kind,)
 
 
-def classify(case, baseline, challenger, identity):
+def classify(case: dict, baseline: dict, challenger: dict, identity: Callable[[str], dict | None]) -> str:
     """Отнести расхождение к проверяемой категории адресного конфликта."""
     reference = case.get("expected_address") or case.get("historical_suggestion_not_truth")
     if reference and ", дом " in reference and not legacy_house_matches(case["query"], reference):
@@ -135,7 +138,7 @@ def classify(case, baseline, challenger, identity):
     if "backend_error" in {baseline["status"], challenger["status"]}:
         return "backend_error"
 
-    def signature(value):
+    def signature(value: dict) -> tuple:
         """Получить устойчивое представление результата без непостоянных измерений."""
         return (
             value["status"],
@@ -172,7 +175,7 @@ def classify(case, baseline, challenger, identity):
     return "different_status_or_candidate_set"
 
 
-def context(root, case):
+def context(root: Path, case: dict) -> dict:
     """Получить значимый адресный контекст для сравнения вариантов."""
     path = root / (case.get("dialog", "missing") + ".json")
     if not path.is_file():
@@ -205,7 +208,7 @@ def context(root, case):
     }
 
 
-def review(args):
+def review(args: argparse.Namespace) -> None:
     """Подготовить агрегированный отчёт о спорных результатах поиска."""
     args.output.mkdir(parents=True, exist_ok=False)
     frozen = json.loads((args.run / "frozen-input.json").read_text(encoding="utf8"))
@@ -219,7 +222,7 @@ def review(args):
     catalog = SqliteCatalog(str(args.catalog))
 
     @lru_cache(maxsize=8192)
-    def identity(identifier):
+    def identity(identifier: str) -> dict | None:
         """Получить устойчивую идентичность сравниваемого адреса."""
         row = catalog.building(identifier)
         return (

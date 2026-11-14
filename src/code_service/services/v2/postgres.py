@@ -65,7 +65,7 @@ class PostgresCatalog(Ranker):
         operation_timeout_seconds: float = 5,
         revision: str = "unknown",
         candidate_limit: int = 100,
-    ):
+    ) -> None:
         """Сохранить прежние бюджеты, ревизию и предел кандидатов."""
         self.minimum_similarity = minimum_similarity
         self.ambiguity_margin = ambiguity_margin

@@ -42,7 +42,7 @@ def compare() -> dict:
     from number_parser import parse
     from ru_word2number.w2n import word_to_num
 
-    def ru_word(value):
+    def ru_word(value: str) -> str:
         """Проверить преобразование числительного выбранной внешней библиотекой."""
         try:
             return str(word_to_num(value))
@@ -73,7 +73,7 @@ def compare() -> dict:
     }
 
 
-def main():
+def main() -> None:
     """Сравнение русских порядковых числительных; внешние пакеты нужны только для этого запуска."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)

@@ -33,7 +33,7 @@ def export(env: Path, baseline: Path, output: Path, group: int) -> dict:
     session = TimeoutSession(vk_proxy_url="")
     vk = VkApi(token=config["VK_GROUP_TOKEN"], api_version="5.199", session=session)
 
-    def call(method: str, params: dict):
+    def call(method: str, params: dict) -> dict:
         """Вызвать метод выгрузки VK с ограничением частоты и повторов."""
         assert method in {"messages.getConversations", "messages.getHistory"}
         for attempt in range(5):

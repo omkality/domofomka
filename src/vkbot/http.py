@@ -37,7 +37,7 @@ async def call_vk[T](operation: Callable[..., T], *args: Any, **kwargs: Any) -> 
 class TimeoutSession(Session):
     """Bound VK API requests while preserving explicit Long Poll timeouts."""
 
-    def __init__(self, vk_proxy_url: str | None = None, *, longpoll: bool = False):
+    def __init__(self, vk_proxy_url: str | None = None, *, longpoll: bool = False) -> None:
         """Настроить ограниченные HTTP-попытки и отдельный режим Long Poll."""
         super().__init__()
         self.longpoll = longpoll
@@ -135,7 +135,7 @@ class TimeoutSession(Session):
 class RateGate:
     """Общий ограничитель частоты фактических HTTP-попыток VK."""
 
-    def __init__(self, interval: float):
+    def __init__(self, interval: float) -> None:
         """Создать общий потокобезопасный бюджет HTTP-запросов."""
         self.interval = interval
         self.lock = threading.Lock()
@@ -154,7 +154,7 @@ class RateGate:
 class RateSession(TimeoutSession):
     """Сессия VK с общим ограничителем частоты запросов."""
 
-    def __init__(self, gate: RateGate, *, longpoll: bool = False):
+    def __init__(self, gate: RateGate, *, longpoll: bool = False) -> None:
         """Подключить общий бюджет к ограниченной сессии VK."""
         super().__init__(longpoll=longpoll)
         self.gate = gate

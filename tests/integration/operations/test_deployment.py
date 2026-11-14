@@ -207,7 +207,7 @@ def test_v2_readiness_uses_http_and_rejects_a_masked_catalog_failure(tmp_path, m
     requested = []
 
     class Connection:
-        def __init__(self, host, port, timeout):
+        def __init__(self, host, port, timeout) -> None:
             pass
 
         def request(self, method, path):

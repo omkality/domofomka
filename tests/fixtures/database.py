@@ -1,14 +1,22 @@
 """Настоящий тестовый PostgreSQL с миграциями и отдельным namespace на тест."""
 
+from __future__ import annotations
+
 import uuid
-from collections.abc import Generator
+from collections.abc import AsyncIterator, Awaitable, Callable, Generator
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
 
+if TYPE_CHECKING:
+    from src.vkbot.queue import QueueStore
+
+type QueueFactory = Callable[..., Awaitable[QueueStore]]
+
 
 @pytest.fixture(scope="session")
-def migrated_database(postgres_dsn) -> str:
+def migrated_database(postgres_dsn: str) -> str:
     """Применить настоящие yoyo-миграции к PostgreSQL из Testcontainers."""
     from src.infrastructure.database.migrate import apply
 
@@ -17,13 +25,13 @@ def migrated_database(postgres_dsn) -> str:
 
 
 @pytest_asyncio.fixture
-async def queue_factory(migrated_database):
+async def queue_factory(migrated_database: str) -> AsyncIterator[QueueFactory]:
     """Создать очередь в своём сообществе и удалить только её строки после теста."""
     from src.vkbot.queue import QueueStore
 
     created = []
 
-    async def create(*, telemetry=False, lease_seconds=3):
+    async def create(*, telemetry: bool = False, lease_seconds: float = 3) -> QueueStore:
         """Выдать независимую очередь с нужным режимом диагностики."""
         group = 1_000_000_000 + uuid.uuid4().int % 1_000_000_000
         queue = QueueStore(migrated_database, group, lease_seconds=lease_seconds, telemetry=telemetry)
@@ -40,19 +48,19 @@ async def queue_factory(migrated_database):
 
 
 @pytest_asyncio.fixture
-async def store(queue_factory):
+async def store(queue_factory: QueueFactory) -> QueueStore:
     """Выдать очередь без диагностики с короткой арендой заданий."""
     return await queue_factory()
 
 
 @pytest_asyncio.fixture
-async def observed_store(queue_factory):
+async def observed_store(queue_factory: QueueFactory) -> QueueStore:
     """Выдать очередь с записью этапов обработки и сетевых попыток."""
     return await queue_factory(telemetry=True, lease_seconds=120)
 
 
 @pytest.fixture
-def isolated_database(postgres_dsn) -> Generator[str, None, None]:
+def isolated_database(postgres_dsn: str) -> Generator[str, None, None]:
     """Выдать пустую БД для проверки DDL, не затрагивая общие таблицы очереди."""
     import psycopg
     from psycopg import sql

@@ -106,7 +106,7 @@ def settings(path: Path) -> dict:
 class Deployment:
     """Проверяемое переключение готовых образов с сохранением данных и откатом."""
 
-    def __init__(self, root: Path, target: str):
+    def __init__(self, root: Path, target: str) -> None:
         """Выбрать окружение, пути релизов, порт и пределы развёртывания."""
         self.root = root.resolve()
         self.target = target

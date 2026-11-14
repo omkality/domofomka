@@ -77,7 +77,7 @@ def test_search_http_failure_is_recorded_without_becoming_not_found_or_aborting_
     case = {"query": "Тестовая 10", "expected_address": "Москва, улица Тестовая, дом 10", "cohort": "historical"}
 
     class FakeCatalog:
-        def __init__(self, path):
+        def __init__(self, path) -> None:
             pass
 
         def resolve(self, query):

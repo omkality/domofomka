@@ -9,12 +9,13 @@ import sqlite3
 import unicodedata
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from tools.catalog.async_reference import AsyncReferenceReader
 from tools.catalog.sqlite_catalog import SqliteCatalog
 
 
-def prepare(catalog: Path, output: Path):
+def prepare(catalog: Path, output: Path) -> dict:
     """Подготовить детерминированные входные случаи проверки качества."""
     output.mkdir(parents=True, exist_ok=True)
     if (output / "controlled.jsonl").exists():
@@ -99,7 +100,7 @@ def prepare(catalog: Path, output: Path):
     return {"controlled_queries": len(cases), "anchor_identities": len(chosen), "cities": len(cities)}
 
 
-def evaluate(catalog: Path, output: Path):
+def evaluate(catalog: Path, output: Path) -> dict:
     """Выполнить контрольный запрос и собрать его результат для сравнения."""
     engine = SqliteCatalog(str(catalog))
     counts = collections.Counter()
@@ -127,7 +128,7 @@ def evaluate(catalog: Path, output: Path):
     return report
 
 
-def review_queue(corpus: Path, output: Path):
+def review_queue(corpus: Path, output: Path) -> dict:
     """Сохранить спорные расхождения для отдельного рассмотрения."""
     if (output / "history-review.jsonl").exists():
         raise FileExistsError("Do not overwrite existing review decisions")
@@ -205,7 +206,7 @@ def address_fields(address: str) -> dict:
     }
 
 
-def review_evaluate(catalog: Path, output: Path):
+def review_evaluate(catalog: Path, output: Path) -> dict:
     """Проверить запрос с учётом отдельно рассмотренных конфликтов."""
     import asyncio
 
@@ -220,17 +221,13 @@ def review_evaluate(catalog: Path, output: Path):
 
     async def lookup_reference(query: str) -> dict:
         """Временно подставить офлайн-эталон только внутри инструмента оценки."""
-        original = search.get_catalog
 
-        async def selected_catalog():
+        async def selected_catalog() -> AsyncReferenceReader:
             """Вернуть явно выбранный инструментом файловый эталон."""
             return AsyncReferenceReader(engine)
 
-        search.get_catalog = selected_catalog
-        try:
+        with patch.object(search, "get_catalog", selected_catalog):
             return await search.lookup(query)
-        finally:
-            search.get_catalog = original
 
     counts = collections.Counter()
     details = []

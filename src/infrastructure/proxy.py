@@ -9,7 +9,7 @@ from src.infrastructure.network import network_settings
 class ProxyHealth:
     """Состояние выбора прокси и его cooldown в текущем процессе."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Создать потокобезопасное состояние маршрутов без фоновых проверок."""
         self.lock = threading.Lock()
         self.routes: dict[tuple[str, str], dict[str, float]] = {}

@@ -4,6 +4,8 @@ Snapshot selection mirrors the unchanged legacy matcher, without scanning one
 million identical street/code rows for every query. Only aggregate metrics publish.
 """
 
+from __future__ import annotations
+
 import argparse
 import collections
 import concurrent.futures
@@ -12,6 +14,7 @@ import json
 import re
 import sqlite3
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -42,7 +45,7 @@ def source_fingerprints() -> dict[str, str]:
     }
 
 
-def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_config: dict | None = None):
+def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_config: dict | None = None) -> None:
     """Подготовить входные данные и читатели процесса сравнения."""
     search_config.clear()
     search_config.update(query_config or {})
@@ -82,7 +85,7 @@ def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_c
             )
 
 
-def legacy_lookup(message: str, *, accept_source=None):
+def legacy_lookup(message: str, *, accept_source: Callable[[tuple], bool] | None = None) -> str | None:
     """Воспроизвести прежнее совпадение v1 на неизменённых исходных группах."""
     if not message:
         return None
@@ -111,7 +114,7 @@ def legacy_lookup(message: str, *, accept_source=None):
     return f"{city}, {r[2]} {r[3]}, дом {r[4]}"
 
 
-def evaluate(record: dict):
+def evaluate(record: dict) -> dict:
     """Выполнить контрольный запрос и собрать его результат для сравнения."""
     q = record["query"]
     start = time.perf_counter()

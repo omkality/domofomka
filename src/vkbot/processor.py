@@ -34,7 +34,7 @@ class LookupUnavailable(RuntimeError):
 class Processor:
     """Планировщик ответов и исполнитель сохранённых действий VK."""
 
-    def __init__(self, settings: Any, store: QueueStore, gate: RateGate):
+    def __init__(self, settings: Any, store: QueueStore, gate: RateGate) -> None:
         """Подключить очередь, VK-клиент и параметры планирования ответов."""
         self.settings = settings
         self.store = store

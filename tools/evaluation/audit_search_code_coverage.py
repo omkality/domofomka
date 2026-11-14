@@ -5,12 +5,15 @@
 Запросы и построчные результаты разрешены только в artifacts/private.
 """
 
+from __future__ import annotations
+
 import argparse
 import collections
 import concurrent.futures
 import hashlib
 import json
 import time
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
@@ -30,7 +33,9 @@ def code_values(answer: dict) -> set[tuple[str, str, str]]:
     }
 
 
-def offered_codes(result: dict, legacy: dict, read_codes) -> set[tuple[str, str, str]]:
+def offered_codes(
+    result: dict, legacy: dict, read_codes: Callable[[str], set[tuple[str, str, str]]]
+) -> set[tuple[str, str, str]]:
     """Собрать коды всех адресов, фактически предложенных результатом поиска."""
     if result.get("engine") == "v1" and result["status"] == "found":
         return code_values(legacy)
@@ -38,7 +43,7 @@ def offered_codes(result: dict, legacy: dict, read_codes) -> set[tuple[str, str,
     return set().union(*(read_codes(option["building_id"]) for option in options if option.get("building_id")))
 
 
-def initialize(catalog_path, legacy, legacy_index, baseline=None):
+def initialize(catalog_path: Path, legacy: Path, legacy_index: Path, baseline: Path | None = None) -> None:
     """Подготовить входные данные и читатели процесса сравнения."""
     codes = collections.defaultdict(set)
     with SqliteCatalog(str(catalog_path)).connect() as db:
@@ -55,7 +60,7 @@ def initialize(catalog_path, legacy, legacy_index, baseline=None):
     worker_context.update(codes=codes, legacy=str(legacy), index=str(legacy_index), baseline=baseline)
 
 
-def compare(item):
+def compare(item: tuple[int, dict]) -> list[dict]:
     """Сравнить результаты одинаковых запросов на проверяемых вариантах."""
     query, rows = item
     legacy = lookup(query, worker_context["legacy"], worker_context["index"])
@@ -114,7 +119,7 @@ def compare(item):
     return outcomes
 
 
-def run(args):
+def run(args: argparse.Namespace) -> None:
     """Выполнить выбранный контрольный прогон и сохранить его результаты."""
     private = Path("artifacts/private").resolve()
     output = args.output.resolve()
@@ -188,7 +193,7 @@ def run(args):
     print(json.dumps(report, ensure_ascii=False), flush=True)
 
 
-def main():
+def main() -> None:
     """Сверить сохранность уникальных кодов v1 в замороженных результатах поиска."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results", type=Path, nargs="+", required=True)

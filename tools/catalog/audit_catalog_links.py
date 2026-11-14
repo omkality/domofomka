@@ -8,7 +8,7 @@ from contextlib import closing
 from pathlib import Path
 
 
-def audit(path: Path, output: Path):
+def audit(path: Path, output: Path) -> dict:
     """Проанализировать исходные данные и сохранить агрегированный отчёт."""
     output.mkdir(parents=True, exist_ok=True)
     totals = collections.defaultdict(collections.Counter)

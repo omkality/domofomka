@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 
 
-def inspect():
+def inspect() -> dict:
     """Сохранить состояние контейнеров dev перед и после ограниченной проверки."""
     result = {}
     for service in ("api", "vkbot", "queue"):
@@ -29,7 +29,7 @@ def inspect():
     return result
 
 
-def lookup(query, version):
+def lookup(query: str, version: str) -> tuple[dict, float]:
     """Вызвать версию dev API и записать результат без отправки в VK."""
     start = time.monotonic()
     with urlopen(
@@ -48,7 +48,7 @@ def lookup(query, version):
     ), round((time.monotonic() - start) * 1000, 3)
 
 
-def probe(service, variable, route, code):
+def probe(service: str, variable: str, route: str | None, code: str) -> dict:
     # None оставляет рабочую настройку; переопределение действует лишь у docker exec.
     """Выполнить ограниченную dev-проверку маршрута без отправки сообщений."""
     start = time.monotonic()
@@ -96,7 +96,7 @@ def probe(service, variable, route, code):
     }
 
 
-def main():
+def main() -> None:
     """Ограниченная приёмочная проверка dev на хосте VDS, без отправки сообщений VK."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path("/root/domofomka-dev"))

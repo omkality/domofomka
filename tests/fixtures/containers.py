@@ -5,7 +5,8 @@ import os
 import re
 import subprocess
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from typing import cast
 
 import pytest
 from psycopg.conninfo import make_conninfo
@@ -47,7 +48,7 @@ def container_network() -> Generator[Network, None, None]:
 
 
 @pytest.fixture(scope="session")
-def postgres_container(compose_services, container_network) -> Generator[DockerContainer, None, None]:
+def postgres_container(compose_services: dict, container_network: Network) -> Generator[DockerContainer, None, None]:
     """Запустить PostgreSQL один раз с рабочими digest, командой и лимитами."""
     config = compose_services["queue"]
     assert "@sha256:" in config["image"], "Test the exact pinned Compose image"
@@ -62,14 +63,15 @@ def postgres_container(compose_services, container_network) -> Generator[DockerC
     ).with_envs(**config["environment"])
     container.with_network(container_network).with_network_aliases("queue")
     # Docker поддерживает случайный порт с явной привязкой к loopback.
-    container.ports["5432/tcp"] = ("127.0.0.1", None)
+    bindings = cast(dict[str, int | tuple[str, int | None] | None], container.ports)
+    bindings["5432/tcp"] = ("127.0.0.1", None)
     container.with_command(config["command"]).waiting_for(ExecWaitStrategy(readiness).with_startup_timeout(60))
     with container:
         yield container
 
 
 @pytest.fixture(scope="session")
-def postgres_dsn(postgres_container, compose_services) -> str:
+def postgres_dsn(postgres_container: DockerContainer, compose_services: dict) -> str:
     """Выдать только адрес созданного тестами PostgreSQL, без внешнего DSN."""
     environment = compose_services["queue"]["environment"]
     host = postgres_container.get_container_host_ip()
@@ -84,7 +86,9 @@ def postgres_dsn(postgres_container, compose_services) -> str:
 
 
 @pytest.fixture(scope="session")
-def runtime_images(compose_services, tmp_path_factory) -> Generator[dict[str, str], None, None]:
+def runtime_images(
+    compose_services: dict, tmp_path_factory: pytest.TempPathFactory
+) -> Generator[dict[str, str], None, None]:
     """Собрать приложения из рабочих Dockerfile один раз; CI передаёт те же готовые образы."""
     images, built = {}, []
     logs = tmp_path_factory.mktemp("runtime-build")
@@ -116,7 +120,9 @@ def runtime_images(compose_services, tmp_path_factory) -> Generator[dict[str, st
 
 
 @pytest.fixture
-def runtime_container(runtime_images, compose_services, container_network):
+def runtime_container(
+    runtime_images: dict[str, str], compose_services: dict, container_network: Network
+) -> Callable[[str], DockerContainer]:
     """Создать контейнер приложения с ограничениями из того же Compose."""
 
     def create(service: str) -> DockerContainer:

@@ -4,6 +4,7 @@ import ssl
 import subprocess
 import sys
 import time
+from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -42,15 +43,15 @@ def clients(monkeypatch):
 
 
 class SlowBody(httpx.AsyncByteStream):
-    def __init__(self):
+    def __init__(self) -> None:
         self.closed = False
 
-    async def __aiter__(self):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
         """Удержать тело после успешного получения заголовков."""
         await asyncio.sleep(1)
         yield b"{}"
 
-    async def aclose(self):
+    async def aclose(self) -> None:
         self.closed = True
 
 
