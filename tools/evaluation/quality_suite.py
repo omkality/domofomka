@@ -10,24 +10,44 @@ import unicodedata
 from contextlib import closing
 from pathlib import Path
 
-from src.code_service.v2.engine import Catalog
+from src.code_service.services.v2.engine import Catalog
 
 
 def prepare(catalog: Path, output: Path):
+    """Подготовить детерминированные входные случаи проверки качества."""
     output.mkdir(parents=True, exist_ok=True)
     if (output / "controlled.jsonl").exists():
         raise FileExistsError("Use a new output directory to preserve the frozen controls")
     chosen = []
     cities = collections.Counter()
     with closing(sqlite3.connect(f"file:{catalog.resolve().as_posix()}?mode=ro", uri=True)) as db:
-        rows = db.execute("""SELECT b.id,b.display,b.city,b.street,b.house,b.city_key,b.street_key FROM buildings b
-            JOIN (SELECT DISTINCT building_id FROM codes) c ON c.building_id=b.id
-            WHERE b.guid IS NOT NULL ORDER BY b.id""")
+        rows = db.execute(r"""
+            SELECT b.id,
+                   b.display,
+                   b.city,
+                   b.street,
+                   b.house,
+                   b.city_key,
+                   b.street_key
+            FROM buildings b
+            JOIN
+                (SELECT DISTINCT building_id
+                 FROM codes) c ON c.building_id = b.id
+            WHERE b.guid IS NOT NULL
+            ORDER BY b.id
+            """)
         for bid, display, city, street, house, ck, sk in rows:
             if cities[city] >= 2:
                 continue
             identities = db.execute(
-                "SELECT count(DISTINCT id) FROM buildings WHERE city_key=? AND street_key=? AND house=? AND guid IS NOT NULL",
+                r"""
+                SELECT count(DISTINCT id)
+                FROM buildings
+                WHERE city_key = ?
+                    AND street_key = ?
+                    AND house = ?
+                    AND guid IS NOT NULL
+                """,
                 (ck, sk, house),
             ).fetchone()[0]
             if identities != 1:
@@ -67,6 +87,7 @@ def prepare(catalog: Path, output: Path):
 
 
 def evaluate(catalog: Path, output: Path):
+    """Выполнить контрольный запрос и собрать его результат для сравнения."""
     engine = Catalog(str(catalog))
     counts = collections.Counter()
     bad = []
@@ -94,6 +115,7 @@ def evaluate(catalog: Path, output: Path):
 
 
 def review_queue(corpus: Path, output: Path):
+    """Сохранить спорные расхождения для отдельного рассмотрения."""
     if (output / "history-review.jsonl").exists():
         raise FileExistsError("Do not overwrite existing review decisions")
     source = []
@@ -130,12 +152,14 @@ def review_queue(corpus: Path, output: Path):
 
 
 def literal_words(value: str) -> set[str]:
+    """Выделить значимые буквальные слова ожидаемого адреса."""
     value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")
     value = re.sub(r"\b(\d+)[- ]?(?:я|й|ая|ый|ой)\b", r"\1", value)
     return set(re.findall(r"[а-яa-z0-9]+", value))
 
 
 def address_fields(address: str) -> dict:
+    """Разделить адрес на поля для проверки идентичности результата."""
     prefix, house = address.rsplit(", дом ", 1)
     markers = list(
         re.finditer(
@@ -169,10 +193,11 @@ def address_fields(address: str) -> dict:
 
 
 def review_evaluate(catalog: Path, output: Path):
+    """Проверить запрос с учётом отдельно рассмотренных конфликтов."""
     import asyncio
 
     from src.code_service.config import settings
-    from src.code_service.v2 import search
+    from src.code_service.services.v2 import search
 
     settings.search_catalog_path = str(catalog)
     settings.legacy_index_path = "artifacts/search/legacy-index.db"

@@ -1,0 +1,15 @@
+/var/log/syslog
+/var/log/mail.log
+/var/log/kern.log
+/var/log/auth.log
+/var/log/user.log
+/var/log/cron.log {
+    daily
+    maxsize 2M
+    rotate 7
+    maxage 7
+    missingok
+    notifempty
+    compress
+    copytruncate
+}

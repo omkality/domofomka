@@ -9,8 +9,8 @@ from contextlib import closing
 from functools import lru_cache
 from pathlib import Path
 
-from src.code_service.v2.localities import load_facts
-from src.code_service.v2.normalize import house_key, text
+from src.code_service.services.v2.localities import load_facts
+from src.code_service.services.v2.normalize import house_key, text
 from tools.catalog.build_catalog import (
     index_streets,
     link_codes,
@@ -20,6 +20,7 @@ from tools.catalog.build_catalog import (
 
 
 def repair(source: Path, legacy: Path, output: Path, locality_facts: Path | None = None) -> dict:
+    """Создать проверяемое исправление отдельной копии поискового каталога."""
     normalized_house = lru_cache(maxsize=65536)(house_key)
     work = output.with_suffix(".building.db")
     subset = output.with_suffix(".source-subset.db")
@@ -47,21 +48,31 @@ def repair(source: Path, legacy: Path, output: Path, locality_facts: Path | None
         db.execute("CREATE TEMP TABLE affected(id TEXT PRIMARY KEY)")
         db.executemany("INSERT INTO affected VALUES(?)", [(identity,) for identity in changed])
         # Also catch ranges previously linked to a plain-number GAR house.
-        suspect = db.execute(
-            "SELECT c.house,p.building_id,b.house FROM legacy.codes c "
-            "JOIN provenance p ON p.source_id=c.id JOIN buildings b ON b.id=p.building_id"
-        )
+        suspect = db.execute(r"""
+            SELECT c.house,
+                   p.building_id,
+                   b.house
+            FROM legacy.codes c
+            JOIN provenance p ON p.source_id = c.id
+            JOIN buildings b ON b.id = p.building_id
+            """)
         mismatched = {identity for raw, identity, actual in suspect if normalized_house(raw) != actual}
         db.executemany(
             "INSERT OR IGNORE INTO affected VALUES(?)",
             [(identity,) for identity in mismatched],
         )
         db.row_factory = sqlite3.Row
-        rows = db.execute(
-            "SELECT c.*,p.building_id AS previous_building,p.resolution AS previous_resolution,b.house AS target_house "
-            "FROM affected a JOIN provenance p ON p.building_id=a.id "
-            "JOIN legacy.codes c ON c.id=p.source_id JOIN buildings b ON b.id=a.id ORDER BY c.id"
-        ).fetchall()
+        rows = db.execute(r"""
+            SELECT c.*,
+                   p.building_id AS previous_building,
+                   p.resolution AS previous_resolution,
+                   b.house AS target_house
+            FROM affected a
+            JOIN provenance p ON p.building_id = a.id
+            JOIN legacy.codes c ON c.id = p.source_id
+            JOIN buildings b ON b.id = a.id
+            ORDER BY c.id
+            """).fetchall()
         db.execute("DELETE FROM codes WHERE building_id IN(SELECT id FROM affected)")
         db.execute("DELETE FROM aliases WHERE building_id IN(SELECT id FROM affected)")
         moved = []
@@ -107,10 +118,13 @@ def repair(source: Path, legacy: Path, output: Path, locality_facts: Path | None
         link_codes(db, subset, relink_stats, load_facts(locality_facts))
         assert db.execute("SELECT count(*) FROM provenance").fetchone()[0] == before
         conflicts = 0
-        for raw, actual in db.execute(
-            "SELECT DISTINCT c.house,b.house FROM legacy.codes c JOIN provenance p ON p.source_id=c.id "
-            "JOIN buildings b ON b.id=p.building_id"
-        ):
+        for raw, actual in db.execute(r"""
+            SELECT DISTINCT c.house,
+                            b.house
+            FROM legacy.codes c
+            JOIN provenance p ON p.source_id = c.id
+            JOIN buildings b ON b.id = p.building_id
+            """):
             conflicts += normalized_house(raw) != actual
         if conflicts:
             raise ValueError(f"Unresolved source house conflicts: {conflicts}")

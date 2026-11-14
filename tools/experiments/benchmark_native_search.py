@@ -20,7 +20,7 @@ from pathlib import Path
 import httpx
 from rapidfuzz.distance import DamerauLevenshtein
 
-from src.code_service.v2.constraints import (
+from src.code_service.services.v2.constraints import (
     complete_name_match,
     has_misaligned_source_fields,
     legacy_result_matches,
@@ -28,8 +28,8 @@ from src.code_service.v2.constraints import (
     name_constraints_match,
     whole_location_match,
 )
-from src.code_service.v2.engine import MAPPING, Catalog, documents, search_body
-from src.code_service.v2.normalize import STOP, address_words, building_kind_matches, parse_query
+from src.code_service.services.v2.engine import MAPPING, Catalog, documents, search_body
+from src.code_service.services.v2.normalize import STOP, address_words, building_kind_matches, parse_query
 from tools.evaluation import evaluate_search as replay
 from tools.evaluation.compare_postgres_catalog import select
 from tools.evaluation.quality_suite import address_fields, literal_words
@@ -41,6 +41,7 @@ from tools.experiments import (
 
 
 def mapping(*, aliases=False, lexical=False, similarity=None, bm25_b=0.75, city_roles=False):
+    """Подготовить конфигурацию полей и анализаторов экспериментального индекса."""
     value = copy.deepcopy(MAPPING)
     if similarity not in {None, "BM25", "boolean"}:
         raise ValueError("Unknown lab similarity")
@@ -130,9 +131,10 @@ def mapping(*, aliases=False, lexical=False, similarity=None, bm25_b=0.75, city_
 
 
 def configurations(stage="initial"):
+    """Перечислить воспроизводимые профили сравнения поискового движка."""
     if stage == "lexical":
         return search_lexical_profiles.profiles()
-    values = [{"name": "catalog", "mode": "catalog"}, {"name": "hybrid", "mode": "hybrid"}]
+    values: list[dict] = [{"name": "catalog", "mode": "catalog"}, {"name": "hybrid", "mode": "hybrid"}]
     for field, fuzziness, prefix in itertools.product(
         ["words", "words.plain", "words.synonyms"], ["1", "AUTO", "AUTO:4,7"], [0, 1]
     ):
@@ -204,6 +206,7 @@ def configurations(stage="initial"):
 
 
 def query_text(message, variant):
+    """Подготовить текст запроса для выбранного варианта сравнения."""
     source = variant.get("text_source")
     query = parse_query(message, preserve_lexical_ordinals=source in {"lexical", "expanded_words"})
     lexical_text = query.words if source == "words" else query.search_text
@@ -217,6 +220,7 @@ def query_text(message, variant):
 
 
 def native_body(message, variant, *, analyzed_tokens=None, street_tokens=None):
+    """Собрать native-запрос OpenSearch с точными адресными ограничениями."""
     query, lexical_text = query_text(message, variant)
     match = {
         "query": lexical_text,
@@ -302,6 +306,7 @@ def build_index(
     bm25_b=0.75,
     city_roles=False,
 ):
+    """Построить отдельный индекс сравнения из зафиксированных документов."""
     if not index.startswith("domofomka-native-lab-"):
         raise ValueError("Only isolated experiment indexes are allowed")
     with httpx.Client(base_url=url, trust_env=False, timeout=120) as client:
@@ -334,10 +339,13 @@ def build_index(
         by_street = collections.defaultdict(list)
         if aliases:
             with Catalog(str(catalog)).connect() as db:
-                for row in db.execute(
-                    "SELECT a.*,b.city_key AS canonical_city,b.street_key AS canonical_street "
-                    "FROM aliases a JOIN buildings b ON b.id=a.building_id"
-                ):
+                for row in db.execute(r"""
+                    SELECT a.*,
+                           b.city_key AS canonical_city,
+                           b.street_key AS canonical_street
+                    FROM aliases a
+                    JOIN buildings b ON b.id = a.building_id
+                    """):
                     by_street[row["canonical_city"], row["canonical_street"]].append(
                         {
                             "building_id": row["building_id"],
@@ -350,6 +358,7 @@ def build_index(
                         by_street[row["canonical_city"], row["canonical_street"]][-1]["city"] = row["city_key"]
 
         def flush():
+            """Записать накопленную ограниченную пачку результатов."""
             payload = "".join(
                 json.dumps({"index": {"_index": index, "_id": doc["id"]}})
                 + "\n"
@@ -381,6 +390,7 @@ def build_index(
 
 
 def analysis_probes(client, index):
+    """Проверить формы токенов выбранного анализатора на контрольных примерах."""
     probes = []
     for query, expected in [
         ("мск,ул.Бианки", ["москва", "бианки"]),
@@ -408,6 +418,7 @@ def native_result(
     locality_places=None,
     city_roles=False,
 ):
+    """Привести найденных кандидатов к общему формату сравнения."""
     query = parse_query(message)
     if not query.words and query.name_words:
         query = replace(query, words=query.name_words)
@@ -428,6 +439,7 @@ def native_result(
     eligible = []
 
     def numeric(word):
+        """Сохранить числовую часть адреса в выбранном преобразовании текста."""
         return any(char.isdigit() for char in word)
 
     query_numbers = {word for word in query.words.split() if numeric(word)} if query_numbers is None else query_numbers
@@ -543,6 +555,7 @@ def native_result(
 
 
 def sample(corpus, reviewed, limit, full=False):
+    """Выбрать детерминированную подвыборку контрольного корпуса."""
     records, seen = [], set()
     success = [
         json.loads(line) for line in (corpus / "successful-queries.jsonl").read_text(encoding="utf8").splitlines()
@@ -585,6 +598,7 @@ def sample(corpus, reviewed, limit, full=False):
 
 
 def reviewed_conflict(case, result, catalog):
+    """Проверить, относится ли случай к отдельно рассмотренному конфликту."""
     if case.get("expected_status") and result["status"] != case["expected_status"]:
         return True
     if case.get("allowed_statuses") and result["status"] not in case["allowed_statuses"]:
@@ -627,6 +641,7 @@ def reviewed_conflict(case, result, catalog):
 
 
 def search_variant(catalog, message, variant, search, analyze=None, city_query=None):
+    """Выполнить поиск в выбранном экспериментальном профиле."""
     parsed = parse_query(message)
     locality = (
         search_locality_profiles.locality_hint(
@@ -753,6 +768,7 @@ def search_variant(catalog, message, variant, search, analyze=None, city_query=N
 
 
 def legacy_exact_match(message, address, variant, analyze):
+    """Проверить точное сохранение прежнего эталонного адреса."""
     fields = address_fields(address)
     row = dict(fields, display=address, guid=None)
     if not building_kind_matches(parse_query(message), row):
@@ -782,6 +798,7 @@ def resume_rows(
     engine_version=None,
     max_query_length=None,
 ):
+    """Прочитать уже завершённые результаты для возобновления прогона."""
     previous = json.loads((path / "frozen-input.json").read_text(encoding="utf8"))
     if previous["sha256"] != fingerprint or previous["variants"] != variants:
         raise ValueError("Cannot resume with different inputs or configurations")
@@ -819,6 +836,7 @@ def resume_rows(
 
 
 def run(args):
+    """Выполнить выбранный контрольный прогон и сохранить его результаты."""
     if args.output.exists():
         raise FileExistsError("Use a fresh experiment directory")
     args.output.mkdir(parents=True)
@@ -940,6 +958,7 @@ def run(args):
     )
 
     def evaluate(index_case):
+        """Выполнить контрольный запрос и собрать его результат для сравнения."""
         index, case = index_case
         if not hasattr(local, "client"):
             local.client = httpx.Client(base_url=args.url, trust_env=False, timeout=15)
@@ -956,6 +975,7 @@ def run(args):
         analysis_cache = {}
 
         def analyze(text, analyzer):
+            """Получить токены выбранного анализатора для проверки конфигурации."""
             key = (text, analyzer)
             if key not in analysis_cache:
                 response = local.client.post("/" + args.index + "/_analyze", json={"analyzer": analyzer, "text": text})
@@ -976,11 +996,13 @@ def run(args):
             else:
 
                 def search(body):
+                    """Выполнить экспериментальный поисковый запрос."""
                     response = local.client.post("/" + args.index + "/_search", json=body)
                     response.raise_for_status()
                     return response.json()["hits"]["hits"]
 
                 def city_query(body):
+                    """Сформировать ограничение местности для экспериментального поиска."""
                     response = local.client.post("/" + args.index + "/_search", json=body)
                     response.raise_for_status()
                     return response.json()
@@ -988,7 +1010,7 @@ def run(args):
                 try:
                     result = search_variant(catalog, case["query"], variant, search, analyze, city_query)
                 except httpx.HTTPError as exc:
-                    backend_error = {"type": type(exc).__name__}
+                    backend_error: dict = {"type": type(exc).__name__}
                     if isinstance(exc, httpx.HTTPStatusError):
                         backend_error["http_status"] = exc.response.status_code
                         try:
@@ -1088,6 +1110,7 @@ def run(args):
         return outcomes
 
     def record(stream, rows):
+        """Добавить результат контрольного случая в текущий отчёт."""
         for row in rows:
             name, cohort = row["variant"], row["cohort"]
             counts = counters[name]
@@ -1141,7 +1164,9 @@ def run(args):
         ],
     }
     current_sources = replay.source_fingerprints()
-    current_sources["tools/experiments/benchmark_native_search.py"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    current_sources["tools/experiments/benchmark_native_search.py"] = hashlib.sha256(
+        Path(__file__).read_bytes()
+    ).hexdigest()
     current_sources["tools/experiments/search_lexical_profiles.py"] = hashlib.sha256(
         Path(search_lexical_profiles.__file__).read_bytes()
     ).hexdigest()

@@ -1,0 +1,12 @@
+[sqlfluff]
+dialect = postgres
+templater = raw
+max_line_length = 120
+rules = LT01,LT02,LT03,LT04,LT05,LT06,LT07,LT08,LT09,LT10,LT11,LT12,CP01
+
+[sqlfluff:indentation]
+indent_unit = space
+tab_space_size = 4
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = upper

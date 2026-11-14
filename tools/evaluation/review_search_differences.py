@@ -9,8 +9,8 @@ import unicodedata
 from functools import lru_cache
 from pathlib import Path
 
-from src.code_service.v2.engine import Catalog
-from src.code_service.v2.normalize import legacy_house_matches
+from src.code_service.services.v2.engine import Catalog
+from src.code_service.services.v2.normalize import legacy_house_matches
 from tools.evaluation.quality_suite import address_fields, literal_words
 
 
@@ -19,6 +19,7 @@ def context_score(label, result, identity):
     options = [result] if result["status"] in {"found", "no_codes"} else result.get("candidates", [])
 
     def matches(option, constraints):
+        """Проверить выполнение текущих ограничений адресного случая."""
         building = identity(option["building_id"]) if option.get("building_id") else None
         if not building and option.get("address"):
             fields = address_fields(option["address"])
@@ -53,6 +54,7 @@ def context_score(label, result, identity):
 
 
 def score_context_run(args):
+    """Сравнить результаты вариантов контекста на фиксированных случаях."""
     args.output.mkdir(parents=True, exist_ok=False)
     frozen = json.loads((args.run / "frozen-input.json").read_text(encoding="utf8"))
     catalog = Catalog(str(args.catalog))
@@ -60,6 +62,7 @@ def score_context_run(args):
 
     @lru_cache(maxsize=4096)
     def identity(identifier):
+        """Получить устойчивую идентичность сравниваемого адреса."""
         row = catalog.building(identifier)
         if row:
             with catalog.connect() as db:
@@ -100,10 +103,12 @@ def score_context_run(args):
 
 
 def folded(value):
+    """Нормализовать строку для сопоставления форм написания."""
     return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", value or "").casefold().replace("ё", "е")).strip()
 
 
 def literal_identity(row):
+    """Построить буквальную идентичность адреса для разбора расхождений."""
     try:
         kind = address_fields(row["display"])["kind"]
     except (ValueError, KeyError):
@@ -112,6 +117,7 @@ def literal_identity(row):
 
 
 def classify(case, baseline, challenger, identity):
+    """Отнести расхождение к проверяемой категории адресного конфликта."""
     reference = case.get("expected_address") or case.get("historical_suggestion_not_truth")
     if reference and ", дом " in reference and not legacy_house_matches(case["query"], reference):
         return "reference_house_conflict"
@@ -119,6 +125,7 @@ def classify(case, baseline, challenger, identity):
         return "backend_error"
 
     def signature(value):
+        """Получить устойчивое представление результата без непостоянных измерений."""
         return (
             value["status"],
             value.get("building_id"),
@@ -155,6 +162,7 @@ def classify(case, baseline, challenger, identity):
 
 
 def context(root, case):
+    """Получить значимый адресный контекст для сравнения вариантов."""
     path = root / (case.get("dialog", "missing") + ".json")
     if not path.is_file():
         return {"available": False}
@@ -187,6 +195,7 @@ def context(root, case):
 
 
 def review(args):
+    """Подготовить агрегированный отчёт о спорных результатах поиска."""
     args.output.mkdir(parents=True, exist_ok=False)
     frozen = json.loads((args.run / "frozen-input.json").read_text(encoding="utf8"))
     cases = frozen["cases"]
@@ -200,6 +209,7 @@ def review(args):
 
     @lru_cache(maxsize=8192)
     def identity(identifier):
+        """Получить устойчивую идентичность сравниваемого адреса."""
         row = catalog.building(identifier)
         return (
             {key: row.get(key) for key in ("id", "guid", "display", "city", "street", "house", "region", "lineage")}

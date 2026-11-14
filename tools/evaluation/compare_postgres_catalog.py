@@ -10,13 +10,14 @@ import time
 from pathlib import Path
 
 from src.code_service.config import settings
-from src.code_service.v2 import search
-from src.code_service.v2.engine import Catalog
-from src.code_service.v2.postgres import PostgresCatalog
+from src.code_service.services.v2 import search
+from src.code_service.services.v2.engine import Catalog
+from src.code_service.services.v2.postgres import PostgresCatalog
 from tools.experiments.postgres_search_experiment import PostgresExperiment
 
 
 def select(corpus: Path, limit: int):
+    """Выбрать фиксированный набор случаев для сравнения хранилищ."""
     rows, seen = [], set()
     for name in ("correction-hypotheses", "successful-queries"):
         for line in (corpus / (name + ".jsonl")).read_text(encoding="utf8").splitlines():
@@ -30,6 +31,7 @@ def select(corpus: Path, limit: int):
 
 
 def signature(result: dict):
+    """Получить устойчивое представление результата без непостоянных измерений."""
     return {
         key: result[key]
         for key in ("status", "engine", "address", "building_id", "candidates", "fallback_reason", "fallback_rejected")
@@ -38,6 +40,7 @@ def signature(result: dict):
 
 
 async def compare(args):
+    """Сравнить результаты одинаковых запросов на проверяемых вариантах."""
     if args.output.exists():
         raise FileExistsError("Preserve completed results; use a new output directory")
     args.output.mkdir(parents=True)
@@ -63,6 +66,7 @@ async def compare(args):
     fingerprint = hashlib.sha256(json.dumps(records, sort_keys=True).encode()).hexdigest()
 
     async def lookup(backend, query):
+        """Получить результат текущего варианта поиска для контрольного запроса."""
         search.get_catalog = lambda: sqlite if backend == "sqlite" else postgres
         started = time.perf_counter()
         result = await search.lookup(query)

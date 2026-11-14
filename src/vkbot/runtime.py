@@ -1,3 +1,5 @@
+"""Жизненный цикл сбора событий, обработки, доставки и обслуживания очереди."""
+
 import asyncio
 import contextlib
 import json
@@ -24,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def validate_environment(settings: Any) -> None:
+    """Запретить запуск бота с неверным сообществом или опасным сочетанием настроек."""
     if str(settings.vk_group_id) != str(settings.expected_vk_group_id):
         raise ValueError("VK_GROUP_ID does not match EXPECTED_VK_GROUP_ID")
     if settings.dev_faults_enabled and (
@@ -35,7 +38,10 @@ def validate_environment(settings: Any) -> None:
 
 
 class Runtime:
+    """Жизненный цикл сборщика, обработчиков, доставки и обслуживания очереди."""
+
     def __init__(self, settings: Any):
+        """Проверить окружение и собрать очередь с общим ограничителем VK."""
         validate_environment(settings)
         self.settings = settings
         self.store = QueueStore(
@@ -55,6 +61,7 @@ class Runtime:
     def verify_token(self) -> None:
         # The token must be authorized for the configured community before any
         # history reads or sends can happen, including on a misconfigured dev.
+        """Проверить токен и ожидаемое тестовое или рабочее сообщество VK."""
         session = RateSession(self.gate)
         try:
             vk = VkApi(token=self.settings.vk_group_token, api_version="5.199", session=session)
@@ -63,6 +70,7 @@ class Runtime:
             session.close()
 
     async def run(self) -> None:
+        """Удерживать единственный runtime сообщества и выполнять его фоновые задачи."""
         await asyncio.to_thread(self.verify_token)
         await asyncio.to_thread(self.store.initialize)
         # One collector/runtime per community. This is an operator-controlled
@@ -90,6 +98,7 @@ class Runtime:
             guard.close()
 
     async def _maintenance(self) -> None:
+        """Периодически очищать допустимые записи и проверять состояние хранения."""
         from src.vkbot.maintenance import compact, health
 
         while True:
@@ -138,11 +147,13 @@ class Runtime:
             await asyncio.sleep(self.settings.queue_maintenance_interval_seconds)
 
     async def _guard(self, connection: Any) -> None:
+        """Выполнять фоновую операцию с контролируемым повтором после ошибки."""
         while True:
             await asyncio.sleep(self.settings.queue_guard_interval_seconds)
             await asyncio.to_thread(lambda: connection.execute("SELECT 1").fetchone())
 
     def _longpoll(self) -> VkBotLongPoll:
+        """Получить события Long Poll с ограниченными сетевыми бюджетами."""
         vk = VkApi(token=self.settings.vk_group_token, api_version="5.199", session=RateSession(self.gate))
         poll = VkBotLongPoll(vk=vk, group_id=self.store.group_id, wait=network_settings.vk_longpoll_wait_seconds)
         poll.session.close()
@@ -155,6 +166,7 @@ class Runtime:
 
     def _acknowledge(self, records: list[dict]) -> None:
         # Ephemeral acknowledgement is best effort and only follows durable ingest.
+        """Подтвердить записанное callback-нажатие без повторной рассылки уведомлений."""
         session = RateSession(self.gate)
         try:
             vk = VkApi(token=self.settings.vk_group_token, api_version="5.199", session=session).get_api()
@@ -191,6 +203,7 @@ class Runtime:
             session.close()
 
     async def _collect(self) -> None:
+        """Собирать события VK и сохранять их вместе с курсором до обработки."""
         poll = None
         while True:
             try:
@@ -233,6 +246,7 @@ class Runtime:
                 await asyncio.sleep(network_settings.bot_restart_delay_seconds)
 
     async def _reconcile(self) -> None:
+        """Периодически добавлять отсутствующие сообщения из истории."""
         processor = await asyncio.to_thread(Processor, self.settings, self.store, self.gate)
         reconciler = Reconciler(processor.vk, self.store, self.settings)
         try:
@@ -247,12 +261,14 @@ class Runtime:
             processor.close()
 
     async def _heartbeat(self, table: str, job: dict) -> None:
+        """Продлевать аренду, пока worker выполняет текущую операцию."""
         while True:
             await asyncio.sleep(max(self.settings.queue_heartbeat_min_seconds, self.settings.queue_lease_seconds / 3))
             if not await asyncio.to_thread(self.store.renew, table, job):
                 return
 
     async def _worker(self, table: str, index: int) -> None:
+        """Обрабатывать разрешённые задания очереди, сохраняя исход попытки."""
         processor = await asyncio.to_thread(Processor, self.settings, self.store, self.gate)
         try:
             while True:
@@ -317,6 +333,7 @@ class Runtime:
             processor.close()
 
     def _observed_job(self, operation: Any, table: str, job: dict) -> None:
+        """Измерить попытку задания и сохранить диагностику после рабочей операции."""
         if not self.store.telemetry:
             operation(job)
             return

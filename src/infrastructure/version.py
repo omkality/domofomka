@@ -1,3 +1,5 @@
+"""Версия пакета, ревизия образа и безопасные сведения о сборке."""
+
 import tomllib
 from pathlib import Path
 

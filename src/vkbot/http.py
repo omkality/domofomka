@@ -1,3 +1,5 @@
+"""Ограниченные HTTP-попытки VK, общий RateGate и выбор сетевого маршрута."""
+
 import os
 import threading
 import time
@@ -16,6 +18,7 @@ class TimeoutSession(Session):
     """Bound VK API requests while preserving explicit Long Poll timeouts."""
 
     def __init__(self, vk_proxy_url: str | None = None, *, longpoll: bool = False):
+        """Настроить ограниченные HTTP-попытки и отдельный режим Long Poll."""
         super().__init__()
         self.longpoll = longpoll
         self.vk_proxy_url = vk_proxy_url if vk_proxy_url is not None else os.getenv("VK_PROXY_URL") or None
@@ -25,6 +28,7 @@ class TimeoutSession(Session):
                 raise ValueError("VK_PROXY_URL must be an HTTP or HTTPS proxy URL")
 
     def request(self, method: str, url: str, **kwargs: Any) -> Response:
+        """Выполнить ограниченный HTTP-запрос с выбранным сетевым бюджетом."""
         if self.longpoll:
             kwargs["timeout"] = (
                 network_settings.vk_connect_timeout_seconds,
@@ -109,25 +113,34 @@ class TimeoutSession(Session):
 
 
 class RateGate:
+    """Общий ограничитель частоты фактических HTTP-попыток VK."""
+
     def __init__(self, interval: float):
+        """Создать общий потокобезопасный бюджет HTTP-запросов."""
         self.interval = interval
         self.lock = threading.Lock()
         self.last = 0.0
 
     @measured("vk.rate_limit_wait")
     def wait(self) -> None:
+        """Дождаться разрешённого момента следующего HTTP-запроса."""
         with self.lock:
             remaining = self.interval - (time.monotonic() - self.last)
             if remaining > 0:
                 time.sleep(remaining)
             self.last = time.monotonic()
 
+
 class RateSession(TimeoutSession):
+    """Сессия VK с общим ограничителем частоты запросов."""
+
     def __init__(self, gate: RateGate, *, longpoll: bool = False):
+        """Подключить общий бюджет к ограниченной сессии VK."""
         super().__init__(longpoll=longpoll)
         self.gate = gate
 
     def send(self, request: Any, **kwargs: Any) -> Any:
         # Gate actual HTTP attempts, including retries inside TimeoutSession.
+        """Выполнить HTTP-попытку после проверки общего ограничителя."""
         self.gate.wait()
         return super().send(request, **kwargs)

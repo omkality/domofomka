@@ -10,6 +10,7 @@ from tools.catalog.import_gar import records
 
 
 def region_facts(directory: Path) -> dict:
+    """Извлечь канонические региональные названия и связи ГАР."""
     files = list(directory.glob("AS_ADDR_OBJ_2*.XML"))
     if len(files) != 1:
         raise ValueError("Expected one address-object snapshot per region")
@@ -41,6 +42,7 @@ def region_facts(directory: Path) -> dict:
 
 
 def main():
+    """Извлечь действующие субъекты РФ из ADDR_OBJ, не читая XML домов."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=Path("artifacts/gar_xml"))
     parser.add_argument("--output", type=Path, required=True)

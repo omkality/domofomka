@@ -108,10 +108,16 @@ jobs:
       - run: uv sync --frozen --all-groups
       - name: Audit locked runtime dependencies
         run: |
-          uv export --frozen --no-dev --group api --group vkbot --no-emit-project --output-file "$RUNNER_TEMP/runtime-requirements.txt"
+          uv export --frozen --no-dev --group api --group vkbot --group migrations --no-emit-project --output-file "$RUNNER_TEMP/runtime-requirements.txt"
           uv run --frozen pip-audit --require-hashes --disable-pip -r "$RUNNER_TEMP/runtime-requirements.txt"
-      - run: uv run ruff check --no-cache src tests tools ops
-      - run: uv run python -m pytest -q -p no:cacheprovider
+      - run: uv run --frozen --all-groups ruff check --no-cache src tests tools ops
+      - name: Check code, SQL and explicit environment configuration
+        run: |
+          uv run --frozen --all-groups black --check src tests tools ops
+          uv run --frozen --all-groups mypy --config-file=mypy.ini src tools ops
+          uv run --frozen --all-groups sqlfluff lint src/infrastructure/database --disable-progress-bar
+          uv run --frozen --all-groups python -m tools.configuration.environment --check-examples
+      - run: uv run --frozen --all-groups python -m pytest -q -p no:cacheprovider
       - name: Build runtime images without development dependencies
         run: |
           docker build --label org.opencontainers.image.source=https://github.com/omkality/domofomka --label org.opencontainers.image.revision="$GITHUB_SHA" -t domofomka-api-check -f Dockerfile.api .

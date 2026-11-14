@@ -1,0 +1,53 @@
+[
+  {
+    "source": "journald.conf",
+    "target": "/etc/systemd/journald.conf.d/99-storage-budget.conf"
+  },
+  {
+    "source": "logrotate-timer.conf",
+    "target": "/etc/systemd/system/logrotate.timer.d/zz-storage-budget.conf"
+  },
+  {
+    "source": "logrotate/btmp",
+    "target": "/etc/logrotate.d/btmp"
+  },
+  {
+    "source": "logrotate/wtmp",
+    "target": "/etc/logrotate.d/wtmp"
+  },
+  {
+    "source": "logrotate/rsyslog",
+    "target": "/etc/logrotate.d/rsyslog",
+    "when": "exists"
+  },
+  {
+    "source": "logrotate/tinyproxy",
+    "target": "/etc/logrotate.d/tinyproxy",
+    "when": "exists"
+  },
+  {
+    "source": "apt-cache.conf",
+    "target": "/etc/apt/apt.conf.d/99-cache-budget"
+  },
+  {
+    "source": "sysctl.conf",
+    "target": "/etc/sysctl.d/99-storage-no-core.conf"
+  },
+  {
+    "source": "../disk_reserve.py",
+    "target": "/usr/local/libexec/domofomka-disk-reserve.py"
+  },
+  {
+    "source": "storage.env",
+    "target": "/etc/domofomka-storage.env",
+    "when": "missing"
+  },
+  {
+    "source": "../systemd/domofomka-disk-reserve.service",
+    "target": "/etc/systemd/system/domofomka-disk-reserve.service"
+  },
+  {
+    "source": "../systemd/domofomka-disk-reserve.timer",
+    "target": "/etc/systemd/system/domofomka-disk-reserve.timer"
+  }
+]

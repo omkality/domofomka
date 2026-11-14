@@ -1,0 +1,10 @@
+/var/log/tinyproxy/tinyproxy.log {
+    daily
+    maxsize 1M
+    rotate 4
+    maxage 7
+    missingok
+    notifempty
+    compress
+    copytruncate
+}

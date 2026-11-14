@@ -16,9 +16,9 @@ from pathlib import Path
 
 import httpx
 
-from src.code_service.v1.matching import STREET_TYPES, address_exists
-from src.code_service.v2.engine import Catalog, search_body
-from src.code_service.v2.normalize import address_words, legacy_house_matches, parse_query
+from src.code_service.services.v1.matching import STREET_TYPES, address_exists
+from src.code_service.services.v2.engine import Catalog, search_body
+from src.code_service.services.v2.normalize import address_words, legacy_house_matches, parse_query
 
 legacy_groups = []
 legacy_cache = {}
@@ -29,23 +29,36 @@ search_config = {}
 
 
 def source_fingerprints() -> dict[str, str]:
+    """Зафиксировать контрольные суммы кода, словарей и конфигурации сравнения."""
     root = Path(__file__).resolve().parents[2]
     paths = [root / "uv.lock", root / "tools/experiments/compose.opensearch.yml"]
     for folder in ["src/code_service", "src/infrastructure", "tools/evaluation", "tools/experiments"]:
-        paths.extend(p for p in (root / folder).rglob("*") if p.suffix in {".py", ".json"})
+        paths.extend(p for p in (root / folder).rglob("*") if p.suffix in {".py", ".json", ".sql"})
     return {
         path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in sorted(paths) if path.is_file()
+        for path in sorted(paths)
+        if path.is_file()
     }
 
 
 def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_config: dict | None = None):
+    """Подготовить входные данные и читатели процесса сравнения."""
     search_config.clear()
     search_config.update(query_config or {})
     with sqlite3.connect(legacy) as db:
-        legacy_groups[:] = db.execute(
-            "SELECT min(id),city,street_type,street,house FROM codes GROUP BY city,street_type,street,house ORDER BY min(id)"
-        ).fetchall()
+        legacy_groups[:] = db.execute(r"""
+            SELECT min(id),
+                   city,
+                   street_type,
+                   street,
+                   house
+            FROM codes
+            GROUP BY city,
+                     street_type,
+                     street,
+                     house
+            ORDER BY min(id)
+            """).fetchall()
     catalogs[:] = [Catalog(catalog_path)]
     if opensearch_url:
         search_clients[:] = [(opensearch_url, httpx.Client(trust_env=False, timeout=2))]
@@ -57,6 +70,7 @@ def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_c
 
 
 def legacy_lookup(message: str, *, accept_source=None):
+    """Воспроизвести прежнее совпадение v1 на неизменённых исходных группах."""
     if not message:
         return None
     parts = re.split("[^а-я]", message)
@@ -85,6 +99,7 @@ def legacy_lookup(message: str, *, accept_source=None):
 
 
 def evaluate(record: dict):
+    """Выполнить контрольный запрос и собрать его результат для сравнения."""
     q = record["query"]
     start = time.perf_counter()
     old = legacy_lookup(q)
@@ -110,6 +125,7 @@ def evaluate(record: dict):
     ids = expected_ids.get((expected.words, expected.house), set())
 
     def key(value: str) -> tuple:
+        """Построить устойчивый ключ сравнения текущей записи."""
         return (parse_query(value).words, parse_query(value).house)
 
     matched = (result.get("building_id") in ids) or (

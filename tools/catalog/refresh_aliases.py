@@ -4,12 +4,17 @@ import argparse
 import sqlite3
 from pathlib import Path
 
-from src.code_service.v2.normalize import indexed_name_words
+from src.code_service.services.v2.normalize import indexed_name_words
 
 
 def refresh(db: sqlite3.Connection) -> int:
+    """Перестроить FTS-индекс исходных вариантов адреса, сохранив дома и коды."""
     db.execute("DROP TABLE IF EXISTS alias_search")
-    db.execute("CREATE VIRTUAL TABLE alias_search USING fts5(building_id UNINDEXED,house UNINDEXED,words)")
+    db.execute(r"""
+        CREATE VIRTUAL TABLE alias_search USING fts5(building_id UNINDEXED,
+                                                     house UNINDEXED,
+                                                     words)
+        """)
     count = 0
     for building, city, street, house in db.execute("SELECT * FROM aliases"):
         db.execute("INSERT INTO alias_search VALUES(?,?,?)", (building, house, indexed_name_words(city, street)))

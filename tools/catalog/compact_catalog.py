@@ -10,10 +10,12 @@ import sqlite3
 import zlib
 from pathlib import Path
 
+from src.infrastructure.database.resources import read_sql
 from tools.catalog.refresh_aliases import refresh
 
 
 def compact(source: Path, output: Path):
+    """Собрать компактный каталог со сжатыми домами без кодов."""
     work = output.with_suffix(".building.db")
     output.parent.mkdir(parents=True, exist_ok=True)
     if work.exists():
@@ -26,21 +28,7 @@ def compact(source: Path, output: Path):
     db.execute("PRAGMA synchronous=OFF")
     db.execute("PRAGMA cache_size=-262144")
     db.execute("ATTACH DATABASE ? AS source", (str(source.resolve()),))
-    db.executescript("""
-    CREATE TABLE buildings AS SELECT b.* FROM (SELECT DISTINCT building_id FROM source.codes) c JOIN source.buildings b ON b.id=c.building_id;
-    CREATE UNIQUE INDEX building_id ON buildings(id);
-    CREATE INDEX building_lookup ON buildings(street_key,house);
-    CREATE INDEX building_street ON buildings(city_key,street_key,house);
-    CREATE TABLE codes AS SELECT * FROM source.codes;
-    CREATE INDEX codes_building ON codes(building_id);
-    CREATE TABLE aliases AS SELECT * FROM source.aliases;
-    CREATE TABLE streets(id TEXT PRIMARY KEY,city_key TEXT,street_key TEXT,words TEXT,has_codes INTEGER);
-    CREATE TABLE street_houses(id TEXT PRIMARY KEY,data BLOB);
-    CREATE VIRTUAL TABLE search USING fts5(id UNINDEXED,words,tokenize='unicode61');
-    CREATE VIRTUAL TABLE vocabulary USING fts5vocab(search,'row');
-    CREATE TABLE metadata AS SELECT * FROM source.metadata;
-    INSERT INTO metadata VALUES('format','compact');
-    """)
+    db.executescript(read_sql("compact-sqlite.sql"))
     coded = {(r[0], r[1]) for r in db.execute("SELECT DISTINCT city_key,street_key FROM buildings")}
     count = 0
     houses = 0
@@ -48,7 +36,17 @@ def compact(source: Path, output: Path):
         groups = {}
         row_count = 0
         for house in src.execute(
-            "SELECT display,house,city,street,region,lineage FROM buildings WHERE city_key=? AND street_key=?",
+            r"""
+            SELECT display,
+                   house,
+                   city,
+                   street,
+                   region,
+                   lineage
+            FROM buildings
+            WHERE city_key = ?
+                AND street_key = ?
+            """,
             (street["city_key"], street["street_key"]),
         ):
             prefix = house["display"].rsplit(", дом ", 1)[0]

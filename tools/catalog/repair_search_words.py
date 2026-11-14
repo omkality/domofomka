@@ -6,11 +6,12 @@ import json
 import sqlite3
 from pathlib import Path
 
-from src.code_service.v2.normalize import indexed_name_words
+from src.code_service.services.v2.normalize import indexed_name_words
 from tools.catalog.refresh_aliases import refresh
 
 
 def repair(source: Path, output: Path) -> dict:
+    """Создать проверяемое исправление отдельной копии поискового каталога."""
     if output.exists() or source.resolve() == output.resolve():
         raise FileExistsError("Preserve the frozen source and previous result")
     output.parent.mkdir(parents=True, exist_ok=True)

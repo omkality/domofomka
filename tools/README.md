@@ -10,14 +10,16 @@
 | `evaluation` | Повтор запросов, сравнение ответов и контроль скорости. |
 | `experiments` | Сравнение поисковых движков, анализаторов и библиотек. Не часть рабочего окружения. |
 | `operations` | Передача выпуска в CI/CD, проверка образов и приёмка dev. |
+| `configuration` | Проверка полноты и единого порядка переменных окружения без изменения значений. |
 
 Запускайте из корня репозитория через `python -m`, например:
 
 ```bash
-uv run --group api python -m tools.catalog.build_catalog --help
-uv run --group api python -m tools.history.export_vk --help
-uv run --group api python -m tools.evaluation.evaluate_search --help
-uv run --group api python -m tools.operations.dev_acceptance --help
+uv run --frozen --all-groups python -m tools.catalog.build_catalog --help
+uv run --frozen --all-groups python -m tools.history.export_vk --help
+uv run --frozen --all-groups python -m tools.evaluation.evaluate_search --help
+uv run --frozen --all-groups python -m tools.operations.dev_acceptance --help
+uv run --frozen --all-groups python -m tools.configuration.environment --check-examples
 ```
 
 У каждой команды свой `--help`. Не запускайте импорт или исправление каталога

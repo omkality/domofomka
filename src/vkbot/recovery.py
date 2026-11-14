@@ -7,12 +7,16 @@ from src.vkbot.queue import QueueStore, event_record
 
 
 class Reconciler:
+    """Восстановление отсутствующих входящих сообщений из ограниченной истории VK."""
+
     def __init__(self, vk: Any, store: QueueStore, settings: Any):
+        """Сохранить VK-клиент, очередь и границы восстановления истории."""
         self.vk = vk
         self.store = store
         self.settings = settings
 
     def run(self) -> int:
+        """Добавить отсутствующие входящие сообщения и сохранить watermark сверки."""
         upper = time.time()
         tracking = self.store.get_state("tracking_started", upper)
         watermark = self.store.get_state("reconcile_watermark")
@@ -63,6 +67,7 @@ class Reconciler:
         return added
 
     def _history(self, peer: int, lower: float) -> list[dict]:
+        """Прочитать ограниченную историю диалога до заданного watermark."""
         offset = 0
         messages = []
         while True:

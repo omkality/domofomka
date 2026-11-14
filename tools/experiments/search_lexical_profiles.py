@@ -5,11 +5,12 @@ import re
 import time
 from functools import lru_cache
 
-from src.code_service.v2.engine import Catalog
-from src.code_service.v2.normalize import NAME_LABELS, ORDINALS, STOP, TENS, ordinals
+from src.code_service.services.v2.engine import Catalog
+from src.code_service.services.v2.normalize import NAME_LABELS, ORDINALS, STOP, TENS, ordinals
 
 
 def exact_text_match(tokens, row, aliases=()):
+    """Проверить буквальное совпадение значимого названия."""
     return tokens in [
         set(row["street_key"].split()),
         set((row["city_key"] + " " + row["street_key"]).split()),
@@ -21,6 +22,7 @@ class ExactCatalog(Catalog):
     """Лабораторный контроль: приоритет полного имени, затем прежнее ранжирование."""
 
     def _resolve_candidates(self, query, variants, candidates):
+        """Отфильтровать и ранжировать кандидатов до ответа или уточнения."""
         exact = [
             row
             for row in candidates
@@ -34,6 +36,7 @@ class ExactCatalog(Catalog):
 
 
 def ordinal_rules() -> list[str]:
+    """Построить правила преобразования порядковых числительных для сравнения."""
     forms = {}
     for root, number in ORDINALS.items():
         if root == "трет":
@@ -54,6 +57,7 @@ def ordinal_rules() -> list[str]:
 
 @lru_cache(maxsize=1)
 def ordinal_replacement():
+    """Преобразовать одну порядковую форму контрольного профиля."""
     values = dict(rule.split(" => ") for rule in ordinal_rules())
     pattern = re.compile(
         r"\b(?:" + "|".join(re.escape(word) for word in sorted(values, key=lambda s: (-len(s), s))) + r")\b"
@@ -62,11 +66,13 @@ def ordinal_replacement():
 
 
 def expanded_ordinals(value):
+    """Подготовить текст с раскрытыми порядковыми номерами улиц."""
     pattern, values = ordinal_replacement()
     return pattern.sub(lambda match: values[match[0]], value)
 
 
 def extend_analysis(definition: dict) -> None:
+    """Добавить анализаторы выбранного экспериментального профиля."""
     analysis = definition["settings"]["analysis"]
     analysis["char_filter"]["numbered_suffix"] = {
         "type": "pattern_replace",
@@ -107,7 +113,8 @@ def extend_analysis(definition: dict) -> None:
 
 
 def profiles() -> list[dict]:
-    values = [{"name": "catalog", "mode": "catalog"}, {"name": "hybrid", "mode": "hybrid"}]
+    """Перечислить фиксированные варианты лексического сравнения."""
+    values: list[dict] = [{"name": "catalog", "mode": "catalog"}, {"name": "hybrid", "mode": "hybrid"}]
     pipelines = [
         ("python", "words", "query_plain", "words.plain"),
         ("parser", "structural", "clean_syn", "words.plain"),
@@ -229,6 +236,7 @@ def guard_street_roles(body, tokens, street_tokens=None):
     text = " ".join(alphabetic if street_tokens is None else street_tokens)
 
     def branch(value, nested=False):
+        """Проверить одну ветвь экспериментального выбора кандидатов."""
         block = value["bool"]
         full, street = block["must"]
         full_options = next(iter(full["match"].values()))
@@ -257,7 +265,10 @@ def guard_street_roles(body, tokens, street_tokens=None):
 
 
 def street_probe_body(body):
+    """Собрать запрос кандидатов улицы для выбранного профиля."""
+
     def strip(value):
+        """Удалить служебные формы выбранного лексического профиля."""
         if isinstance(value, dict):
             if "filter" in value:
                 value["filter"] = [
@@ -277,6 +288,7 @@ def street_probe_body(body):
 
 
 def known_street(hits, tokens):
+    """Проверить существование точной улицы перед ослаблением поиска."""
     for hit in hits:
         source = hit.get("_source", {})
         aliases = [
@@ -292,6 +304,7 @@ def known_street(hits, tokens):
 
 
 def probes(client, index):
+    """Сформировать контрольные запросы к анализатору и индексу."""
     values = []
     for query, expected in [
         ("мск восьмая парковая", ["москва", "8", "парковая"]),
@@ -308,6 +321,7 @@ def probes(client, index):
 
 
 def clone_documents(client, source: str, target: str, definition: dict, expected_meta: dict) -> int:
+    """Перенести одинаковые документы в новый индекс сравнения."""
     if not source.startswith("domofomka-native-lab-") or not target.startswith("domofomka-native-lab-"):
         raise ValueError("Only isolated lab indexes may be cloned")
     response = client.get("/" + source + "/_mapping")

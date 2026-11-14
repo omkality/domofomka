@@ -8,7 +8,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e
 
 COPY pyproject.toml uv.lock ./
 
-RUN uv sync --frozen --no-dev --group api
+RUN uv sync --frozen --no-dev --group api --group migrations
 
 FROM python:3.12.16-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS runtime
 

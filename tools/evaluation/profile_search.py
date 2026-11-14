@@ -12,7 +12,10 @@ from src.infrastructure.network import tls_context
 
 
 def measure(url: str, version: str, queries: collections.abc.Iterable[str], workers: int) -> dict:
+    """Измерить выбранный сценарий без подмены его результата."""
+
     def request(query: str) -> tuple:
+        """Выполнить ограниченный HTTP-запрос с выбранным сетевым бюджетом."""
         with httpx.Client(verify=tls_context(), trust_env=False, timeout=30) as client:
             started = time.perf_counter()
             response = client.get(f"{url}/api/{version}/codes/msg", params={"message": query})

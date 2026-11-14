@@ -28,10 +28,12 @@ EVIDENCE_ORDER = {
 
 def words(value: str) -> tuple[str, ...]:
     # Никаких stemming, исправлений опечаток или нормализатора проверяемого поиска.
+    """Выделить нормализованные слова анализируемого сообщения."""
     return tuple(re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")))
 
 
 def kind_key(value: str) -> str:
+    """Получить канонический ключ типа адресного объекта."""
     return "".join(words(value))
 
 
@@ -42,6 +44,7 @@ def query_key(value: str) -> str:
 
 
 def extract_region(directory: Path) -> dict:
+    """Извлечь явно заданный регион из пользовательского текста."""
     files = list(directory.glob("AS_ADDR_OBJ_2*.XML"))
     if len(files) != 1:
         raise ValueError("Expected one address-object snapshot per region")
@@ -63,6 +66,7 @@ class LocalityMatcher:
     """Лексические признаки для аналитики; не геокодер и не выбор города пользователя."""
 
     def __init__(self, places: list[dict], street_names: set[str] | None = None):
+        """Сохранить зависимости и настроить ресурсы экземпляра."""
         self.places = {}
         self.trie = {}
         self.street_names = {words(name) for name in street_names or set()}
@@ -82,12 +86,14 @@ class LocalityMatcher:
                 self._insert(words(alias), key, True)
 
     def _insert(self, spelling: tuple[str, ...], key: tuple[str, ...], alias: bool) -> None:
+        """Добавить подготовленное название в индекс упоминаний местностей."""
         node = self.trie
         for token in spelling:
             node = node.setdefault(token, {})
         node[None] = (key, alias)
 
     def find(self, value: str) -> list[dict]:
+        """Найти адресные упоминания в тексте с помощью подготовленного индекса."""
         normalized = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")
         spans = list(re.finditer(r"[^\W_]+", normalized))
         tokens = tuple(match[0] for match in spans)
@@ -108,9 +114,7 @@ class LocalityMatcher:
             category = (
                 "city"
                 if item["kinds"] & {"г", "город"}
-                else "urban_place"
-                if item["kinds"] & URBAN_KINDS
-                else "other_settlement"
+                else "urban_place" if item["kinds"] & URBAN_KINDS else "other_settlement"
             )
             prefix = tokens[start - 1] if start else ""
             # В ГАР есть числовые названия посёлков; «д. 3» обычно номер дома.
@@ -151,10 +155,12 @@ class LocalityMatcher:
 
 def mentions(matches: list[dict]) -> list[dict]:
     # Без маркера названия деревень часто совпадают со словами улицы или обычной речи.
+    """Найти упоминания известных местностей в сообщении."""
     return [m for m in matches if m["category"] != "other_settlement" or m["evidence"] == "explicit_locality"]
 
 
 def reply_kind(value: str) -> str:
+    """Определить вид фактически отправленного ответа бота."""
     value = value.strip()
     if value == "Нет результатов":
         return "no_results"
@@ -164,11 +170,12 @@ def reply_kind(value: str) -> str:
 
 
 def audit(source: Path, output: Path, matcher: LocalityMatcher) -> dict:
+    """Проанализировать исходные данные и сохранить агрегированный отчёт."""
     if output.exists():
         raise FileExistsError("Preserve frozen audit results; choose a new output directory")
     output.mkdir(parents=True)
     counts, evidence = Counter(), Counter()
-    places = defaultdict(
+    places: defaultdict[str, dict] = defaultdict(
         lambda: {
             "messages": 0,
             "dialogs": set(),
@@ -187,6 +194,7 @@ def audit(source: Path, output: Path, matcher: LocalityMatcher) -> dict:
     with (output / "incoming.jsonl").open("w", encoding="utf8") as stream:
 
         def finish(row: dict | None, outcome: str) -> None:
+            """Завершить построение индекса названий местностей."""
             if row is None:
                 return
             row["next_reply"] = outcome
@@ -290,6 +298,7 @@ def audit(source: Path, output: Path, matcher: LocalityMatcher) -> dict:
 
 
 def main() -> None:
+    """Аудит упоминаний населённых пунктов во всех входящих текстах, без изменения поиска."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=Path("artifacts/private/vk-prod"))
     parser.add_argument("--gar", type=Path, default=Path("artifacts/gar_xml"))

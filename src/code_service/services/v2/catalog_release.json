@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "source_revision": "4b5591a46b850ce860051b142fb1133f1f664100da3e45cf01211c35e6cd93d8",
+  "target_revision": "9d79c9fed085ef3c289d660c5fa5dbbb1d5639943b67aeed1618892e34c8ec0a",
+  "patch_sha256": "ae90c69eb28ba1f3b8dba55a1605463a58cd3f5e7c0da176fc3881e7f16fdd13",
+  "patch_bytes": 2406576,
+  "raw_bytes": 13703611,
+  "changed_rows": {
+    "buildings": 25,
+    "codes": 124,
+    "aliases": 46,
+    "streets": 1,
+    "street_houses": 2,
+    "alias_search": 62613,
+    "metadata": 2,
+    "provenance": 63
+  }
+}

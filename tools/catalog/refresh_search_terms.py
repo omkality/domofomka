@@ -7,11 +7,12 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from src.code_service.v2.normalize import address_words
+from src.code_service.services.v2.normalize import address_words
 from tools.catalog.refresh_aliases import refresh
 
 
 def rebuild(source: Path, output: Path) -> dict:
+    """Перестроить подготовленные поисковые данные отдельного каталога."""
     work = output.with_suffix(".building.db")
     if source.resolve() == output.resolve() or output.exists() or work.exists():
         raise FileExistsError("Use a fresh candidate; preserve the source")

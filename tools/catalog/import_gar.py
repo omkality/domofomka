@@ -11,12 +11,14 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from src.code_service.v2.normalize import house_key, text
+from src.code_service.services.v2.normalize import house_key, text
+from src.infrastructure.database.resources import read_sql
 
 
 def locality(chain, region):
     # Cities of regional significance may be level 2, not level 5.
     # A district/urban district name is never a substitute for a settlement.
+    """Выделить населённый пункт из последовательности адресных объектов."""
     settlement = next((n for n in chain if n[2] in (5, 6)), None)
     if settlement is None:
         settlement = next((n for n in chain if n[2] == 2 and n[1].rstrip(".") in {"г", "город"}), None)
@@ -25,6 +27,7 @@ def locality(chain, region):
 
 
 def records(path: Path):
+    """Потоково прочитать записи XML без загрузки файла целиком в память."""
     context = ET.iterparse(path, events=("start", "end"))
     _, root = next(context)
     for event, element in context:
@@ -35,6 +38,7 @@ def records(path: Path):
 
 
 def region_job(args):
+    """Импортировать один регион в отдельный локальный артефакт."""
     source, target, region = args
     target = Path(target) / f"gar-{region}.db"
     if target.exists():
@@ -50,16 +54,12 @@ def region_job(args):
     if work.exists():
         work.unlink()
     db = sqlite3.connect(work)
-    db.executescript("""PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF;
-    CREATE TABLE nodes(id INTEGER PRIMARY KEY,name TEXT,kind TEXT,level INTEGER);
-    CREATE TABLE houses(id INTEGER PRIMARY KEY,guid TEXT,number TEXT);
-    CREATE TABLE parents(id INTEGER PRIMARY KEY,parent INTEGER);
-    CREATE TABLE buildings(id TEXT PRIMARY KEY,guid TEXT,display TEXT,city TEXT,street TEXT,house TEXT,street_key TEXT,city_key TEXT,region TEXT,lineage TEXT);
-    CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT);""")
+    db.executescript(read_sql("gar-region-sqlite.sql"))
     root = Path(source)
     directory = root / region
 
     def file(family):
+        """Найти региональный файл нужного вида ГАР."""
         return next(directory.glob(f"AS_{family}_2*.XML"))
 
     count = 0

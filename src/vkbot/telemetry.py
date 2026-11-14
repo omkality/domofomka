@@ -9,66 +9,19 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
+from src.infrastructure.database.schema import require_schema
 from src.infrastructure.telemetry import settings
 
 logger = logging.getLogger(__name__)
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS request_log (
- id UUID PRIMARY KEY, group_id BIGINT NOT NULL,inbox_id BIGINT NOT NULL,
- parent_request_id UUID,user_key TEXT NOT NULL,event_type TEXT NOT NULL,event_source TEXT NOT NULL,
- query_text TEXT,query_hash TEXT,query_truncated BOOLEAN NOT NULL DEFAULT false,
- occurred_at TIMESTAMPTZ,received_at TIMESTAMPTZ NOT NULL,updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
- environment TEXT NOT NULL,app_revision TEXT NOT NULL,schema_version INT NOT NULL DEFAULT 1,
- outcome JSONB NOT NULL DEFAULT '{}',telemetry_state TEXT NOT NULL DEFAULT 'pending',
- recorded_bytes BIGINT NOT NULL DEFAULT 0,
- UNIQUE(group_id,inbox_id)
-);
-CREATE INDEX IF NOT EXISTS request_log_retention ON request_log(group_id,updated_at);
-CREATE TABLE IF NOT EXISTS request_spans (
- id UUID PRIMARY KEY,request_id UUID NOT NULL REFERENCES request_log(id) ON DELETE CASCADE,
- parent_span_id UUID,queue TEXT NOT NULL,job_id BIGINT NOT NULL,attempt INT NOT NULL,
- service TEXT NOT NULL,stage TEXT NOT NULL,started_at TIMESTAMPTZ NOT NULL,duration_ms DOUBLE PRECISION NOT NULL,
- status TEXT NOT NULL,error_type TEXT,error_code TEXT,attributes JSONB NOT NULL DEFAULT '{}'
-);
-CREATE INDEX IF NOT EXISTS request_spans_request ON request_spans(request_id);
-ALTER TABLE request_spans ADD COLUMN IF NOT EXISTS instance_id TEXT NOT NULL DEFAULT 'unknown';
-CREATE TABLE IF NOT EXISTS search_runs (
- span_id UUID PRIMARY KEY REFERENCES request_spans(id) ON DELETE CASCADE,
- engine TEXT NOT NULL,result TEXT,query_text TEXT,normalized_query TEXT,
- building_id TEXT,address TEXT,candidates JSONB NOT NULL DEFAULT '[]',attributes JSONB NOT NULL DEFAULT '{}'
-);
-CREATE TABLE IF NOT EXISTS network_attempts (
- span_id UUID PRIMARY KEY REFERENCES request_spans(id) ON DELETE CASCADE,
- target TEXT NOT NULL,operation TEXT NOT NULL,route TEXT NOT NULL,route_reason TEXT NOT NULL,
- attempt INT NOT NULL,http_status INT,provider_error_code TEXT,attributes JSONB NOT NULL DEFAULT '{}'
-);
-CREATE OR REPLACE VIEW request_summary AS
-SELECT r.*,
- coalesce(r.outcome->'result'->>'engine',r.outcome->>'cached_result_engine') AS result_engine,
- r.outcome->'result'->>'status' AS search_result,
- coalesce((r.outcome->>'cache_hit')::boolean,(r.outcome->>'geo_cache_hit')::boolean,false) AS cache_hit,
- r.outcome->'result'->>'fallback_reason' AS search_fallback_reason,
- r.outcome->'result'->>'fallback_rejected' AS fallback_rejected_reason,
- EXISTS(SELECT 1 FROM search_runs s JOIN request_spans p ON p.id=s.span_id
-        WHERE p.request_id=r.id AND s.engine='v1') AS v1_executed,
- EXISTS(SELECT 1 FROM search_runs s JOIN request_spans p ON p.id=s.span_id
-        WHERE p.request_id=r.id AND s.engine='v2') AS v2_executed,
- (SELECT s.result FROM search_runs s JOIN request_spans p ON p.id=s.span_id
-  WHERE p.request_id=r.id AND s.engine='v1' ORDER BY p.started_at DESC,p.id DESC LIMIT 1) AS v1_result,
- (SELECT s.result FROM search_runs s JOIN request_spans p ON p.id=s.span_id
-  WHERE p.request_id=r.id AND s.engine='v2' ORDER BY p.started_at DESC,p.id DESC LIMIT 1) AS v2_result,
- (SELECT sum(p.duration_ms) FROM search_runs s JOIN request_spans p ON p.id=s.span_id
-  WHERE p.request_id=r.id AND s.engine='v1') AS v1_total_ms,
- (SELECT sum(p.duration_ms) FROM search_runs s JOIN request_spans p ON p.id=s.span_id
-  WHERE p.request_id=r.id AND s.engine='v2') AS v2_total_ms,
- (r.outcome->>'processing_delay_ms')::double precision AS processing_delay_ms,
- ((r.outcome->>'last_delivery_at')::double precision-extract(epoch from r.received_at))*1000
- AS elapsed_to_last_delivery_ms
-FROM request_log r;
-"""
+
+
+def verify_schema(conn: Any) -> None:
+    """Проверить наличие миграции аналитики до её включения, не исполняя DDL."""
+    require_schema(conn, telemetry=True)
 
 
 def identity(group: int, inbox: int) -> str:
+    """Получить устойчивый UUID запроса по сообществу и входящему заданию."""
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"domofomka:{group}:inbox:{inbox}"))
 
 
@@ -85,13 +38,18 @@ def guarded(conn: Any, operation: Callable) -> None:
 
 
 def storage_bytes(conn: Any) -> int:
+    """Измерить физический объём таблиц диагностики и их индексов."""
     return conn.execute(
-        "SELECT sum(pg_total_relation_size(t::regclass)) AS n FROM unnest(%s::text[]) AS t",
+        r"""
+        SELECT sum(pg_total_relation_size(t::regclass)) AS n
+        FROM unnest(%s::text[]) AS t
+        """,
         (["request_log", "request_spans", "search_runs", "network_attempts"],),
     ).fetchone()["n"]
 
 
 def register(conn: Any, group: int, inbox: int, environment: str) -> bool:
+    """Создать диагностическую запись для существующего входящего задания."""
     if conn.execute("SELECT 1 FROM request_log WHERE id=%s", (identity(group, inbox),)).fetchone():
         return True
     row = conn.execute("SELECT * FROM bot_inbox WHERE group_id=%s AND id=%s", (group, inbox)).fetchone()
@@ -108,10 +66,38 @@ def register(conn: Any, group: int, inbox: int, environment: str) -> bool:
     # A deterministic pseudonym, not anonymisation. The database remains private.
     user = hashlib.sha256(f"{group}:{row['peer_id']}".encode()).hexdigest()
     conn.execute(
-        """INSERT INTO request_log(id,group_id,inbox_id,parent_request_id,user_key,event_type,event_source,
-        query_text,query_hash,query_truncated,occurred_at,received_at,environment,app_revision,recorded_bytes)
-        VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,to_timestamp(%s),to_timestamp(%s),%s,%s,%s)
-        ON CONFLICT(id) DO NOTHING""",
+        r"""
+        INSERT INTO request_log(id,
+             group_id,
+             inbox_id,
+             parent_request_id,
+             user_key,
+             event_type,
+             event_source,
+             query_text,
+             query_hash,
+             query_truncated,
+             occurred_at,
+             received_at,
+             environment,
+             app_revision,
+             recorded_bytes)
+        VALUES(%s,
+             %s,
+             %s,
+             %s,
+             %s,
+             %s,
+             %s,
+             %s,
+             %s,
+             %s,
+             to_timestamp(%s),
+             to_timestamp(%s),
+             %s,
+             %s,
+             %s) ON CONFLICT(id) DO NOTHING
+        """,
         (
             identity(group, inbox),
             group,
@@ -134,8 +120,14 @@ def register(conn: Any, group: int, inbox: int, environment: str) -> bool:
 
 
 def budget_used(conn: Any, group: int) -> int:
+    """Подсчитать начисленный объём диагностики сообщества."""
     return conn.execute(
-        "SELECT coalesce(sum(recorded_bytes),0) AS n FROM request_log WHERE group_id=%s", (group,)
+        r"""
+        SELECT coalesce(sum(recorded_bytes), 0) AS n
+        FROM request_log
+        WHERE group_id = %s
+        """,
+        (group,),
     ).fetchone()["n"]
 
 
@@ -148,13 +140,31 @@ def make_room(conn: Any, group: int, charge: int, exclude: uuid.UUID | None = No
     if needed <= 0:
         return True
     rows = conn.execute(
-        """SELECT r.id,r.recorded_bytes FROM request_log r
-        WHERE r.group_id=%s AND r.id IS DISTINCT FROM %s
-        AND NOT EXISTS(SELECT 1 FROM bot_inbox i WHERE i.group_id=r.group_id AND i.id=r.inbox_id
-            AND i.status<>'done')
-        AND NOT EXISTS(SELECT 1 FROM bot_outbox o WHERE o.group_id=r.group_id AND o.inbox_id=r.inbox_id
-            AND o.status<>'done')
-        ORDER BY r.updated_at,r.id LIMIT %s FOR UPDATE OF r SKIP LOCKED""",
+        r"""
+        SELECT r.id,
+               r.recorded_bytes
+        FROM request_log r
+        WHERE r.group_id = %s
+            AND r.id IS DISTINCT
+            FROM %s
+            AND NOT EXISTS
+                (SELECT 1
+                 FROM bot_inbox i
+                 WHERE i.group_id = r.group_id
+                     AND i.id = r.inbox_id
+                     AND i.status <> 'done')
+            AND NOT EXISTS
+                (SELECT 1
+                 FROM bot_outbox o
+                 WHERE o.group_id = r.group_id
+                     AND o.inbox_id = r.inbox_id
+                     AND o.status <> 'done')
+        ORDER BY r.updated_at,
+                 r.id
+        LIMIT %s
+        FOR
+        UPDATE OF r SKIP LOCKED
+        """,
         (group, exclude, settings.telemetry_eviction_batch),
     ).fetchall()
     selected = []
@@ -169,25 +179,49 @@ def make_room(conn: Any, group: int, charge: int, exclude: uuid.UUID | None = No
 
 
 def dropped(conn: Any, group: int) -> None:
+    """Отметить пропуск части измерений из-за ограничения бюджета."""
     logger.warning("Telemetry storage budget reached; diagnostic records skipped")
     conn.execute(
-        "INSERT INTO bot_state VALUES(%s,'telemetry_dropped','1'::jsonb) ON CONFLICT(group_id,name) "
-        "DO UPDATE SET value=to_jsonb(bot_state.value::bigint+1)",
+        r"""
+        INSERT INTO bot_state
+        VALUES(%s,'telemetry_dropped','1'::JSONB) ON CONFLICT(group_id, name) DO
+        UPDATE
+        SET value = to_jsonb(bot_state.value::bigint + 1)
+        """,
         (group,),
     )
 
 
 def refresh(conn: Any, group: int, inbox: int) -> None:
+    """Обновить диагностическую сводку по фактическому состоянию очереди."""
     row = conn.execute(
-        "SELECT status,last_error,payload,completed_at,event_key FROM bot_inbox WHERE group_id=%s AND id=%s",
+        r"""
+        SELECT status,
+               last_error,
+               payload,
+               completed_at,
+               event_key
+        FROM bot_inbox
+        WHERE group_id = %s
+            AND id = %s
+        """,
         (group, inbox),
     ).fetchone()
     if not row:
         return
     effects = conn.execute(
-        "SELECT id,method,status,completed_at,context->>'status' AS result_status,"
-        "coalesce(context->'data'<>'{}'::jsonb,false) AS has_codes "
-        "FROM bot_outbox WHERE group_id=%s AND inbox_id=%s ORDER BY id",
+        r"""
+        SELECT id,
+               METHOD,
+               status,
+               completed_at,
+               context ->> 'status' AS result_status,
+               coalesce(context -> 'data' <> '{}'::JSONB, FALSE) AS has_codes
+        FROM bot_outbox
+        WHERE group_id = %s
+            AND inbox_id = %s
+        ORDER BY id
+        """,
         (group, inbox),
     ).fetchall()
     receipt = row["payload"].get("_queue_receipt", {})
@@ -239,8 +273,16 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
     if child:
         state.update(geo_retry_request_id=identity(group, child["id"]), geo_retry_status=child["status"])
     started = conn.execute(
-        "SELECT extract(epoch from min(p.started_at)) AS t,extract(epoch from min(r.received_at)) AS received "
-        "FROM request_log r LEFT JOIN request_spans p ON p.request_id=r.id AND p.stage='inbox.process' WHERE r.id=%s",
+        r"""
+        SELECT extract(epoch
+                       FROM min(p.started_at)) AS t,
+               extract(epoch
+                       FROM min(r.received_at)) AS received
+        FROM request_log r
+        LEFT JOIN request_spans p ON p.request_id = r.id
+        AND p.stage = 'inbox.process'
+        WHERE r.id = %s
+        """,
         (identity(group, inbox),),
     ).fetchone()
     if started and started["t"]:
@@ -258,17 +300,24 @@ def refresh(conn: Any, group: int, inbox: int) -> None:
     if receipt.get("throttled"):
         conn.execute("UPDATE request_log SET telemetry_state='not_applicable' WHERE id=%s", (identity(group, inbox),))
     conn.execute(
-        "UPDATE request_log SET outcome=outcome||%s,updated_at=now() WHERE id=%s",
+        r"""
+        UPDATE request_log
+        SET outcome = outcome || %s,
+            updated_at = now()
+        WHERE id = %s
+        """,
         (Jsonb(state), identity(group, inbox)),
     )
 
 
 def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -> None:
+    """Сохранить ограниченный пакет этапов попытки без отмены рабочей транзакции."""
     inbox = job["id"] if queue == "bot_inbox" else job["inbox_id"]
     with store.connect() as conn:
 
         def write() -> None:
             # Bound concurrent writers and charge a conservative live-data budget.
+            """Записать подготовленное содержимое с сохранением границ текущей операции."""
             conn.execute("SELECT pg_advisory_xact_lock(20261107,%s)", (store.group_id,))
             charge = len(json.dumps(packet, ensure_ascii=False).encode()) + 2048 * len(packet["spans"])
             if not register(conn, store.group_id, inbox, environment):
@@ -337,31 +386,67 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
                     )
             with conn.cursor() as cursor:
                 cursor.executemany(
-                    """INSERT INTO request_spans(id,request_id,parent_span_id,queue,job_id,attempt,service,stage,
-                    started_at,duration_ms,status,error_type,error_code,attributes,instance_id)
-                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,to_timestamp(%s),%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                    r"""
+                    INSERT INTO request_spans(id,
+                         request_id,
+                         parent_span_id,
+                         queue,
+                         job_id,
+                         attempt,
+                         service,
+                         stage,
+                         started_at,
+                         duration_ms,
+                         status,
+                         error_type,
+                         error_code,
+                         attributes,
+                         instance_id)
+                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s,to_timestamp(%s),%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING
+                    """,
                     spans,
                 )
                 if searches:
                     cursor.executemany(
-                        "INSERT INTO search_runs VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", searches
+                        r"""
+                        INSERT INTO search_runs
+                        VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING
+                        """,
+                        searches,
                     )
                 if attempts:
                     cursor.executemany(
-                        "INSERT INTO network_attempts VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                        r"""
+                        INSERT INTO network_attempts
+                        VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING
+                        """,
                         attempts,
                     )
             notes = packet["notes"]
             if queue == "bot_outbox" and notes.get("decision") == "delivery_obsolete":
                 conn.execute(
-                    "UPDATE request_log SET outcome=jsonb_set(outcome,'{skipped_outbox_ids}',"
-                    "coalesce(outcome->'skipped_outbox_ids','[]'::jsonb)||%s) WHERE id=%s",
+                    r"""
+                    UPDATE request_log
+                    SET outcome = jsonb_set(outcome,
+                         '{skipped_outbox_ids}',
+                         coalesce(outcome -> 'skipped_outbox_ids',
+                         '[]'::JSONB) || %s)
+                    WHERE id = %s
+                    """,
                     (Jsonb([job["id"]]), rid),
                 )
             conn.execute(
-                "UPDATE request_log SET outcome=outcome||%s,telemetry_state="
-                "CASE WHEN telemetry_state='partial' THEN 'partial' ELSE %s END,updated_at=now(),"
-                "recorded_bytes=recorded_bytes+%s WHERE id=%s",
+                r"""
+                UPDATE request_log
+                SET outcome = outcome || %s,
+                    telemetry_state = CASE
+                                          WHEN telemetry_state = 'partial' THEN 'partial'
+                                          ELSE %s
+                                      END,
+                                      updated_at = now(),
+                                      recorded_bytes = recorded_bytes + %s
+                WHERE id = %s
+                """,
                 (
                     Jsonb(notes),
                     "partial" if packet["dropped"] or notes.get("api_measurements", "ok") != "ok" else "recorded",
@@ -379,21 +464,38 @@ def persist(store: Any, queue: str, job: dict, packet: dict, environment: str) -
 
 
 def maintain(store: Any, batch: int) -> dict:
+    """Освободить избыточную диагностику и обновить незавершённые сводки."""
     with store.connect() as conn:
         conn.execute("SELECT pg_advisory_xact_lock(20261107,%s)", (store.group_id,))
         size = storage_bytes(conn)
         # Refresh terminal transitions made without a worker (expiry, superseding).
         changed = conn.execute(
-            """SELECT r.inbox_id FROM request_log r JOIN bot_inbox i ON i.id=r.inbox_id AND i.group_id=r.group_id
-            WHERE r.group_id=%s AND (
-              r.outcome->>'inbox_status' IS DISTINCT FROM i.status OR
-              coalesce((r.outcome->>'outbox_total')::int,0)<>
-                (SELECT count(*) FROM bot_outbox o WHERE o.inbox_id=i.id) OR
-              coalesce((r.outcome->>'outbox_done')::int,0)+coalesce((r.outcome->>'outbox_skipped')::int,0)<>
-                (SELECT count(*) FROM bot_outbox o WHERE o.inbox_id=i.id AND o.status='done') OR
-              coalesce((r.outcome->>'outbox_failed')::int,0)<>
-                (SELECT count(*) FROM bot_outbox o WHERE o.inbox_id=i.id AND o.status='failed')
-            ) LIMIT %s""",
+            r"""
+            SELECT r.inbox_id
+            FROM request_log r
+            JOIN bot_inbox i ON i.id = r.inbox_id
+            AND i.group_id = r.group_id
+            WHERE r.group_id = %s
+                AND (r.outcome ->> 'inbox_status' IS DISTINCT
+                     FROM i.status
+                     OR coalesce((r.outcome ->> 'outbox_total')::int, 0) <>
+                         (SELECT count(*)
+                          FROM bot_outbox o
+                          WHERE o.inbox_id = i.id)
+                     OR coalesce((r.outcome ->> 'outbox_done')::int,
+                          0) + coalesce((r.outcome ->> 'outbox_skipped')::int,
+                          0) <>
+                         (SELECT count(*)
+                          FROM bot_outbox o
+                          WHERE o.inbox_id = i.id
+                              AND o.status = 'done')
+                     OR coalesce((r.outcome ->> 'outbox_failed')::int, 0) <>
+                         (SELECT count(*)
+                          FROM bot_outbox o
+                          WHERE o.inbox_id = i.id
+                              AND o.status = 'failed'))
+            LIMIT %s
+            """,
             (store.group_id, batch),
         ).fetchall()
         for row in changed:
@@ -419,7 +521,13 @@ def maintain(store: Any, batch: int) -> dict:
             "budget_reached": budget_used(conn, store.group_id) >= settings.telemetry_max_storage_bytes,
             "dropped_batches": (
                 conn.execute(
-                    "SELECT value FROM bot_state WHERE group_id=%s AND name='telemetry_dropped'", (store.group_id,)
+                    r"""
+            SELECT value
+            FROM bot_state
+            WHERE group_id = %s
+                AND name = 'telemetry_dropped'
+            """,
+                    (store.group_id,),
                 ).fetchone()
                 or {}
             ).get("value", 0),
@@ -431,22 +539,53 @@ def report(store: Any) -> dict:
     with store.connect() as conn:
         params = (store.group_id,)
         requests = conn.execute(
-            "SELECT telemetry_state,count(*) AS count FROM request_log WHERE group_id=%s GROUP BY telemetry_state",
+            r"""
+            SELECT telemetry_state,
+                   count(*) AS COUNT
+            FROM request_log
+            WHERE group_id = %s
+            GROUP BY telemetry_state
+            """,
             params,
         ).fetchall()
         searches = conn.execute(
-            """SELECT s.engine,s.result,count(*) AS attempts,
-            percentile_cont(0.5) WITHIN GROUP(ORDER BY p.duration_ms) AS p50_ms,
-            percentile_cont(0.95) WITHIN GROUP(ORDER BY p.duration_ms) AS p95_ms
-            FROM search_runs s JOIN request_spans p ON p.id=s.span_id JOIN request_log r ON r.id=p.request_id
-            WHERE r.group_id=%s GROUP BY s.engine,s.result""",
+            r"""
+            SELECT s.engine,
+                   s.result,
+                   count(*) AS attempts,
+                   percentile_cont(0.5) WITHIN GROUP(
+                                                     ORDER BY p.duration_ms) AS p50_ms,
+                                               percentile_cont(0.95) WITHIN GROUP(
+                                                                                  ORDER BY p.duration_ms) AS p95_ms
+            FROM search_runs s
+            JOIN request_spans p ON p.id = s.span_id
+            JOIN request_log r ON r.id = p.request_id
+            WHERE r.group_id = %s
+            GROUP BY s.engine,
+                     s.result
+            """,
             params,
         ).fetchall()
         routes = conn.execute(
-            """SELECT n.target,n.operation,n.route,n.route_reason,p.status,count(*) AS attempts,
-            percentile_cont(0.95) WITHIN GROUP(ORDER BY p.duration_ms) AS p95_ms
-            FROM network_attempts n JOIN request_spans p ON p.id=n.span_id JOIN request_log r ON r.id=p.request_id
-            WHERE r.group_id=%s GROUP BY n.target,n.operation,n.route,n.route_reason,p.status""",
+            r"""
+            SELECT n.target,
+                   n.operation,
+                   n.route,
+                   n.route_reason,
+                   p.status,
+                   count(*) AS attempts,
+                   percentile_cont(0.95) WITHIN GROUP(
+                                                      ORDER BY p.duration_ms) AS p95_ms
+            FROM network_attempts n
+            JOIN request_spans p ON p.id = n.span_id
+            JOIN request_log r ON r.id = p.request_id
+            WHERE r.group_id = %s
+            GROUP BY n.target,
+                     n.operation,
+                     n.route,
+                     n.route_reason,
+                     p.status
+            """,
             params,
         ).fetchall()
         return {

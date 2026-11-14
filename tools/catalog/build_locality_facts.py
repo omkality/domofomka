@@ -4,12 +4,15 @@ import argparse
 import json
 from pathlib import Path
 
-from src.code_service.v2.normalize import address_words, text
+from src.code_service.services.v2.normalize import address_words, text
 from tools.catalog.import_gar import records
 
 
 def build_region(source: Path, region: str):
+    """Подготовить адресные факты одного региона из действующих объектов ГАР."""
+
     def family(name):
+        """Прочитать родительскую цепочку адресного объекта."""
         files = list((source / region).glob("AS_" + name + "_2*.XML"))
         if len(files) != 1:
             raise ValueError("Expected one snapshot file for " + region + "/" + name)
@@ -31,7 +34,7 @@ def build_region(source: Path, region: str):
         if row.get("ISACTIVE") != "1" or oid not in cities:
             continue
         admin = []
-        current = oid
+        current: int | None = oid
         seen = set()
         while current and current not in seen:
             seen.add(current)

@@ -19,6 +19,7 @@ REARM = int(os.environ.get("DISK_REARM_BYTES", "1342177280"))
 
 
 def safe_cleanup() -> None:
+    """Выполнить только штатную очистку журналов и кеша пакетов с таймаутами."""
     for command in (
         ["apt-get", "clean"],
         ["journalctl", "--rotate"],
@@ -30,6 +31,7 @@ def safe_cleanup() -> None:
 
 
 def reserve_action(free: int, exists: bool) -> str:
+    """Выбрать освобождение или восстановление дискового резерва с гистерезисом."""
     if free < LOW:
         return "release_and_clean"
     if not exists and free >= REARM:
@@ -38,6 +40,7 @@ def reserve_action(free: int, exists: bool) -> str:
 
 
 def stop_application() -> list[str]:
+    """Аварийно остановить только известные контейнеры domofomka, сохранив VPN."""
     if not shutil.which("docker"):
         return []
     names = subprocess.check_output(["docker", "ps", "--format", "{{.Names}}"], text=True).splitlines()
@@ -65,6 +68,7 @@ def stop_application() -> list[str]:
 
 
 def main() -> None:
+    """Проверить место, освободить резерв и при критическом дефиците остановить только domofomka."""
     import fcntl
 
     if not 67108864 <= CRITICAL < LOW < REARM or not 0 < RESERVE <= LOW:

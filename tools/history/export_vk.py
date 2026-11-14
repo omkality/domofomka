@@ -14,12 +14,14 @@ from src.vkbot.http import TimeoutSession
 
 
 def export(env: str, target: Path, interval: float) -> None:
+    """Выгрузить разрешённую историю VK в закрытые локальные артефакты."""
     config = dotenv_values(env)
     group = int(config["VK_GROUP_ID"])
     target.mkdir(parents=True, exist_ok=True)
     vk = VkApi(token=config["VK_GROUP_TOKEN"], api_version="5.199", session=TimeoutSession(vk_proxy_url=""))
 
     def call(method, params):
+        """Вызвать метод выгрузки VK с ограничением частоты и повторов."""
         assert method in {"messages.getConversations", "messages.getHistory", "execute"}
         for attempt in range(8):
             time.sleep(interval * (params.pop("_weight", 1)))

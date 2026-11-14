@@ -1,6 +1,7 @@
 # Global settings
 cache-dir = "~/.cache/ruff"
 line-length = 120
+target-version = "py312"
 show-fixes = true
 
 # Lint settings
@@ -27,13 +28,6 @@ select = [
 ]
 
 ignore = [
-    "D100", # Missing docstring in public module
-    "D101", # Missing docstring in public class
-    "D103", # Missing docstring in public function
-    "D102", # Missing docstring in public method
-    "D104", # Missing docstring in public package
-    "D106", # Missing docstring in public nested class
-    "D107", # Missing docstring in __init__
     "N805", # First argument of a method should be named 'self'
     "N818", # Exception name should be named with an Error suffix
     "B007", # Loop control variable `process_time` not used within loop body
@@ -69,6 +63,7 @@ fixable = [
 
 # Per-file ignores
 [lint.per-file-ignores]
+"tests/**/*.py" = ["D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107"]
 "*/versions/*.py" = ["D103", "W291"]
 "*/models/*.py" = ["F821", "D101"]
 "*test_*.py" = ["PLR0913", "ANN001", "ANN201", "ANN202"]

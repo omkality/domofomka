@@ -1,0 +1,11 @@
+DROP TABLE code_sources;
+DROP TABLE entrances;
+DROP TABLE vocabulary;
+DROP TABLE metadata;
+DROP TABLE provenance;
+DROP TABLE alias_search;
+DROP TABLE street_houses;
+DROP TABLE streets;
+DROP TABLE aliases;
+DROP TABLE codes;
+DROP TABLE buildings;

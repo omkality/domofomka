@@ -7,21 +7,33 @@ import sqlite3
 import time
 from pathlib import Path
 
-from src.code_service.v1.index import lookup
+from src.code_service.services.v1.index import lookup
 from tools.evaluation import evaluate_search as reference
 
 paths = []
 
 
 def initialize(source, index):
+    """Подготовить входные данные и читатели процесса сравнения."""
     paths[:] = [source, index]
     with sqlite3.connect(source) as db:
-        reference.legacy_groups[:] = db.execute(
-            "SELECT min(id),city,street_type,street,house FROM codes GROUP BY city,street_type,street,house ORDER BY min(id)"
-        ).fetchall()
+        reference.legacy_groups[:] = db.execute(r"""
+            SELECT min(id),
+                   city,
+                   street_type,
+                   street,
+                   house
+            FROM codes
+            GROUP BY city,
+                     street_type,
+                     street,
+                     house
+            ORDER BY min(id)
+            """).fetchall()
 
 
 def evaluate(query):
+    """Выполнить контрольный запрос и собрать его результат для сравнения."""
     expected = reference.legacy_lookup(query)
     start = time.perf_counter()
     result = lookup(query, *paths)

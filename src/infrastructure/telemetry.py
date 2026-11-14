@@ -18,6 +18,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class TelemetrySettings(BaseSettings):
+    """Ограничения объёма и детализации диагностики."""
+
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore", hide_input_in_errors=True
     )
@@ -41,7 +43,10 @@ _attributes: ContextVar[Any] = ContextVar("observation_attributes", default=None
 
 
 class Capture:
+    """Ограниченный набор этапов одной попытки обработки запроса."""
+
     def __init__(self, enabled: bool = True):
+        """Создать ограниченный набор этапов и блокировку записи текущей попытки."""
         self.enabled = enabled
         self.rows: list[dict] = []
         self.notes: dict = {}
@@ -63,6 +68,7 @@ class Capture:
         _capture.reset(self.token)
 
     def add(self, row: dict) -> None:
+        """Добавить этап с учётом пределов количества и байтов."""
         try:
             size = len(json.dumps(row, ensure_ascii=False).encode())
         except (TypeError, ValueError):
@@ -77,7 +83,13 @@ class Capture:
 
     def packet(self) -> dict:
         # Notes are explicit, bounded summaries, never an arbitrary response body.
-        packet = {"schema_version": 1, "spans": list(self.rows), "notes": dict(self.notes), "dropped": self.dropped}
+        """Подготовить ограниченный пакет этапов и итоговых свойств."""
+        packet: dict[str, Any] = {
+            "schema_version": 1,
+            "spans": list(self.rows),
+            "notes": dict(self.notes),
+            "dropped": self.dropped,
+        }
         while len(json.dumps(packet, ensure_ascii=False).encode()) > settings.telemetry_max_packet_bytes:
             if packet["spans"]:
                 packet["spans"].pop(0)
@@ -90,10 +102,12 @@ class Capture:
 
 
 def active() -> bool:
+    """Проверить, включён ли сбор этапов в текущем контексте."""
     return _capture.get() is not None
 
 
 def note(**values: Any) -> None:
+    """Добавить итоговое свойство текущего измеряемого запроса."""
     capture = _capture.get()
     if capture is not None:
         for key, value in values.items():
@@ -109,6 +123,7 @@ def note(**values: Any) -> None:
 
 
 def amend(**values: Any) -> None:
+    """Дополнить атрибуты текущего этапа измерения."""
     attributes = _attributes.get()
     if attributes is not None:
         attributes.update(values)
@@ -116,6 +131,7 @@ def amend(**values: Any) -> None:
 
 @contextmanager
 def span(stage: str, *, kind: str = "internal", **attributes: Any) -> Generator[dict, None, None]:
+    """Измерить этап и записать его исход без перехвата рабочей ошибки."""
     capture = _capture.get()
     if capture is None:
         yield {}
@@ -160,11 +176,15 @@ def span(stage: str, *, kind: str = "internal", **attributes: Any) -> Generator[
 
 
 def measured(stage: str) -> Callable:
+    """Обернуть синхронную или асинхронную операцию измерением этапа."""
+
     def decorate(function: Callable) -> Callable:
+        """Создать обёртку измерения для переданной функции."""
         if inspect.iscoroutinefunction(function):
 
             @functools.wraps(function)
             async def asynchronous(*args: Any, **kwargs: Any) -> Any:
+                """Выполнить асинхронную функцию внутри измеряемого этапа."""
                 with span(stage):
                     return await function(*args, **kwargs)
 
@@ -172,6 +192,7 @@ def measured(stage: str) -> Callable:
 
         @functools.wraps(function)
         def synchronous(*args: Any, **kwargs: Any) -> Any:
+            """Выполнить синхронную функцию внутри измеряемого этапа."""
             with span(stage):
                 return function(*args, **kwargs)
 
@@ -205,6 +226,7 @@ def search_result(result: dict) -> dict:
 
 
 def merge(packet: dict) -> None:
+    """Присоединить ограниченный пакет измерений другого сервиса."""
     capture = _capture.get()
     if capture is None:
         return

@@ -13,7 +13,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from src.code_service.v2.normalize import street_kind, text
+from src.code_service.services.v2.normalize import street_kind, text
 from tools.catalog.reconcile_street_order import apply
 from tools.evaluation.quality_suite import address_fields
 
@@ -31,6 +31,7 @@ STREET_PREFIX = re.compile(
 
 
 def region_forms(facts: list[dict]) -> dict[str, set[str]]:
+    """Собрать допустимые формы явно указанного региона."""
     forms = collections.defaultdict(set)
     for row in facts:
         name = text(row["name"])
@@ -44,6 +45,7 @@ def region_forms(facts: list[dict]) -> dict[str, set[str]]:
 
 
 def explicit_region_city(value: str, forms: dict[str, set[str]]) -> tuple[str, str] | None:
+    """Разделить явно указанные регион и населённый пункт."""
     parts = [text(part) for part in value.split(",")]
     if parts and parts[0] in {"россия", "российская федерация"}:
         parts = parts[1:]
@@ -58,10 +60,17 @@ def explicit_region_city(value: str, forms: dict[str, set[str]]) -> tuple[str, s
 
 
 def mappings(db: sqlite3.Connection, facts: list[dict]) -> tuple[list[dict], dict]:
+    """Подготовить только однозначно проверенные перенаправления исходных адресов."""
     db.row_factory = sqlite3.Row
     forms = region_forms(facts)
-    rows = db.execute("""SELECT b.* FROM buildings b JOIN
-        (SELECT DISTINCT building_id FROM codes) c ON c.building_id=b.id WHERE b.guid IS NULL""").fetchall()
+    rows = db.execute(r"""
+        SELECT b.*
+        FROM buildings b
+        JOIN
+            (SELECT DISTINCT building_id
+             FROM codes) c ON c.building_id = b.id
+        WHERE b.guid IS NULL
+        """).fetchall()
     result = []
     skipped = collections.Counter()
     reasons = collections.Counter()
@@ -79,9 +88,19 @@ def mappings(db: sqlite3.Connection, facts: list[dict]) -> tuple[list[dict], dic
             continue
 
         def official(name: str, required_kind: str, city=city, region=region, house=row["house"]) -> list:
+            """Проверить официальную адресную форму по фактам каталога."""
             candidates = db.execute(
-                "SELECT id,guid,display,region FROM buildings WHERE city_key=? AND street_key=? "
-                "AND house=? AND guid IS NOT NULL",
+                r"""
+                SELECT id,
+                       guid,
+                       display,
+                       region
+                FROM buildings
+                WHERE city_key = ?
+                    AND street_key = ?
+                    AND house = ?
+                    AND guid IS NOT NULL
+                """,
                 (city, name, house),
             ).fetchall()
             found = []
@@ -101,7 +120,14 @@ def mappings(db: sqlite3.Connection, facts: list[dict]) -> tuple[list[dict], dic
         # Существующее буквальное название приоритетно; тип в имени может быть его частью.
         if not exact and embedded:
             literal_street = db.execute(
-                "SELECT display,region FROM buildings WHERE city_key=? AND street_key=? AND guid IS NOT NULL",
+                r"""
+                SELECT display,
+                       region
+                FROM buildings
+                WHERE city_key = ?
+                    AND street_key = ?
+                    AND guid IS NOT NULL
+                """,
                 (city, street),
             )
             literal_exists = False
@@ -151,6 +177,7 @@ def mappings(db: sqlite3.Connection, facts: list[dict]) -> tuple[list[dict], dic
 
 
 def main():
+    """Подтверждать тип внутри названия и явный субъект РФ только по уникальному дому ГАР."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--regions", type=Path, required=True)

@@ -11,6 +11,7 @@ from src.vkbot.runtime import validate_environment
 
 
 def main() -> None:
+    """Operator commands; credentials come from the environment, never arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "command", choices=["status", "health", "telemetry", "pause", "resume", "retry-failed", "fault"]

@@ -32,18 +32,24 @@ class LookupUnavailable(RuntimeError):
 
 
 class Processor:
+    """Планировщик ответов и исполнитель сохранённых действий VK."""
+
     def __init__(self, settings: Any, store: QueueStore, gate: RateGate):
+        """Подключить очередь, VK-клиент и параметры планирования ответов."""
         self.settings = settings
         self.store = store
         self.vk = VkApi(token=settings.vk_group_token, api_version="5.199", session=RateSession(gate)).get_api()
 
     def close(self) -> None:
+        """Закрыть открытые соединения и ресурсы компонента."""
         self.vk._vk.http.close()
 
     def _get(self, url: str, params: dict | None = None, *, timeout: float | None = None) -> httpx.Response:
+        """Вызвать внутренний API с общим дедлайном, включая чтение тела."""
         total = timeout if timeout is not None else network_settings.internal_api_timeout_seconds
 
         async def request() -> httpx.Response:
+            """Выполнить ограниченный HTTP-запрос с выбранным сетевым бюджетом."""
             async with (
                 asyncio.timeout(total),
                 httpx.AsyncClient(
@@ -61,11 +67,13 @@ class Processor:
         return asyncio.run(request())
 
     def fault(self, name: str) -> None:
+        """Применить разрешённую dev-подстановку ошибки к текущему сценарию."""
         if self.settings.dev_faults_enabled and self.store.consume_fault(name):
             raise TimeoutError("Injected dev failure")
 
     @measured("api.lookup")
     def lookup(self, message: str | None = None, geo: dict | None = None) -> dict:
+        """Получить результат внутреннего поиска с ограниченным сетевым бюджетом."""
         if message and len(message) > getattr(self.settings, "search_max_query_length", 500):
             return {"status": "invalid_query", "data": {}, "engine": "v2"}
         version = getattr(self.settings, "search_api_version", "v1")
@@ -105,6 +113,7 @@ class Processor:
             raise LookupUnavailable("Lookup API is temporarily unavailable") from None
 
     def plan(self, job: dict) -> None:
+        """Подготовить постоянные эффекты входящего события без немедленной отправки."""
         if job["kind"] in {"message_new", "geo_retry"}:
             self._message(job)
         elif job["kind"] == "message_event":
@@ -113,6 +122,7 @@ class Processor:
             raise ValueError("Unsupported inbox event")
 
     def _message(self, job: dict) -> None:
+        """Подготовить ответ на входящее сообщение, не отправляя его в VK."""
         if job["kind"] == "geo_retry" and self.store.geo_retry_current(job) is False:
             note(decision="geo_obsolete_or_expired")
             self.store.defer_geo_retry(job, self.settings.geo_retry_delay_seconds)
@@ -122,7 +132,7 @@ class Processor:
         base = {"peer_id": peer}
         if message.get("id"):
             base["reply_to"] = message["id"]
-        effects = []
+        effects: list[dict[str, Any]] = []
         if message.get("text", "").strip().lower() == "начать":
             note(decision="start_message")
             effects.append(
@@ -263,6 +273,7 @@ class Processor:
         self.store.plan(job, effects)
 
     def _callback(self, job: dict) -> None:
+        """Подготовить действие кнопки по сохранённому контексту сообщения."""
         obj = job["payload"]
         payload = obj["payload"]
         if isinstance(payload, str):
@@ -490,6 +501,7 @@ class Processor:
         self.store.plan(job, [effect], callback_at=job["occurred_at"])
 
     def deliver(self, job: dict) -> None:
+        """Исполнить сохранённое действие и подтвердить его только после ответа VK."""
         params = dict(job["params"])
         if not self.store.renew("bot_outbox", job):
             raise RuntimeError("Queue lease lost before dispatch")

@@ -6,10 +6,14 @@ ADDRESS_PAGE_SIZE = 5
 # Место для навигации между подъездами и возврата к адресам.
 SELECTED_ENTRANCES_PER_PAGE = INLINE_BUTTON_LIMIT - 3
 
+
 def inline_keyboard(entrances: list[str]) -> str:
+    """Подготовить inline-клавиатуру выбора подъездов."""
     return serialize_inline_keyboard(build_many_buttons(entrances))
 
+
 def code_answer(result: dict, entrance: str) -> str:
+    """Сформировать ответ с кодами выбранного подъезда по источникам."""
     order = {"yaeda": 0, "delivery": 1, "oldcodes": 2}
     codes = sorted(result["data"][entrance], key=lambda item: order.get(item[1], 99))
     lines = []
@@ -21,7 +25,9 @@ def code_answer(result: dict, entrance: str) -> str:
         lines.append(code)
     return f"{result['address']}\nПодъезд {entrance}\n" + "\n".join(lines)
 
+
 def building_answer(result: dict) -> str:
+    """Показать адрес и сразу раскрыть коды единственного подъезда."""
     data = result.get("data", {})
     if len(data) == 1:
         return code_answer(result, next(iter(data)))
@@ -29,7 +35,9 @@ def building_answer(result: dict) -> str:
         return result["address"] + "\nПо этому адресу кодов в нашей базе пока нет."
     return result["address"]
 
+
 def address_choices(result: dict, page: int = 0) -> tuple[str, str]:
+    """Подготовить страницу адресов с навигацией и отменой выбора."""
     choices = result["candidates"]
     size = ADDRESS_PAGE_SIZE
     start = page * size
@@ -50,6 +58,7 @@ def address_choices(result: dict, page: int = 0) -> tuple[str, str]:
         rows.append(navigation)
     rows.append([callback_button("Ни один не подходит", {"dismiss_choices": True})])
     return message, serialize_inline_keyboard(rows)
+
 
 def selected_keyboard(result: dict) -> str:
     """Подъезды выбранного адреса и возврат к сохранённому списку в одном сообщении."""

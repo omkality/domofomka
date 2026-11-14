@@ -7,10 +7,11 @@ import re
 from collections import Counter
 from pathlib import Path
 
-from src.code_service.v2.normalize import ordinals, parse_query
+from src.code_service.services.v2.normalize import ordinals, parse_query
 
 
 def audit(source: Path, output: Path):
+    """Проанализировать исходные данные и сохранить агрегированный отчёт."""
     counts = Counter()
     failure_patterns = Counter()
     patterns = Counter()
@@ -69,9 +70,11 @@ def audit(source: Path, output: Path):
                         "query": previous["text"],
                         "expected_address": address,
                         "evidence": "bot_address_response",
-                        "split": "holdout"
-                        if int(hashlib.sha256(data["dialog"].encode()).hexdigest()[:8], 16) % 5 == 0
-                        else "train",
+                        "split": (
+                            "holdout"
+                            if int(hashlib.sha256(data["dialog"].encode()).hexdigest()[:8], 16) % 5 == 0
+                            else "train"
+                        ),
                     }
                     success.append(record)
                     good = parse_query(previous["text"])
