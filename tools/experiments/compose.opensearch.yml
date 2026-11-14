@@ -1,35 +1,6 @@
 # Только локальное сравнение: требуется явный профиль search-comparison.
 name: domofomka-search-comparison
 services:
-  api:
-    profiles: [search-comparison]
-    build:
-      context: ../..
-      dockerfile: Dockerfile.api
-    init: true
-    mem_limit: 512m
-    memswap_limit: 768m
-    pids_limit: 128
-    env_file: ['../../.env.dev']
-    environment:
-      SEARCH_BACKEND: sqlite
-      SEARCH_CATALOG_PATH: ${SEARCH_COMPARE_CATALOG_PATH:-/backend/catalog/serving.source-fields-final.db}
-      POSTGRES_PASSWORD: ''
-      QUEUE_DATABASE_URL: ''
-      VK_GROUP_TOKEN: ''
-      OPENSEARCH_URL: http://opensearch:9200
-      API_DEBUG: 'false'
-      API_PORT: '8000'
-      PYTHONDONTWRITEBYTECODE: '1'
-    command: /backend/.venv/bin/granian --interface asgi src.code_service.main:app --host 0.0.0.0 --port 8000 --workers 2
-    ports: ['127.0.0.1:28000:8000']
-    volumes:
-      - ../../src:/backend/src:ro
-      - ../../artifacts/search:/backend/catalog:ro
-      - ../../codes.db:/backend/codes.db:ro
-    logging:
-      driver: json-file
-      options: {max-size: '10m', max-file: '3'}
   opensearch:
     profiles: [search-comparison]
     image: opensearchproject/opensearch:3.3.2@sha256:798cf28e226a32f5c928dd1ed9478dd3a33d2212176aad3679020088ad3afa1a

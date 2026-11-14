@@ -37,6 +37,9 @@ def main() -> None:
     assert shutil.which("uvx") is None, "Build tools must stay in the build stage"
     unused = "vkbot" if sys.argv[1] == "api" else "code_service"
     assert not Path("src", unused).exists(), "Do not package the other application"
+    assert not Path("tools").exists(), "Offline catalog readers must stay outside runtime images"
+    for package in ("testcontainers", "docker", "pytest"):
+        assert importlib.util.find_spec(package) is None, f"Test dependency {package} must stay outside runtime images"
     print(json.dumps({"uid": os.getuid(), "capabilities": 0, "no_new_privileges": True, "root_readonly": True}))
 
 

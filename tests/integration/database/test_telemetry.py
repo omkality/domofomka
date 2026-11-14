@@ -13,7 +13,7 @@ from src.code_service.config import settings as api_settings
 from src.code_service.main import app
 from src.code_service.services.geocoding import DadataClient
 from src.code_service.services.v2 import search
-from src.code_service.services.v2.engine import Catalog
+from src.code_service.services.v2.postgres import PostgresCatalog
 from src.infrastructure.network import network_settings
 from src.infrastructure.proxy import proxy_health
 from src.infrastructure.telemetry import Capture, merge, note, search_result, settings, span
@@ -87,10 +87,7 @@ def observed_api(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "telemetry_enabled", True)
     source = tmp_path / "source.db"
     source.touch()
-    catalog = tmp_path / "catalog.db"
-    catalog.touch()
     monkeypatch.setattr(api_settings, "db_name", str(source))
-    monkeypatch.setattr(api_settings, "search_catalog_path", str(catalog))
     monkeypatch.setattr(api_settings, "legacy_index_path", str(tmp_path / "absent-index.db"))
     monkeypatch.setattr(api_settings, "opensearch_url", None)
     monkeypatch.setattr(api_settings, "search_cache_ttl_seconds", 120)
@@ -100,10 +97,10 @@ def observed_api(tmp_path, monkeypatch):
 
 
 def test_api_cache_does_not_fake_new_search_or_reuse_old_measurements(observed_api, monkeypatch):
-    resolve = MagicMock(
+    resolve = AsyncMock(
         return_value={"status": "found", "engine": "v2", "address": "House", "data": {"1": [["CODE", "test"]]}}
     )
-    monkeypatch.setattr(Catalog, "resolve", resolve)
+    monkeypatch.setattr(PostgresCatalog, "resolve", resolve)
     with TestClient(app) as client:
         first = client.get("/api/v2/codes/msg", params={"message": "test", "observe": "true"}).json()
         second = client.get("/api/v2/codes/msg", params={"message": "test", "observe": "true"}).json()
@@ -122,7 +119,7 @@ def test_api_cache_does_not_fake_new_search_or_reuse_old_measurements(observed_a
 def test_api_records_v2_error_and_actual_v1_result(observed_api, monkeypatch):
     from src.code_service.services.v1 import codes
 
-    monkeypatch.setattr(Catalog, "resolve", MagicMock(side_effect=RuntimeError("offline")))
+    monkeypatch.setattr(PostgresCatalog, "resolve", AsyncMock(side_effect=RuntimeError("offline")))
     monkeypatch.setattr(
         codes,
         "scan_data_from_db",

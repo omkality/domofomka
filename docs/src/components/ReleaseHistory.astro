@@ -1,0 +1,15 @@
+---
+import { unified } from "@astrojs/markdown-remark";
+import releases from "../generated/releases.json";
+const renderer = await unified({ remarkRehype: { allowDangerousHtml: false } }).createRenderer({ syntaxHighlight: false });
+const history = await Promise.all(releases.history.map(async (release) => ({
+  ...release, notes: (await renderer.render(release.body)).code,
+})));
+const date = new Intl.DateTimeFormat("ru-RU", { dateStyle: "long", timeZone: "Europe/Moscow" });
+---
+
+{history.map((release) => <section>
+  <h2 id={`release-${release.tag}`}><a href={release.url}>{release.name}</a></h2>
+  <p><time datetime={release.publishedAt}>{date.format(new Date(release.publishedAt))}</time></p>
+  <div set:html={release.notes} />
+</section>)}

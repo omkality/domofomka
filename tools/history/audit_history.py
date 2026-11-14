@@ -10,7 +10,7 @@ from pathlib import Path
 from src.code_service.services.v2.normalize import ordinals, parse_query
 
 
-def audit(source: Path, output: Path):
+def audit(source: Path, output: Path) -> None:
     """Проанализировать исходные данные и сохранить агрегированный отчёт."""
     counts = Counter()
     failure_patterns = Counter()

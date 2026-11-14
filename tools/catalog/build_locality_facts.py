@@ -8,10 +8,10 @@ from src.code_service.services.v2.normalize import address_words, text
 from tools.catalog.import_gar import records
 
 
-def build_region(source: Path, region: str):
+def build_region(source: Path, region: str) -> dict:
     """Подготовить адресные факты одного региона из действующих объектов ГАР."""
 
-    def family(name):
+    def family(name: str) -> Path:
         """Прочитать родительскую цепочку адресного объекта."""
         files = list((source / region).glob("AS_" + name + "_2*.XML"))
         if len(files) != 1:

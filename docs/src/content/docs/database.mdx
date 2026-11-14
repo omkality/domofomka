@@ -3,6 +3,9 @@ title: "Схема баз данных"
 ---
 
 import C4View from "../../components/C4View.astro";
+import ReleaseStatus from "../../components/ReleaseStatus.astro";
+
+<ReleaseStatus />
 
 Один экземпляр PostgreSQL обслуживает две отдельные БД:
 
@@ -11,6 +14,10 @@ import C4View from "../../components/C4View.astro";
 
 API читает каталог через отдельную роль без права записи. Бот записывает очередь в свою БД.
 Исходная `codes.db` и её небольшой индекс остаются для v1 и проверки происхождения старых строк.
+Рабочий v2 всегда использует PostgreSQL. Файловый SQLite-эталон v2 расположен
+в `tools/catalog/sqlite_catalog.py` для сборки и сравнительных тестов;
+он не входит в рабочий образ API. `SEARCH_BACKEND` и `SEARCH_CATALOG_PATH`
+не являются настройками приложения.
 Полный XML ГАР и промежуточная сборка не переносятся на VDS.
 
 Весь справочник действующих домов ГАР помещается на VDS благодаря компактному представлению:

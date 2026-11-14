@@ -20,8 +20,6 @@ class Settings(BaseSettings):
     legacy_index_path: str = "/backend/catalog/legacy-index.db"
     dadata_token: str
     dadata_proxy_url: str | None = None
-    search_catalog_path: str = "/backend/catalog/serving.db"
-    search_backend: Literal["sqlite", "postgres"] = "sqlite"
     catalog_database_url: SecretStr | None = None
     catalog_revision: str = "unknown"
     catalog_connect_timeout_seconds: int = Field(default=3, ge=1, le=30)

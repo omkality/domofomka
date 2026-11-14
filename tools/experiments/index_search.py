@@ -6,15 +6,16 @@ import time
 
 import httpx
 
-from src.code_service.services.v2.engine import MAPPING, documents
+from tools.catalog.documents import documents
+from tools.experiments.opensearch_schema import MAPPING
 
 
-def index(path: str, url: str, alias: str):
+def index(path: str, url: str, alias: str) -> None:
     """Загрузить подготовленные документы в отдельный поисковый индекс."""
     name = alias + "-" + str(time.time_ns())
     with httpx.Client(trust_env=False, timeout=120) as client:
 
-        def request(method, path, body):
+        def request(method: str, path: str, body: dict | bytes | None) -> dict:
             """Выполнить ограниченный HTTP-запрос с выбранным сетевым бюджетом."""
             r = getattr(client, method)(url + path, json=body)
             if r.status_code >= 300:
@@ -25,7 +26,7 @@ def index(path: str, url: str, alias: str):
         batch = []
         count = 0
 
-        def flush():
+        def flush() -> None:
             """Записать накопленную ограниченную пачку результатов."""
             data = "".join(
                 json.dumps({"index": {"_index": name, "_id": d["id"]}})

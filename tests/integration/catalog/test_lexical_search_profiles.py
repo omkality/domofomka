@@ -3,9 +3,9 @@ import sqlite3
 
 import pytest
 
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import address_words, parse_query
 from tools.catalog.build_catalog import SCHEMA, index_streets
+from tools.catalog.sqlite_catalog import SqliteCatalog
 from tools.experiments.benchmark_native_search import configurations, mapping, native_body, native_result
 from tools.experiments.search_lexical_profiles import expanded_ordinals, ordinal_rules
 
@@ -94,7 +94,7 @@ def test_street_numbers_come_from_the_selected_analyzer_but_cannot_match_a_neigh
         {"_id": hashlib.sha256(("москва\0" + n + " парковая").encode()).hexdigest()[:32], "_score": 10}
         for n in ["8", "9"]
     ]
-    catalog = Catalog(str(path))
+    catalog = SqliteCatalog(str(path))
     assert native_result(catalog, "восьмым парковая 14", hits, 0.8, query_numbers=set())["status"] == "not_found"
     result = native_result(catalog, "восьмым парковая 14", hits, 0.8, query_numbers={"8"})
     assert result["building_id"] == "8"

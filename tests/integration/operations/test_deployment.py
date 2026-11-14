@@ -76,7 +76,6 @@ def test_catalog_layout_request_is_dev_only_and_named(target, layout):
 def test_catalog_layout_disk_guard_does_not_stop_applications(tmp_path, monkeypatch):
     deployment, _, _, _ = prepare(tmp_path)
     deployment.config.update(
-        SEARCH_BACKEND="postgres",
         CATALOG_DATABASE_URL="postgresql://queue/domofomka_catalog_test",
         CATALOG_REVISION="d" * 64,
     )
@@ -101,7 +100,6 @@ def test_catalog_layout_disk_guard_does_not_stop_applications(tmp_path, monkeypa
 def test_catalog_layout_is_idempotent_without_stopping_or_rewriting(tmp_path, monkeypatch):
     deployment, _, _, _ = prepare(tmp_path)
     deployment.config.update(
-        SEARCH_BACKEND="postgres",
         CATALOG_DATABASE_URL="postgresql://queue/domofomka_catalog_test",
         CATALOG_REVISION="d" * 64,
     )
@@ -199,7 +197,6 @@ def test_v2_readiness_uses_http_and_rejects_a_masked_catalog_failure(tmp_path, m
     probes = []
     monkeypatch.setattr(deployment, "compose", lambda release, *args, **kwargs: probes.append(args[-1]))
     deployment.check(release)
-    monkeypatch.setenv("SEARCH_BACKEND", "postgres")
     responses = iter(
         [
             {"name": "domofomka", "version": "2.0.0"},
@@ -210,7 +207,7 @@ def test_v2_readiness_uses_http_and_rejects_a_masked_catalog_failure(tmp_path, m
     requested = []
 
     class Connection:
-        def __init__(self, host, port, timeout):
+        def __init__(self, host, port, timeout) -> None:
             pass
 
         def request(self, method, path):
@@ -384,9 +381,13 @@ def test_failed_activation_restores_old_images_and_keeps_release_state(tmp_path,
 
 
 @pytest.mark.parametrize("protocol", [0, 1])
-def test_activation_migrates_before_start_and_keeps_old_images_compatible(tmp_path, monkeypatch, protocol):
+@pytest.mark.parametrize("catalog_enabled", [False, True])
+def test_activation_migrates_before_start_and_keeps_old_images_compatible(
+    tmp_path, monkeypatch, protocol, catalog_enabled
+):
     deployment, _, new, _ = prepare(tmp_path)
-    deployment.config["SEARCH_BACKEND"] = "postgres"
+    if catalog_enabled:
+        deployment.config["CATALOG_DATABASE_URL"] = "postgresql://unused/catalog"
     value = json.loads((new / "release.json").read_text())
     (new / "release.json").write_text(json.dumps(dict(value, schema_migrations=protocol)))
     commands = []
@@ -401,10 +402,11 @@ def test_activation_migrates_before_start_and_keeps_old_images_compatible(tmp_pa
     assert commands[0] == ("stop", "-t", "30", "vkbot")
     assert commands[-1] == ("up", "-d", "--no-deps", "--no-build", "--pull", "never", "api", "vkbot")
     migrations = commands[1:-1]
-    assert len(migrations) == protocol * 2
+    assert len(migrations) == protocol * (1 + catalog_enabled)
     if protocol:
         assert migrations[0][-2:] == ("apply", "queue")
-        assert migrations[1][-3:] == ("apply", "catalog", "--adopt-baseline")
+        if catalog_enabled:
+            assert migrations[1][-3:] == ("apply", "catalog", "--adopt-baseline")
         assert all(command[:5] == ("run", "--rm", "--no-deps", "-T", "vkbot") for command in migrations)
 
 

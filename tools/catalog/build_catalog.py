@@ -261,7 +261,7 @@ def index_streets(db: sqlite3.Connection) -> None:
     refresh(db)
 
 
-def build(legacy: Path, regions: Path, output: Path, locality_facts: Path | None = None):
+def build(legacy: Path, regions: Path, output: Path, locality_facts: Path | None = None) -> None:
     """Подготовить отдельный проверяемый артефакт из исходных данных."""
     output.parent.mkdir(parents=True, exist_ok=True)
     work = output.with_suffix(".building.db")

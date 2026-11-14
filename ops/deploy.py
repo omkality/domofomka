@@ -106,7 +106,7 @@ def settings(path: Path) -> dict:
 class Deployment:
     """Проверяемое переключение готовых образов с сохранением данных и откатом."""
 
-    def __init__(self, root: Path, target: str):
+    def __init__(self, root: Path, target: str) -> None:
         """Выбрать окружение, пути релизов, порт и пределы развёртывания."""
         self.root = root.resolve()
         self.target = target
@@ -282,7 +282,7 @@ class Deployment:
 
     def optimize_catalog_layout(self) -> bool:
         """Явное обслуживание dev через Actions, без новой копии каталога на VDS."""
-        if self.target != "dev" or self.config.get("SEARCH_BACKEND") != "postgres":
+        if self.target != "dev" or not self.config.get("CATALOG_DATABASE_URL"):
             raise ValueError("Catalog layout maintenance requires dev PostgreSQL")
         database = urlsplit(self.config.get("CATALOG_DATABASE_URL", "").strip("\"'")).path.lstrip("/")
         if not re.fullmatch(r"domofomka_catalog_[A-Za-z0-9_]+", database):
@@ -477,14 +477,13 @@ info=json.loads(r.read()); assert info['name']=='domofomka'
         else:
             probe += """
 from urllib.parse import quote,urlencode
-if os.environ.get('SEARCH_BACKEND','sqlite')=='postgres':
-    c.request('GET','/api/v2/codes/msg?'+urlencode({'message':'мичурина 1а'}))
-    r=c.getresponse(); assert r.status==200
-    result=json.loads(r.read())
-    assert result['status']=='found' and result['engine']=='v2'
-    c.request('GET','/api/v2/buildings/'+quote(result['building_id'],safe=''))
-    r=c.getresponse(); assert r.status==200
-    assert json.loads(r.read())['status']=='found'
+c.request('GET','/api/v2/codes/msg?'+urlencode({'message':'мичурина 1а'}))
+r=c.getresponse(); assert r.status==200
+result=json.loads(r.read())
+assert result['status']=='found' and result['engine']=='v2'
+c.request('GET','/api/v2/buildings/'+quote(result['building_id'],safe=''))
+r=c.getresponse(); assert r.status==200
+assert json.loads(r.read())['status']=='found'
 """
         self.compose(
             release,
@@ -562,7 +561,7 @@ asyncio.run(redis_ready())
                 "apply",
                 "queue",
             )
-            if self.config.get("SEARCH_BACKEND") == "postgres":
+            if self.config.get("CATALOG_DATABASE_URL"):
                 self.compose(
                     release,
                     "run",

@@ -9,11 +9,13 @@ import sqlite3
 import unicodedata
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
-from src.code_service.services.v2.engine import Catalog
+from tools.catalog.async_reference import AsyncReferenceReader
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 
-def prepare(catalog: Path, output: Path):
+def prepare(catalog: Path, output: Path) -> dict:
     """Подготовить детерминированные входные случаи проверки качества."""
     output.mkdir(parents=True, exist_ok=True)
     if (output / "controlled.jsonl").exists():
@@ -98,9 +100,9 @@ def prepare(catalog: Path, output: Path):
     return {"controlled_queries": len(cases), "anchor_identities": len(chosen), "cities": len(cities)}
 
 
-def evaluate(catalog: Path, output: Path):
+def evaluate(catalog: Path, output: Path) -> dict:
     """Выполнить контрольный запрос и собрать его результат для сравнения."""
-    engine = Catalog(str(catalog))
+    engine = SqliteCatalog(str(catalog))
     counts = collections.Counter()
     bad = []
     for line in (output / "controlled.jsonl").read_text(encoding="utf8").splitlines():
@@ -126,7 +128,7 @@ def evaluate(catalog: Path, output: Path):
     return report
 
 
-def review_queue(corpus: Path, output: Path):
+def review_queue(corpus: Path, output: Path) -> dict:
     """Сохранить спорные расхождения для отдельного рассмотрения."""
     if (output / "history-review.jsonl").exists():
         raise FileExistsError("Do not overwrite existing review decisions")
@@ -204,19 +206,29 @@ def address_fields(address: str) -> dict:
     }
 
 
-def review_evaluate(catalog: Path, output: Path):
+def review_evaluate(catalog: Path, output: Path) -> dict:
     """Проверить запрос с учётом отдельно рассмотренных конфликтов."""
     import asyncio
 
     from src.code_service.config import settings
     from src.code_service.services.v2 import search
 
-    settings.search_catalog_path = str(catalog)
     settings.legacy_index_path = "artifacts/search/legacy-index.db"
     settings.db_name = "codes.db"
     settings.opensearch_url = None
     settings.search_cache_ttl_seconds = 0
-    engine = Catalog(str(catalog))
+    engine = SqliteCatalog(str(catalog))
+
+    async def lookup_reference(query: str) -> dict:
+        """Временно подставить офлайн-эталон только внутри инструмента оценки."""
+
+        async def selected_catalog() -> AsyncReferenceReader:
+            """Вернуть явно выбранный инструментом файловый эталон."""
+            return AsyncReferenceReader(engine)
+
+        with patch.object(search, "get_catalog", selected_catalog):
+            return await search.lookup(query)
+
     counts = collections.Counter()
     details = []
     rows = [json.loads(line) for line in (output / "history-review.jsonl").read_text(encoding="utf8").splitlines()]
@@ -224,7 +236,7 @@ def review_evaluate(catalog: Path, output: Path):
         if case["review_status"] in {"unreviewed", "unresolved_intent"}:
             counts["not_scored"] += 1
             continue
-        result = asyncio.run(search.lookup(case["query"]))
+        result = asyncio.run(lookup_reference(case["query"]))
         counts["scored"] += 1
         counts["status_" + result["status"]] += 1
         checks = []

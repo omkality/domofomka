@@ -15,7 +15,7 @@ from pathlib import Path
 from src.code_service.services.v2.catalog_update import TABLES
 
 
-def rows(db, table):
+def rows(db: sqlite3.Connection, table: str) -> sqlite3.Cursor:
     """Прочитать строки указанной таблицы для сравнения снимков каталога."""
     columns, keys = TABLES[table]
     if table == "alias_search":
@@ -33,12 +33,12 @@ def rows(db, table):
     return db.execute("SELECT " + ",".join(columns) + " FROM " + table + " ORDER BY " + ",".join(keys))
 
 
-def serial(row):
+def serial(row: tuple | None) -> list | None:
     """Привести строку каталога к детерминированному представлению патча."""
     return [base64.b64encode(v).decode() if isinstance(v, bytes) else v for v in row] if row else None
 
 
-def difference(left, right, table):
+def difference(left: sqlite3.Connection, right: sqlite3.Connection, table: str) -> tuple[list, int, int]:
     """Получить изменившиеся строки двух проверяемых снимков."""
     columns, keys = TABLES[table]
     indexes = [columns.index(k) for k in keys]
@@ -85,7 +85,7 @@ def build(old_catalog: Path, new_catalog: Path, old_full: Path, new_full: Path, 
                     changes[table] = pairs
                 print(json.dumps({"table": table, "changed": len(pairs)}), flush=True)
 
-    def digest(path):
+    def digest(path: Path) -> str:
         """Вычислить контрольную сумму проверяемого файла потоковым чтением."""
         with path.open("rb") as stream:
             return hashlib.file_digest(stream, "sha256").hexdigest()

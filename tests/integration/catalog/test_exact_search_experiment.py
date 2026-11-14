@@ -4,11 +4,11 @@ import sqlite3
 import pytest
 
 from src.code_service.services.v2.constraints import complete_name_match
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import parse_query
 from tools.catalog.build_catalog import SCHEMA, index_streets
 from tools.catalog.compact_catalog import compact
 from tools.catalog.refresh_aliases import refresh
+from tools.catalog.sqlite_catalog import SqliteCatalog
 from tools.experiments.benchmark_native_search import configurations, native_result, search_variant
 from tools.experiments.search_lexical_profiles import ExactCatalog
 
@@ -67,10 +67,10 @@ def test_exact_street_without_codes_does_not_borrow_codes_from_a_longer_name(nam
     with sqlite3.connect(path) as db:
         db.execute("DELETE FROM codes WHERE building_id='exact'")
     for result in [
-        Catalog(str(path)).resolve("Москва Самотечная 11"),
+        SqliteCatalog(str(path)).resolve("Москва Самотечная 11"),
         ExactCatalog(str(path)).resolve("Москва Самотечная 11"),
         native_result(
-            Catalog(str(path)),
+            SqliteCatalog(str(path)),
             "Москва Самотечная 11",
             hits,
             1,
@@ -86,7 +86,7 @@ def test_exact_street_without_codes_does_not_borrow_codes_from_a_longer_name(nam
 
 def test_bm25_score_does_not_choose_between_equally_matching_coded_cities(names):
     path, hits = names
-    result = native_result(Catalog(str(path)), "Самотечная 11", hits, 1, exact_tokens={"самотечная"})
+    result = native_result(SqliteCatalog(str(path)), "Самотечная 11", hits, 1, exact_tokens={"самотечная"})
     assert result["status"] == "ambiguous"
     assert {c["building_id"] for c in result["candidates"]} == {"exact", "other-city"}
 
@@ -95,7 +95,7 @@ def test_catalog_without_a_city_keeps_coded_partial_names_available(names):
     path, _ = names
     with sqlite3.connect(path) as db:
         db.execute("DELETE FROM codes WHERE building_id IN ('exact','other-city')")
-    result = Catalog(str(path)).resolve("Самотечная 11")
+    result = SqliteCatalog(str(path)).resolve("Самотечная 11")
     assert result["status"] == "found"
     assert result["building_id"] == "longer"
 
@@ -113,13 +113,13 @@ def test_exact_policy_reads_non_coded_hits_before_deciding_and_preserves_fuzzy_f
 
     variant = next(v for v in configurations("lexical") if v["name"] == "lexical.analyzer_exact-AUTO-r1.0")
     result = search_variant(
-        Catalog(str(path)), "Москва Самотечная 11", variant, search, lambda *a: ["москва", "самотечная"]
+        SqliteCatalog(str(path)), "Москва Самотечная 11", variant, search, lambda *a: ["москва", "самотечная"]
     )
     assert calls == [False, True]
     assert result["status"] == "no_codes"
     assert result["building_id"] == "exact"
     query = "Москва Самотечна 11"
-    assert ExactCatalog(str(path)).resolve(query) == Catalog(str(path)).resolve(query)
+    assert ExactCatalog(str(path)).resolve(query) == SqliteCatalog(str(path)).resolve(query)
 
 
 @pytest.mark.parametrize("unrelated_scope", [False, True])
@@ -128,7 +128,7 @@ def test_coverage_without_a_city_does_not_hide_coded_partial_names_behind_empty_
     with sqlite3.connect(path) as db:
         db.execute("DELETE FROM codes WHERE building_id IN ('exact','other-city')")
     result = native_result(
-        Catalog(str(path)),
+        SqliteCatalog(str(path)),
         "Самотечная 11",
         hits,
         1,
@@ -169,7 +169,7 @@ def test_coverage_preserves_full_street_with_administrative_locality_variant_wit
         {"_id": hashlib.sha256("город москва центральный район\0самотечная".encode()).hexdigest()[:32], "_score": 1}
     ]
     result = native_result(
-        Catalog(str(path)),
+        SqliteCatalog(str(path)),
         "Москва Самотечная 11",
         hits,
         1,
@@ -185,7 +185,7 @@ def test_coverage_preserves_full_street_with_administrative_locality_variant_wit
         assert result["building_id"] == "source"
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT count(*) FROM buildings").fetchone()[0] == 4
-    catalog_result = Catalog(str(path)).resolve("Москва Самотечная 11")
+    catalog_result = SqliteCatalog(str(path)).resolve("Москва Самотечная 11")
     if canonical_coded:
         assert catalog_result["status"] == "ambiguous"
         assert {v["building_id"] for v in catalog_result["candidates"]} == {"exact", "source"}
@@ -222,7 +222,7 @@ def test_scoped_empty_street_does_not_borrow_a_name_with_an_unmentioned_type_wor
         )
         db.execute("DELETE FROM codes WHERE building_id='exact'")
         index_streets(db)
-    result = Catalog(str(path)).resolve("Москва Самотечная 11")
+    result = SqliteCatalog(str(path)).resolve("Москва Самотечная 11")
     assert result["status"] == "no_codes"
     assert result["building_id"] == "exact"
 
@@ -240,7 +240,7 @@ def test_scoped_name_keeps_coded_source_with_the_type_stored_inside_the_street_n
             "street='жилой массив Тестовый',street_key='жилой массив тестовый' WHERE id='longer'"
         )
         index_streets(db)
-    result = Catalog(str(path)).resolve("Москва жилой массив Тестовый 11")
+    result = SqliteCatalog(str(path)).resolve("Москва жилой массив Тестовый 11")
     assert result["status"] == "ambiguous"
     assert {v["building_id"] for v in result["candidates"]} == {"exact", "longer"}
 
@@ -267,7 +267,7 @@ def test_catalog_keeps_codes_from_a_verified_parent_locality_alias_as_a_separate
         db.execute("INSERT INTO codes VALUES('satellite','2','test','ONLY-satellite')")
         index_streets(db)
         refresh(db)
-    catalog = Catalog(str(path))
+    catalog = SqliteCatalog(str(path))
     result = catalog.resolve("Москва Самотечная 11")
     assert result["status"] == "ambiguous"
     assert {v["building_id"] for v in result["candidates"]} == {"exact", "satellite"}
@@ -309,7 +309,7 @@ def test_native_and_catalog_leave_misaligned_source_columns_to_the_legacy_fallba
         )
         index_streets(db)
     hit = {"_id": hashlib.sha256((city_key + "\0парнас").encode()).hexdigest()[:32], "_score": 100}
-    catalog = Catalog(str(path))
+    catalog = SqliteCatalog(str(path))
     query = "Москва Самотечная Парнас 11"
     result = native_result(catalog, query, [hit], 1, exact_tokens={"москва", "самотечная", "парнас"})
     assert result["status"] == "not_found"
@@ -337,7 +337,7 @@ def test_known_empty_packed_gar_address_is_not_mistaken_for_misaligned_legacy_fi
         index_streets(db)
     serving = tmp_path / "packed.db"
     compact(path, serving)
-    catalog = Catalog(str(serving))
+    catalog = SqliteCatalog(str(serving))
     result = catalog.resolve("деревня Улица улица Зеленая 9")
     assert result["status"] == "no_codes"
     assert result["building_id"].startswith("address:")
@@ -370,7 +370,7 @@ def test_a_split_source_alias_does_not_skip_joined_word_candidates_in_another_ma
         db.execute("INSERT INTO codes VALUES('satellite','2','test','ONLY-satellite')")
         index_streets(db)
         refresh(db)
-    result = Catalog(str(path)).resolve("Москва Малая Мичу рина 11")
+    result = SqliteCatalog(str(path)).resolve("Москва Малая Мичу рина 11")
     assert result["status"] == "ambiguous"
     assert {item["building_id"] for item in result["candidates"]} == {"exact", "satellite"}
 
@@ -387,7 +387,7 @@ def test_a_locality_label_inside_the_stored_street_name_is_required_for_a_comple
                 (street, key, f"Москва, улица {street}, дом 11", bid),
             )
         index_streets(db)
-    catalog = Catalog(str(path))
+    catalog = SqliteCatalog(str(path))
     hits = [
         {"_id": hashlib.sha256(("москва\0" + key).encode()).hexdigest()[:32], "_score": score}
         for key, score in [("тестовый поселок", 100), ("тестовый вал", 1)]

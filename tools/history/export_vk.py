@@ -5,6 +5,7 @@ import hashlib
 import json
 import time
 from pathlib import Path
+from typing import Literal, overload
 
 from dotenv import dotenv_values
 from vk_api import VkApi
@@ -20,7 +21,13 @@ def export(env: str, target: Path, interval: float) -> None:
     target.mkdir(parents=True, exist_ok=True)
     vk = VkApi(token=config["VK_GROUP_TOKEN"], api_version="5.199", session=TimeoutSession(vk_proxy_url=""))
 
-    def call(method, params):
+    @overload
+    def call(method: Literal["messages.getConversations", "messages.getHistory"], params: dict) -> dict: ...
+
+    @overload
+    def call(method: Literal["execute"], params: dict) -> list[dict] | bool: ...
+
+    def call(method: str, params: dict) -> dict | list[dict] | bool:
         """Вызвать метод выгрузки VK с ограничением частоты и повторов."""
         assert method in {"messages.getConversations", "messages.getHistory", "execute"}
         for attempt in range(8):
@@ -41,7 +48,7 @@ def export(env: str, target: Path, interval: float) -> None:
     if not manifest.exists():
         peers, offset = [], 0
         while True:
-            response = call("messages.getConversations", {"count": 200, "offset": offset, "filter": "all"})
+            response: dict | None = call("messages.getConversations", {"count": 200, "offset": offset, "filter": "all"})
             items = response.get("items", [])
             peers.extend(i["conversation"]["peer"]["id"] for i in items if i["conversation"]["peer"]["type"] == "user")
             offset += len(items)

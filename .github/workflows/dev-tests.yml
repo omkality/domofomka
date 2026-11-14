@@ -45,6 +45,7 @@ jobs:
       ASTRO_TELEMETRY_DISABLED: '1'
       DOCS_BASE_PATH: /domofomka
       DOCS_SITE_URL: https://omkality.github.io
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -105,19 +106,7 @@ jobs:
       bot: ${{ steps.images.outputs.bot }}
       api_bytes: ${{ steps.images.outputs.api_bytes }}
       bot_bytes: ${{ steps.images.outputs.bot_bytes }}
-    services:
-      postgres:
-        image: postgres:17.11-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
-        env:
-          POSTGRES_DB: domofomka
-          POSTGRES_USER: domofomka
-          POSTGRES_PASSWORD: local-test-only
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U domofomka"
-          --health-interval 5s --health-timeout 3s --health-retries 10
     env:
-      TEST_QUEUE_DATABASE_URL: postgresql://domofomka:local-test-only@localhost:5432/domofomka
       API_HOST: localhost
       API_PORT: '8000'
       DB_NAME: unused-test.db
@@ -145,14 +134,18 @@ jobs:
       - name: Check code, SQL and explicit environment configuration
         run: |
           uv run --frozen --all-groups black --check src tests tools ops
-          uv run --frozen --all-groups mypy --config-file=mypy.ini src tools ops
+          uv run --frozen --all-groups mypy --config-file=mypy.ini src tools ops tests/fixtures tests/conftest.py
           uv run --frozen --all-groups sqlfluff lint src/infrastructure/database --disable-progress-bar
           uv run --frozen --all-groups python -m tools.configuration.environment --check-examples
-      - run: uv run --frozen --all-groups python -m pytest -q -p no:cacheprovider
       - name: Build runtime images without development dependencies
         run: |
           docker build --label org.opencontainers.image.source=https://github.com/omkality/domofomka --label org.opencontainers.image.revision="$GITHUB_SHA" -t domofomka-api-check -f Dockerfile.api .
           docker build --label org.opencontainers.image.source=https://github.com/omkality/domofomka --label org.opencontainers.image.revision="$GITHUB_SHA" -t domofomka-bot-check -f Dockerfile.vkbot .
+      - name: Test with the production images and Testcontainers PostgreSQL
+        env:
+          TEST_API_IMAGE: domofomka-api-check
+          TEST_VKBOT_IMAGE: domofomka-bot-check
+        run: uv run --frozen --all-groups python -m pytest -q -p no:cacheprovider
       - name: Check runtime imports and least privilege
         run: |
           docker run --rm -i --network none --read-only --tmpfs /tmp:size=16m --cap-drop ALL --security-opt no-new-privileges -e API_HOST -e API_PORT -e DB_NAME -e DADATA_TOKEN domofomka-api-check python - api < tools/operations/check_runtime_image.py

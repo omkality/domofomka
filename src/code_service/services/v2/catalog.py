@@ -3,9 +3,9 @@
 import asyncio
 
 from src.code_service.config import settings
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.postgres import PostgresCatalog
 
+CATALOG_BACKEND = "postgres"
 _postgres_readers: dict = {}
 _postgres_guards: dict = {}
 
@@ -22,15 +22,8 @@ async def close_catalog() -> None:
         _postgres_guards.pop(loop, None)
 
 
-async def get_catalog() -> Catalog | PostgresCatalog:
-    """Вернуть читатель опубликованной ревизии выбранного хранилища."""
-    if settings.search_backend == "sqlite":
-        return Catalog(
-            settings.search_catalog_path,
-            settings.search_min_similarity,
-            settings.search_ambiguity_margin,
-            candidate_limit=settings.search_candidate_limit,
-        )
+async def get_catalog() -> PostgresCatalog:
+    """Вернуть PostgreSQL-читатель опубликованной ревизии рабочего v2."""
     if not settings.catalog_database_url:
         raise ValueError("CATALOG_DATABASE_URL required for PostgreSQL catalog")
     config = (

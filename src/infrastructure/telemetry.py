@@ -45,7 +45,7 @@ _attributes: ContextVar[Any] = ContextVar("observation_attributes", default=None
 class Capture:
     """Ограниченный набор этапов одной попытки обработки запроса."""
 
-    def __init__(self, enabled: bool = True):
+    def __init__(self, enabled: bool = True) -> None:
         """Создать ограниченный набор этапов и блокировку записи текущей попытки."""
         self.enabled = enabled
         self.rows: list[dict] = []

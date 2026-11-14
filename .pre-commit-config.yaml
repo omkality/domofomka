@@ -27,7 +27,7 @@ repos:
         entry: uv run --frozen --all-groups mypy --config-file=mypy.ini
         language: system
         types: [python]
-        files: ^(src|ops|tools)/
+        files: ^((src|ops|tools|tests/fixtures)/|tests/conftest\.py$)
       - id: explicit-environment-examples
         name: Complete and consistently ordered environment examples
         entry: uv run --frozen --all-groups python -m tools.configuration.environment --check-examples

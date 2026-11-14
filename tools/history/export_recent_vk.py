@@ -33,7 +33,7 @@ def export(env: Path, baseline: Path, output: Path, group: int) -> dict:
     session = TimeoutSession(vk_proxy_url="")
     vk = VkApi(token=config["VK_GROUP_TOKEN"], api_version="5.199", session=session)
 
-    def call(method: str, params: dict):
+    def call(method: str, params: dict) -> dict:
         """Вызвать метод выгрузки VK с ограничением частоты и повторов."""
         assert method in {"messages.getConversations", "messages.getHistory"}
         for attempt in range(5):
@@ -102,9 +102,7 @@ def export(env: Path, baseline: Path, output: Path, group: int) -> dict:
             "messages": messages,
             "incoming_text": incoming,
             "search_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-            "search_source_sha256": hashlib.sha256(
-                Path("src/code_service/services/v2/engine.py").read_bytes()
-            ).hexdigest(),
+            "search_source_sha256": hashlib.sha256(Path("tools/catalog/sqlite_catalog.py").read_bytes()).hexdigest(),
             "note": "Новые записи после исходной выгрузки; чтение не отправляет сообщения и не меняет отметку прочтения. Снимок API не атомарный.",
         }
         (output / "conversations.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf8")

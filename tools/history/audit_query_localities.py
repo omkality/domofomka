@@ -65,7 +65,7 @@ def extract_region(directory: Path) -> dict:
 class LocalityMatcher:
     """Лексические признаки для аналитики; не геокодер и не выбор города пользователя."""
 
-    def __init__(self, places: list[dict], street_names: set[str] | None = None):
+    def __init__(self, places: list[dict], street_names: set[str] | None = None) -> None:
         """Сохранить зависимости и настроить ресурсы экземпляра."""
         self.places = {}
         self.trie = {}

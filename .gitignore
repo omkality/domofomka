@@ -17,4 +17,5 @@ test_main.http
 /.codex-local/
 /history.txt
 /.ci/
+/docs/src/generated/
 /release.json

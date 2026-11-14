@@ -7,7 +7,7 @@ from src.code_service.config import settings
 from src.code_service.main import app
 from src.code_service.services.v2 import search
 from src.code_service.services.v2.cache import LookupCache
-from src.code_service.services.v2.engine import Catalog
+from src.code_service.services.v2.postgres import PostgresCatalog
 
 
 def test_cache_expiry_eviction_copy_and_memory_budget():
@@ -39,31 +39,27 @@ def test_cache_expiry_eviction_copy_and_memory_budget():
 
 @pytest.fixture
 def cached_lookup(tmp_path, monkeypatch):
-    catalog = tmp_path / "catalog.db"
-    catalog.write_bytes(b"catalog revision 1")
     source = tmp_path / "codes.db"
     source.touch()
-    monkeypatch.setattr(settings, "search_catalog_path", str(catalog))
+    monkeypatch.setattr(settings, "catalog_revision", "revision-1")
     monkeypatch.setattr(settings, "db_name", str(source))
     monkeypatch.setattr(settings, "opensearch_url", None)
     monkeypatch.setattr(settings, "search_cache_ttl_seconds", 120)
-    resolve = MagicMock(
+    resolve = AsyncMock(
         return_value={"status": "found", "engine": "v2", "address": "Дом", "data": {"1": [["CODE", "test"]]}}
     )
-    monkeypatch.setattr(Catalog, "resolve", resolve)
-    return catalog, resolve
+    monkeypatch.setattr(PostgresCatalog, "resolve", resolve)
+    return resolve
 
 
-def test_repeated_http_search_is_cached_and_catalog_replacement_invalidates_it(cached_lookup, monkeypatch):
-    path, resolve = cached_lookup
+def test_repeated_http_search_is_cached_and_postgres_revision_invalidates_it(cached_lookup, monkeypatch):
+    resolve = cached_lookup
     with TestClient(app) as client:
         first = client.get("/api/v2/codes/msg", params={"message": "Перерва 62к1"})
         second = client.get("/api/v2/codes/msg", params={"message": "Перерва 62к1"})
         assert first.json() == second.json()
         assert resolve.call_count == 1
-        replacement = path.with_suffix(".new")
-        replacement.write_bytes(b"catalog revision 2")
-        replacement.replace(path)
+        monkeypatch.setattr(settings, "catalog_revision", "revision-2")
         client.get("/api/v2/codes/msg", params={"message": "Перерва 62к1"})
         assert resolve.call_count == 2
         monkeypatch.setattr(settings, "opensearch_prefix_length", 0)
@@ -72,7 +68,7 @@ def test_repeated_http_search_is_cached_and_catalog_replacement_invalidates_it(c
 
 
 def test_unavailable_search_fallback_is_not_cached(cached_lookup, monkeypatch):
-    _, resolve = cached_lookup
+    resolve = cached_lookup
     success = resolve.return_value
     resolve.side_effect = [RuntimeError("offline"), success]
     monkeypatch.setattr(search, "get_data_from_db", AsyncMock(return_value={"data": {"1": []}}))

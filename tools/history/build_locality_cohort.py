@@ -12,7 +12,7 @@ from tools.evaluation.evaluate_search import source_fingerprints
 from tools.history.audit_query_localities import LocalityMatcher, mentions, query_key, words
 
 
-def select_cases(rows, *, excluded: set[str], per_place: int = 8) -> tuple[list[dict], dict]:
+def select_cases(rows: list[dict], *, excluded: set[str], per_place: int = 8) -> tuple[list[dict], dict]:
     """Отобрать контрольные запросы без смешивания диалогов между выборками."""
     if not 1 <= per_place <= 32:
         raise ValueError("Per-place sample must be between 1 and 32")
@@ -164,7 +164,7 @@ def build(audit_path: Path, frozen_path: Path, catalog: Path, output: Path, per_
     return report
 
 
-def main():
+def main() -> None:
     """Разрез полного прогона по упоминаниям и дополнительная равномерная выборка населённых пунктов."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audit", type=Path, required=True)

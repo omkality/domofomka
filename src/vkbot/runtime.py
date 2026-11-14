@@ -40,7 +40,7 @@ def validate_environment(settings: Any) -> None:
 class Runtime:
     """Жизненный цикл сборщика, обработчиков, доставки и обслуживания очереди."""
 
-    def __init__(self, settings: Any):
+    def __init__(self, settings: Any) -> None:
         """Проверить окружение и собрать очередь с общим ограничителем VK."""
         validate_environment(settings)
         self.settings = settings

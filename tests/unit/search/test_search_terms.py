@@ -3,10 +3,10 @@ import sqlite3
 
 import pytest
 
-from src.code_service.services.v2.engine import Catalog
 from src.code_service.services.v2.normalize import address_words, parse_query
 from tools.catalog.build_catalog import SCHEMA, index_streets
 from tools.catalog.refresh_search_terms import rebuild
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 
 @pytest.mark.parametrize("prefix", ["", "Российская Федерация, ", "Российская Федерация "])
@@ -51,8 +51,8 @@ def test_search_terms_rebuild_keeps_codes_houses_and_source_immutable(tmp_path):
     assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
     with sqlite3.connect(target) as db:
         assert db.execute("SELECT * FROM codes ORDER BY building_id").fetchall() == before
-    assert Catalog(str(target)).resolve("Уфа, Российская 153")["building_id"] == "russian"
-    assert Catalog(str(target)).resolve("Уфа, Рязанская 153")["building_id"] == "other"
-    assert Catalog(str(target)).resolve("Уфа, Российская 153к1")["status"] == "not_found"
+    assert SqliteCatalog(str(target)).resolve("Уфа, Российская 153")["building_id"] == "russian"
+    assert SqliteCatalog(str(target)).resolve("Уфа, Рязанская 153")["building_id"] == "other"
+    assert SqliteCatalog(str(target)).resolve("Уфа, Российская 153к1")["status"] == "not_found"
     with pytest.raises(FileExistsError):
         rebuild(source, target)

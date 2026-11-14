@@ -1,5 +1,4 @@
 import copy
-import os
 import uuid
 
 import psycopg
@@ -12,10 +11,8 @@ from tools.catalog.build_postgres_catalog import INDEXES, SCHEMA
 
 
 @pytest.fixture
-def patch_database():
-    dsn = os.environ.get("TEST_QUEUE_DATABASE_URL")
-    if not dsn:
-        pytest.skip("Requires isolated real PostgreSQL")
+def patch_database(postgres_dsn):
+    dsn = postgres_dsn
     name = "domofomka_catalog_build_patch_" + uuid.uuid4().hex[:12]
     info = conninfo_to_dict(dsn)
     info["dbname"] = name

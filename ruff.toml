@@ -41,7 +41,6 @@ ignore = [
     "PT023", # `@pytest.fixture` without value is not allowed
     "D415", # First line should end with a period, question mark, or exclamation point
     "D205", # 1 blank line required between summary line and description
-    "ANN204", # Missing return type annotation for `__init__`
     "ANN401", # Dynamically typed expressions (typing.Any) are disallowed in `run_coroutine`
     "SIM102", # Use a single `if` statement instead of nested `if` statements
     "PLC0415", # `import` should be at the top-level of a file
@@ -67,9 +66,9 @@ fixable = [
 "*/versions/*.py" = ["D103", "W291"]
 "*/models/*.py" = ["F821", "D101"]
 "*test_*.py" = ["PLR0913", "ANN001", "ANN201", "ANN202"]
-"tools/*.py" = ["T201", "ANN001", "ANN201", "ANN202", "E501"]
-"conftest.py" = ["ANN001", "ANN202", "ANN201", "PT004", "E501", "F821"]
-"*/fixtures/*.py" = ["ANN001", "ANN003", "ANN202", "ANN201", "PT004", "E501"]
+"tools/*.py" = ["T201", "E501"]
+"conftest.py" = ["PT004", "E501", "F821"]
+"*/fixtures/*.py" = ["PT004", "E501"]
 "*fixtures*.py" = ["PLR0913", "E501", "SIM117"]
 
 # Isort configuration

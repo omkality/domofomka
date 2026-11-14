@@ -104,8 +104,12 @@ flowchart LR
 Большие данные и исходные переписки остаются в игнорируемой папке `artifacts/`. Они не попадают в Git и контекст сборки Docker.
 Каталог v2 работает в отдельной БД PostgreSQL на сервере приложения
 и не зависит от компьютера разработчика. API читает его через отдельную роль с ограниченными правами;
-при сбое поиска сохраняется fallback на исходную SQLite v1. Файловый каталог v2 поддержан для отката.
+при сбое поиска сохраняется fallback на исходную SQLite v1. Рабочий каталог v2 хранится в PostgreSQL.
 Подробности: [поиск и результаты проверок](docs/src/content/docs/search-v2.md), [очередь и сценарии отказов](docs/src/content/docs/message-delivery.mdx), [тестовое окружение](docs/src/content/docs/dev-stand.md).
+
+Интеграционные тесты сами запускают PostgreSQL через *Testcontainers* из образа рабочего Compose
+и проверяют собранные Docker-образы API и бота. Нужен работающий Docker;
+рабочие БД и токены не используются. [Запуск и изоляция проверок](docs/src/content/docs/development.md#как-проверяется-инфраструктура).
 
 ## Требования
 
@@ -142,7 +146,6 @@ POSTGRES_PASSWORD=replace_with_long_random_password
 QUEUE_DATABASE_URL=postgresql://domofomka:${POSTGRES_PASSWORD}@queue:5432/domofomka
 
 # Каталог v2 — отдельная опубликованная БД и роль только для чтения
-SEARCH_BACKEND=postgres
 CATALOG_DATABASE_URL=postgresql://catalog_reader:replace_with_reader_password@queue:5432/domofomka_catalog_release
 CATALOG_REVISION=replace_with_published_catalog_sha256
 
@@ -155,7 +158,9 @@ DOMOFOMKA_API_PORT=8000
 
 До запуска PostgreSQL-варианта нужно загрузить проверенный каталог и выдать роли API права чтения:
 [публикация и восстановление](docs/src/content/docs/database.mdx#обновление-и-восстановление).
-SQLite-вариант выбирается через `SEARCH_BACKEND=sqlite` и `SEARCH_CATALOG_PATH`.
+Рабочий v2 всегда читает PostgreSQL. SQLite используется для v1 и его индекса;
+файловый эталон v2 находится в `tools/catalog/sqlite_catalog.py` и нужен только для подготовки данных и тестов.
+Переключателей `SEARCH_BACKEND` и `SEARCH_CATALOG_PATH` у рабочего API нет.
 
 Исходная база SQLite3 для v1 должна содержать таблицу `codes`:
 

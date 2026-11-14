@@ -108,10 +108,11 @@ uv run --frozen --all-groups --env-file .env.dev python -m src.infrastructure.da
 В CI/CD откатывают **образы**, а не схему БД: миграции должны быть совместимы
 с предыдущим приложением, пока оно используется для rollback.
 
-В PowerShell SQL-интеграции запускаются так; DSN относится только к одноразовой БД:
+SQL-интеграции сами запускают PostgreSQL через Testcontainers из образа рабочего
+Compose. Временные БД для миграций создаются на каждый тест и удаляются после него;
+достаточно работающего Docker, DSN вручную задавать не нужно:
 
 ```powershell
-$env:TEST_QUEUE_DATABASE_URL = 'postgresql://test:test@127.0.0.1:25437/test_queue'
 uv run --frozen --all-groups python -X utf8 -m pytest tests/integration/database/test_migrations.py -q
 ```
 

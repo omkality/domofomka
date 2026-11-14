@@ -10,7 +10,7 @@ from src.vkbot.queue import QueueStore, event_record
 class Reconciler:
     """Восстановление отсутствующих входящих сообщений из ограниченной истории VK."""
 
-    def __init__(self, vk: Any, store: QueueStore, settings: Any):
+    def __init__(self, vk: Any, store: QueueStore, settings: Any) -> None:
         """Сохранить VK-клиент, очередь и границы восстановления истории."""
         self.vk = vk
         self.store = store

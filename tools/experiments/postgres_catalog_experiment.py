@@ -19,7 +19,7 @@ SCHEMA = read_sql("experiment-postgres-tables.sql")
 INDEXES = list(sqlparse.split(read_sql("experiment-postgres-tables-indexes.sql")))
 
 
-def connect():
+def connect() -> psycopg.Connection[dict]:
     """Открыть соединение с явно выбранной локальной БД подготовки данных."""
     dsn = os.environ["CATALOG_BENCHMARK_DSN"]
     db = psycopg.connect(dsn, autocommit=True, row_factory=dict_row)
@@ -33,7 +33,9 @@ def connect():
     return db
 
 
-def copy_table(source: sqlite3.Connection, target, table: str, select: str, types: list[str]):
+def copy_table(
+    source: sqlite3.Connection, target: psycopg.Connection[dict], table: str, select: str, types: list[str]
+) -> int:
     """Потоково перенести строки таблицы бинарным COPY и измерить длительность."""
     started = time.perf_counter()
     count = 0
@@ -46,7 +48,7 @@ def copy_table(source: sqlite3.Connection, target, table: str, select: str, type
     return count
 
 
-def load(catalog: Path, full_catalog: Path, output: Path):
+def load(catalog: Path, full_catalog: Path, output: Path) -> None:
     """Загрузить подготовленные данные в отдельную локальную БД и проверить публикацию."""
     output.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()

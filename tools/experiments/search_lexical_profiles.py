@@ -1,15 +1,20 @@
 """Лексические варианты для лаборатории; правила домов и адресные данные не меняются."""
 
+from __future__ import annotations
+
 import itertools
 import re
 import time
+from collections.abc import Sequence
 from functools import lru_cache
 
-from src.code_service.services.v2.engine import Catalog
-from src.code_service.services.v2.normalize import NAME_LABELS, ORDINALS, STOP, TENS, ordinals
+import httpx
+
+from src.code_service.services.v2.normalize import NAME_LABELS, ORDINALS, STOP, TENS, Query, ordinals
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 
-def exact_text_match(tokens, row, aliases=()):
+def exact_text_match(tokens: set[str], row: dict, aliases: Sequence[str] = ()) -> bool:
     """Проверить буквальное совпадение значимого названия."""
     return tokens in [
         set(row["street_key"].split()),
@@ -18,10 +23,10 @@ def exact_text_match(tokens, row, aliases=()):
     ]
 
 
-class ExactCatalog(Catalog):
+class ExactCatalog(SqliteCatalog):
     """Лабораторный контроль: приоритет полного имени, затем прежнее ранжирование."""
 
-    def _resolve_candidates(self, query, variants, candidates):
+    def _resolve_candidates(self, query: Query, variants: list[Query], candidates: list[dict]) -> dict:
         """Отфильтровать и ранжировать кандидатов до ответа или уточнения."""
         exact = [
             row
@@ -56,7 +61,7 @@ def ordinal_rules() -> list[str]:
 
 
 @lru_cache(maxsize=1)
-def ordinal_replacement():
+def ordinal_replacement() -> tuple[re.Pattern[str], dict[str, str]]:
     """Преобразовать одну порядковую форму контрольного профиля."""
     values = dict(rule.split(" => ") for rule in ordinal_rules())
     pattern = re.compile(
@@ -65,7 +70,7 @@ def ordinal_replacement():
     return pattern, values
 
 
-def expanded_ordinals(value):
+def expanded_ordinals(value: str) -> str:
     """Подготовить текст с раскрытыми порядковыми номерами улиц."""
     pattern, values = ordinal_replacement()
     return pattern.sub(lambda match: values[match[0]], value)
@@ -228,14 +233,14 @@ def profiles() -> list[dict]:
     return values
 
 
-def guard_street_roles(body, tokens, street_tokens=None):
+def guard_street_roles(body: dict, tokens: list[str], street_tokens: list[str] | None = None) -> dict:
     """Покрытие всего запроса — фильтр; числовой номер не заменяет слово улицы."""
     alphabetic = [token for token in tokens if not token.isdigit()]
     if not alphabetic and street_tokens is None:
         return body
     text = " ".join(alphabetic if street_tokens is None else street_tokens)
 
-    def branch(value, nested=False):
+    def branch(value: dict, nested: bool = False) -> None:
         """Проверить одну ветвь экспериментального выбора кандидатов."""
         block = value["bool"]
         full, street = block["must"]
@@ -264,10 +269,10 @@ def guard_street_roles(body, tokens, street_tokens=None):
     return body
 
 
-def street_probe_body(body):
+def street_probe_body(body: dict) -> dict:
     """Собрать запрос кандидатов улицы для выбранного профиля."""
 
-    def strip(value):
+    def strip(value: dict | list) -> None:
         """Удалить служебные формы выбранного лексического профиля."""
         if isinstance(value, dict):
             if "filter" in value:
@@ -287,7 +292,7 @@ def street_probe_body(body):
     return body
 
 
-def known_street(hits, tokens):
+def known_street(hits: list[dict], tokens: list[str]) -> bool:
     """Проверить существование точной улицы перед ослаблением поиска."""
     for hit in hits:
         source = hit.get("_source", {})
@@ -303,7 +308,7 @@ def known_street(hits, tokens):
     return False
 
 
-def probes(client, index):
+def probes(client: httpx.Client, index: str) -> list[dict]:
     """Сформировать контрольные запросы к анализатору и индексу."""
     values = []
     for query, expected in [
@@ -320,7 +325,7 @@ def probes(client, index):
     return values
 
 
-def clone_documents(client, source: str, target: str, definition: dict, expected_meta: dict) -> int:
+def clone_documents(client: httpx.Client, source: str, target: str, definition: dict, expected_meta: dict) -> int:
     """Перенести одинаковые документы в новый индекс сравнения."""
     if not source.startswith("domofomka-native-lab-") or not target.startswith("domofomka-native-lab-"):
         raise ValueError("Only isolated lab indexes may be cloned")

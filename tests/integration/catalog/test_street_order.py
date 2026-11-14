@@ -3,9 +3,9 @@ import json
 import sqlite3
 from contextlib import closing
 
-from src.code_service.services.v2.engine import Catalog
 from tools.catalog.build_catalog import SCHEMA, index_streets
 from tools.catalog.reconcile_street_order import apply, mappings
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 
 def catalog(path, rows):
@@ -55,7 +55,7 @@ def test_unique_official_street_merges_codes_and_preserves_provenance_and_source
         assert db.execute("SELECT DISTINCT building_id FROM provenance").fetchall() == [("gar:one",)]
         assert db.execute("SELECT count(*) FROM buildings WHERE guid IS NULL").fetchone()[0] == 0
     assert hashlib.sha256(source.read_bytes()).hexdigest() == digest
-    assert Catalog(str(output)).building("legacy:one")["id"] == "gar:one"
+    assert SqliteCatalog(str(output)).building("legacy:one")["id"] == "gar:one"
 
 
 def test_reordering_never_changes_city_house_number_or_street_type(tmp_path):

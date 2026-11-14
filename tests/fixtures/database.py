@@ -1,34 +1,37 @@
 """Настоящий тестовый PostgreSQL с миграциями и отдельным namespace на тест."""
 
-import os
+from __future__ import annotations
+
 import uuid
-from collections.abc import Generator
+from collections.abc import AsyncIterator, Awaitable, Callable, Generator
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
 
+if TYPE_CHECKING:
+    from src.vkbot.queue import QueueStore
 
-@pytest.fixture(scope="session", autouse=True)
-def migrated_database() -> str | None:
-    """Подготовить явно переданную тестовую БД; без неё SQL-тесты пропускаются."""
+type QueueFactory = Callable[..., Awaitable[QueueStore]]
+
+
+@pytest.fixture(scope="session")
+def migrated_database(postgres_dsn: str) -> str:
+    """Применить настоящие yoyo-миграции к PostgreSQL из Testcontainers."""
     from src.infrastructure.database.migrate import apply
 
-    dsn = os.getenv("TEST_QUEUE_DATABASE_URL")
-    if dsn:
-        apply(dsn)
-    return dsn
+    apply(postgres_dsn)
+    return postgres_dsn
 
 
 @pytest_asyncio.fixture
-async def queue_factory(migrated_database):
+async def queue_factory(migrated_database: str) -> AsyncIterator[QueueFactory]:
     """Создать очередь в своём сообществе и удалить только её строки после теста."""
     from src.vkbot.queue import QueueStore
 
-    if not migrated_database:
-        pytest.skip("Set TEST_QUEUE_DATABASE_URL to run real PostgreSQL integration tests")
     created = []
 
-    async def create(*, telemetry=False, lease_seconds=3):
+    async def create(*, telemetry: bool = False, lease_seconds: float = 3) -> QueueStore:
         """Выдать независимую очередь с нужным режимом диагностики."""
         group = 1_000_000_000 + uuid.uuid4().int % 1_000_000_000
         queue = QueueStore(migrated_database, group, lease_seconds=lease_seconds, telemetry=telemetry)
@@ -45,30 +48,28 @@ async def queue_factory(migrated_database):
 
 
 @pytest_asyncio.fixture
-async def store(queue_factory):
+async def store(queue_factory: QueueFactory) -> QueueStore:
     """Выдать очередь без диагностики с короткой арендой заданий."""
     return await queue_factory()
 
 
 @pytest_asyncio.fixture
-async def observed_store(queue_factory):
+async def observed_store(queue_factory: QueueFactory) -> QueueStore:
     """Выдать очередь с записью этапов обработки и сетевых попыток."""
     return await queue_factory(telemetry=True, lease_seconds=120)
 
 
 @pytest.fixture
-def isolated_database(migrated_database) -> Generator[str, None, None]:
+def isolated_database(postgres_dsn: str) -> Generator[str, None, None]:
     """Выдать пустую БД для проверки DDL, не затрагивая общие таблицы очереди."""
     import psycopg
     from psycopg import sql
     from psycopg.conninfo import make_conninfo
 
-    if not migrated_database:
-        pytest.skip("Requires isolated real PostgreSQL")
     name = "domofomka_test_" + uuid.uuid4().hex
-    with psycopg.connect(migrated_database, autocommit=True) as admin:
+    with psycopg.connect(postgres_dsn, autocommit=True) as admin:
         admin.execute(sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(sql.Identifier(name)))
         try:
-            yield make_conninfo(migrated_database, dbname=name)
+            yield make_conninfo(postgres_dsn, dbname=name)
         finally:
             admin.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))

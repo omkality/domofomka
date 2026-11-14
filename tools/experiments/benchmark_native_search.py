@@ -3,6 +3,8 @@
 Переписки и построчные результаты остаются в artifacts/private. Рабочий API не переключается.
 """
 
+from __future__ import annotations
+
 import argparse
 import collections
 import concurrent.futures
@@ -13,9 +15,11 @@ import json
 import re
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
+from typing import TextIO
 
 import httpx
 from rapidfuzz.distance import DamerauLevenshtein
@@ -28,8 +32,10 @@ from src.code_service.services.v2.constraints import (
     name_constraints_match,
     whole_location_match,
 )
-from src.code_service.services.v2.engine import MAPPING, Catalog, documents, search_body
-from src.code_service.services.v2.normalize import STOP, address_words, building_kind_matches, parse_query
+from src.code_service.services.v2.normalize import STOP, Query, address_words, building_kind_matches, parse_query
+from src.code_service.services.v2.opensearch import search_body
+from tools.catalog.documents import documents
+from tools.catalog.sqlite_catalog import SqliteCatalog
 from tools.evaluation import evaluate_search as replay
 from tools.evaluation.compare_postgres_catalog import select
 from tools.evaluation.quality_suite import address_fields, literal_words
@@ -38,9 +44,17 @@ from tools.experiments import (
     search_lexical_profiles,
     search_locality_profiles,
 )
+from tools.experiments.opensearch_schema import MAPPING
 
 
-def mapping(*, aliases=False, lexical=False, similarity=None, bm25_b=0.75, city_roles=False):
+def mapping(
+    *,
+    aliases: bool = False,
+    lexical: bool = False,
+    similarity: str | None = None,
+    bm25_b: float = 0.75,
+    city_roles: bool = False,
+) -> dict:
     """Подготовить конфигурацию полей и анализаторов экспериментального индекса."""
     value = copy.deepcopy(MAPPING)
     if similarity not in {None, "BM25", "boolean"}:
@@ -130,7 +144,7 @@ def mapping(*, aliases=False, lexical=False, similarity=None, bm25_b=0.75, city_
     return value
 
 
-def configurations(stage="initial"):
+def configurations(stage: str = "initial") -> list[dict]:
     """Перечислить воспроизводимые профили сравнения поискового движка."""
     if stage == "lexical":
         return search_lexical_profiles.profiles()
@@ -205,7 +219,7 @@ def configurations(stage="initial"):
     return values
 
 
-def query_text(message, variant):
+def query_text(message: str, variant: dict) -> tuple[Query, str]:
     """Подготовить текст запроса для выбранного варианта сравнения."""
     source = variant.get("text_source")
     query = parse_query(message, preserve_lexical_ordinals=source in {"lexical", "expanded_words"})
@@ -219,7 +233,9 @@ def query_text(message, variant):
     return query, lexical_text
 
 
-def native_body(message, variant, *, analyzed_tokens=None, street_tokens=None):
+def native_body(
+    message: str, variant: dict, *, analyzed_tokens: list[str] | None = None, street_tokens: list[str] | None = None
+) -> dict:
     """Собрать native-запрос OpenSearch с точными адресными ограничениями."""
     query, lexical_text = query_text(message, variant)
     match = {
@@ -295,17 +311,17 @@ def native_body(message, variant, *, analyzed_tokens=None, street_tokens=None):
 
 
 def build_index(
-    catalog,
-    url,
-    index,
+    catalog: Path,
+    url: str,
+    index: str,
     *,
-    aliases=False,
-    lexical=False,
-    source_index=None,
-    similarity=None,
-    bm25_b=0.75,
-    city_roles=False,
-):
+    aliases: bool = False,
+    lexical: bool = False,
+    source_index: str | None = None,
+    similarity: str | None = None,
+    bm25_b: float = 0.75,
+    city_roles: bool = False,
+) -> dict:
     """Построить отдельный индекс сравнения из зафиксированных документов."""
     if not index.startswith("domofomka-native-lab-"):
         raise ValueError("Only isolated experiment indexes are allowed")
@@ -338,7 +354,7 @@ def build_index(
         batch, total = [], 0
         by_street = collections.defaultdict(list)
         if aliases:
-            with Catalog(str(catalog)).connect() as db:
+            with SqliteCatalog(str(catalog)).connect() as db:
                 for row in db.execute(r"""
                     SELECT
                       a.*,
@@ -361,7 +377,7 @@ def build_index(
                     if city_roles:
                         by_street[row["canonical_city"], row["canonical_street"]][-1]["city"] = row["city_key"]
 
-        def flush():
+        def flush() -> None:
             """Записать накопленную ограниченную пачку результатов."""
             payload = "".join(
                 json.dumps({"index": {"_index": index, "_id": doc["id"]}})
@@ -393,7 +409,7 @@ def build_index(
     return {"documents": total, "index": index}
 
 
-def analysis_probes(client, index):
+def analysis_probes(client: httpx.Client, index: str) -> list[dict]:
     """Проверить формы токенов выбранного анализатора на контрольных примерах."""
     probes = []
     for query, expected in [
@@ -409,19 +425,19 @@ def analysis_probes(client, index):
 
 
 def native_result(
-    catalog,
-    message,
-    hits,
-    ratio,
+    catalog: SqliteCatalog,
+    message: str,
+    hits: list[dict],
+    ratio: float,
     *,
-    query_numbers=None,
-    exact_tokens=None,
-    require_exact=False,
-    literal_coverage=False,
-    locality_hint=None,
-    locality_places=None,
-    city_roles=False,
-):
+    query_numbers: set[str] | None = None,
+    exact_tokens: set[str] | None = None,
+    require_exact: bool = False,
+    literal_coverage: bool = False,
+    locality_hint: str | None = None,
+    locality_places: set[str] | None = None,
+    city_roles: bool = False,
+) -> dict:
     """Привести найденных кандидатов к общему формату сравнения."""
     query = parse_query(message)
     if not query.words and query.name_words:
@@ -442,7 +458,7 @@ def native_result(
     rows = catalog.load_candidates(list(scores), query.house)
     eligible = []
 
-    def numeric(word):
+    def numeric(word: str) -> bool:
         """Сохранить числовую часть адреса в выбранном преобразовании текста."""
         return any(char.isdigit() for char in word)
 
@@ -558,7 +574,7 @@ def native_result(
     }
 
 
-def sample(corpus, reviewed, limit, full=False):
+def sample(corpus: Path, reviewed: Path, limit: int, full: bool = False) -> list[dict]:
     """Выбрать детерминированную подвыборку контрольного корпуса."""
     records, seen = [], set()
     success = [
@@ -601,7 +617,7 @@ def sample(corpus, reviewed, limit, full=False):
     return records
 
 
-def reviewed_conflict(case, result, catalog):
+def reviewed_conflict(case: dict, result: dict, catalog: SqliteCatalog) -> bool:
     """Проверить, относится ли случай к отдельно рассмотренному конфликту."""
     if case.get("expected_status") and result["status"] != case["expected_status"]:
         return True
@@ -655,7 +671,14 @@ def reviewed_conflict(case, result, catalog):
     return False
 
 
-def search_variant(catalog, message, variant, search, analyze=None, city_query=None):
+def search_variant(
+    catalog: SqliteCatalog,
+    message: str,
+    variant: dict,
+    search: Callable[[dict], list[dict]],
+    analyze: Callable[[str, str], list[str]] | None = None,
+    city_query: Callable[[dict], dict] | None = None,
+) -> dict:
     """Выполнить поиск в выбранном экспериментальном профиле."""
     parsed = parse_query(message)
     locality = (
@@ -769,7 +792,7 @@ def search_variant(catalog, message, variant, search, analyze=None, city_query=N
         and result["status"] in {"not_found", "incomplete_query", "no_codes_ambiguous"}
         and parsed.house
     ):
-        # Catalog applies the same exact-house, name and scoped-location checks.
+        # SqliteCatalog applies the same exact-house, name and scoped-location checks.
         result = catalog.resolve(message)
     if variant.get("source_choices") and result["status"] in {"found", "ambiguous"}:
         result = search_city_roles.source_choices(result, catalog.resolve(message))
@@ -782,7 +805,7 @@ def search_variant(catalog, message, variant, search, analyze=None, city_query=N
     return result
 
 
-def legacy_exact_match(message, address, variant, analyze):
+def legacy_exact_match(message: str, address: str, variant: dict, analyze: Callable[[str, str], list[str]]) -> bool:
     """Проверить точное сохранение прежнего эталонного адреса."""
     fields = address_fields(address)
     row = dict(fields, display=address, guid=None)
@@ -799,20 +822,20 @@ def legacy_exact_match(message, address, variant, analyze):
 
 
 def resume_rows(
-    path,
-    cases,
-    variants,
-    fingerprint,
-    sources,
-    catalog_revision,
-    index,
-    index_mapping,
+    path: Path,
+    cases: list[dict],
+    variants: list[dict],
+    fingerprint: str,
+    sources: dict,
+    catalog_revision: str,
+    index: str,
+    index_mapping: dict,
     *,
-    index_analysis=None,
-    index_similarity=None,
-    engine_version=None,
-    max_query_length=None,
-):
+    index_analysis: dict | None = None,
+    index_similarity: dict | None = None,
+    engine_version: str | None = None,
+    max_query_length: int | None = None,
+) -> list[dict]:
     """Прочитать уже завершённые результаты для возобновления прогона."""
     previous = json.loads((path / "frozen-input.json").read_text(encoding="utf8"))
     if previous["sha256"] != fingerprint or previous["variants"] != variants:
@@ -850,7 +873,7 @@ def resume_rows(
     return rows
 
 
-def run(args):
+def run(args: argparse.Namespace) -> None:
     """Выполнить выбранный контрольный прогон и сохранить его результаты."""
     if args.output.exists():
         raise FileExistsError("Use a fresh experiment directory")
@@ -898,7 +921,7 @@ def run(args):
     if any(variant.get("city_roles") for variant in variants) and metadata.get("city_roles") != 1:
         raise ValueError("City-role profile requires the city-role index schema")
     replay.initialize(str(args.legacy), str(args.catalog))
-    catalog = Catalog(str(args.catalog))
+    catalog = SqliteCatalog(str(args.catalog))
     exact_catalog = search_lexical_profiles.ExactCatalog(str(args.catalog))
     local = threading.local()
     counters = collections.defaultdict(collections.Counter)
@@ -972,7 +995,7 @@ def run(args):
         encoding="utf8",
     )
 
-    def evaluate(index_case):
+    def evaluate(index_case: tuple[int, dict]) -> list[dict]:
         """Выполнить контрольный запрос и собрать его результат для сравнения."""
         index, case = index_case
         if not hasattr(local, "client"):
@@ -989,7 +1012,7 @@ def run(args):
         outcomes = []
         analysis_cache = {}
 
-        def analyze(text, analyzer):
+        def analyze(text: str, analyzer: str) -> list[str]:
             """Получить токены выбранного анализатора для проверки конфигурации."""
             key = (text, analyzer)
             if key not in analysis_cache:
@@ -1010,13 +1033,13 @@ def run(args):
                 result = exact_catalog.resolve(case["query"])
             else:
 
-                def search(body):
+                def search(body: dict) -> list[dict]:
                     """Выполнить экспериментальный поисковый запрос."""
                     response = local.client.post("/" + args.index + "/_search", json=body)
                     response.raise_for_status()
                     return response.json()["hits"]["hits"]
 
-                def city_query(body):
+                def city_query(body: dict) -> dict:
                     """Сформировать ограничение местности для экспериментального поиска."""
                     response = local.client.post("/" + args.index + "/_search", json=body)
                     response.raise_for_status()
@@ -1124,7 +1147,7 @@ def run(args):
             )
         return outcomes
 
-    def record(stream, rows):
+    def record(stream: TextIO, rows: list[dict]) -> None:
         """Добавить результат контрольного случая в текущий отчёт."""
         for row in rows:
             name, cohort = row["variant"], row["cohort"]

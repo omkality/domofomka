@@ -41,7 +41,7 @@ def region_facts(directory: Path) -> dict:
     }
 
 
-def main():
+def main() -> None:
     """Извлечь действующие субъекты РФ из ADDR_OBJ, не читая XML домов."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=Path("artifacts/gar_xml"))

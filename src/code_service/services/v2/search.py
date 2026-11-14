@@ -8,18 +8,16 @@ import hashlib
 import logging
 from functools import partial
 from pathlib import Path
-from typing import Any
 
 from src.code_service.config import settings
 from src.code_service.errors import BuildingNotFound, CatalogUnavailable
 from src.code_service.services.geocoding import DadataClient
 from src.code_service.services.v1.codes import get_data_from_db
 from src.code_service.services.v2.cache import LookupCache
-from src.code_service.services.v2.catalog import get_catalog
+from src.code_service.services.v2.catalog import CATALOG_BACKEND, get_catalog
 from src.code_service.services.v2.constraints import legacy_result_matches, legacy_source_matches
 from src.code_service.services.v2.normalize import parse_query
 from src.code_service.services.v2.opensearch import candidate_ids
-from src.code_service.services.v2.postgres import PostgresCatalog
 from src.infrastructure.telemetry import note, search_result, span
 
 logger = logging.getLogger(__name__)
@@ -36,8 +34,6 @@ def cache_key(request: tuple) -> tuple | None:
     try:
         files = []
         filenames = [settings.db_name]
-        if settings.search_backend == "sqlite":
-            filenames.insert(0, settings.search_catalog_path)
         for filename in filenames:
             path = Path(filename).resolve()
             stat = path.stat()
@@ -46,7 +42,7 @@ def cache_key(request: tuple) -> tuple | None:
         return None
     return (
         *files,
-        settings.search_backend,
+        CATALOG_BACKEND,
         settings.catalog_revision,
         hashlib.sha256(
             (settings.catalog_database_url.get_secret_value() if settings.catalog_database_url else "").encode()
@@ -76,7 +72,7 @@ async def lookup(message: str) -> dict:
     """Выполнить v2 с ограниченным кешем и проверяемым fallback v1."""
     if len(message) > settings.search_max_query_length:
         return {"status": "invalid_query", "data": {}, "engine": "v2"}
-    note(catalog_backend=settings.search_backend)
+    note(catalog_backend=CATALOG_BACKEND)
     key = cache_key(("text", message))
     cached = result_cache.get(key) if key is not None else None
     if cached is not None:
@@ -99,15 +95,7 @@ async def uncached_lookup(message: str) -> dict:
             try:
                 async with asyncio.timeout(settings.opensearch_timeout_seconds):
                     ids = await candidate_ids(message, settings)
-                    candidates = (
-                        (
-                            await catalog.load_candidates(ids, parse_query(message).house)
-                            if isinstance(catalog, PostgresCatalog)
-                            else await asyncio.to_thread(catalog.load_candidates, ids, parse_query(message).house)
-                        )
-                        if ids
-                        else None
-                    )
+                    candidates = await catalog.load_candidates(ids, parse_query(message).house) if ids else None
 
                 candidates = candidates or None
             except Exception as exc:
@@ -116,14 +104,10 @@ async def uncached_lookup(message: str) -> dict:
             "search.v2",
             kind="search",
             engine="v2",
-            storage_backend=settings.search_backend,
+            storage_backend=CATALOG_BACKEND,
             query=message[: settings.search_max_query_length],
         ) as detail:
-            result = (
-                await catalog.resolve(message, candidates)
-                if isinstance(catalog, PostgresCatalog)
-                else await asyncio.to_thread(catalog.resolve, message, candidates)
-            )
+            result = await catalog.resolve(message, candidates)
             detail["result"] = search_result(result)
         note(result=search_result(result))
         recoverable_incomplete = result["status"] == "incomplete_query" and bool(parse_query(message).house)
@@ -162,7 +146,7 @@ async def uncached_lookup(message: str) -> dict:
 
 async def geo_lookup(lat: float, lon: float, dadata: DadataClient) -> dict:
     """Определить адрес геометки и передать его в поиск этой версии."""
-    note(catalog_backend=settings.search_backend)
+    note(catalog_backend=CATALOG_BACKEND)
     key = cache_key(("geo", lat, lon))
     cached = result_cache.get(key) if key is not None else None
     if cached is not None:
@@ -178,22 +162,14 @@ async def geo_lookup(lat: float, lon: float, dadata: DadataClient) -> dict:
 
 async def read_building(building_id: str) -> dict:
     """Прочитать выбранный дом или сообщить о его отсутствии."""
-    note(catalog_backend=settings.search_backend)
-
-    def read(catalog: Any) -> dict | None:
-        """Прочитать данные текущего контрольного или адресного результата."""
-        row = catalog.building(building_id)
-        return catalog.answer(row) if row else None
+    note(catalog_backend=CATALOG_BACKEND)
 
     try:
-        with span("search.v2.building", kind="search", engine="v2", storage_backend=settings.search_backend) as detail:
+        with span("search.v2.building", kind="search", engine="v2", storage_backend=CATALOG_BACKEND) as detail:
             catalog = await get_catalog()
-            if isinstance(catalog, PostgresCatalog):
-                async with catalog.connect():
-                    row = await catalog.building(building_id)
-                    result = await catalog.answer(row) if row else None
-            else:
-                result = await asyncio.to_thread(read, catalog)
+            async with catalog.connect():
+                row = await catalog.building(building_id)
+                result = await catalog.answer(row) if row else None
             detail["result"] = search_result(result) if result is not None else {"status": "not_found"}
     except Exception as exc:
         raise CatalogUnavailable("Catalog unavailable") from exc

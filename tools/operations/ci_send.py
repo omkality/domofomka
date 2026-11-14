@@ -8,7 +8,7 @@ import tarfile
 from pathlib import Path
 
 
-def main():
+def main() -> None:
     """Передать проверенный выпуск по SSH без сохранения токена реестра на диске."""
     action = os.environ.get("DEPLOY_ACTION", "deploy")
     if action not in {"deploy", "rollback", "rollback-legacy"}:

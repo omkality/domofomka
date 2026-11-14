@@ -67,7 +67,7 @@ class QueueStore:
         message_rate_interval_seconds: float = 0,
         message_rate_burst: int = 2,
         hint_interval_seconds: float = 0,
-    ):
+    ) -> None:
         """Задать сообщество, аренду заданий и отдельные лимиты пользователя."""
         if (
             (max_pending_messages_per_peer is not None and max_pending_messages_per_peer < 1)

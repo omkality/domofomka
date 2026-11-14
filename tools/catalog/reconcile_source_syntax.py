@@ -95,7 +95,9 @@ def mappings(db: sqlite3.Connection, facts: list[dict]) -> tuple[list[dict], dic
         if not region_city and not embedded:
             continue
 
-        def official(name: str, required_kind: str, city=city, region=region, house=row["house"]) -> list:
+        def official(
+            name: str, required_kind: str, city: str = city, region: str | None = region, house: str = row["house"]
+        ) -> list:
             """Проверить официальную адресную форму по фактам каталога."""
             candidates = db.execute(
                 r"""
@@ -190,7 +192,7 @@ def mappings(db: sqlite3.Connection, facts: list[dict]) -> tuple[list[dict], dic
     }
 
 
-def main():
+def main() -> None:
     """Подтверждать тип внутри названия и явный субъект РФ только по уникальному дому ГАР."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, required=True)

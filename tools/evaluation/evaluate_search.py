@@ -4,6 +4,8 @@ Snapshot selection mirrors the unchanged legacy matcher, without scanning one
 million identical street/code rows for every query. Only aggregate metrics publish.
 """
 
+from __future__ import annotations
+
 import argparse
 import collections
 import concurrent.futures
@@ -12,13 +14,15 @@ import json
 import re
 import sqlite3
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
 
 from src.code_service.services.v1.matching import STREET_TYPES, address_exists
-from src.code_service.services.v2.engine import Catalog, search_body
 from src.code_service.services.v2.normalize import address_words, legacy_house_matches, parse_query
+from src.code_service.services.v2.opensearch import search_body
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 legacy_groups = []
 legacy_cache = {}
@@ -41,7 +45,7 @@ def source_fingerprints() -> dict[str, str]:
     }
 
 
-def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_config: dict | None = None):
+def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_config: dict | None = None) -> None:
     """Подготовить входные данные и читатели процесса сравнения."""
     search_config.clear()
     search_config.update(query_config or {})
@@ -63,7 +67,7 @@ def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_c
             ORDER BY
               min(id)
             """).fetchall()
-    catalogs[:] = [Catalog(catalog_path)]
+    catalogs[:] = [SqliteCatalog(catalog_path)]
     if opensearch_url:
         search_clients[:] = [(opensearch_url, httpx.Client(trust_env=False, timeout=2))]
     with catalogs[0].connect() as db:
@@ -81,7 +85,7 @@ def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_c
             )
 
 
-def legacy_lookup(message: str, *, accept_source=None):
+def legacy_lookup(message: str, *, accept_source: Callable[[tuple], bool] | None = None) -> str | None:
     """Воспроизвести прежнее совпадение v1 на неизменённых исходных группах."""
     if not message:
         return None
@@ -110,7 +114,7 @@ def legacy_lookup(message: str, *, accept_source=None):
     return f"{city}, {r[2]} {r[3]}, дом {r[4]}"
 
 
-def evaluate(record: dict):
+def evaluate(record: dict) -> dict:
     """Выполнить контрольный запрос и собрать его результат для сравнения."""
     q = record["query"]
     start = time.perf_counter()

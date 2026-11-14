@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class DadataUnavailable(RuntimeError):
     """Temporary geocoding failure; callers can distinguish it from no results."""
 
-    def __init__(self, message: str = "Geocoding is temporarily unavailable", *, retryable: bool = True):
+    def __init__(self, message: str = "Geocoding is temporarily unavailable", *, retryable: bool = True) -> None:
         """Сохранить причину отказа геокодера и допустимость повтора."""
         super().__init__(message)
         self.retryable = retryable
@@ -30,7 +30,7 @@ class DadataClient:
     _unavailable_until = 0.0
     _unavailable_retryable = True
 
-    def __init__(self, token: str, timeout_seconds: float | None = None, proxy_url: str | None = None):
+    def __init__(self, token: str, timeout_seconds: float | None = None, proxy_url: str | None = None) -> None:
         """Проверить URL прокси и настроить токен и общий бюджет DaData."""
         if proxy_url and (urlsplit(proxy_url).scheme not in {"http", "https"} or not urlsplit(proxy_url).hostname):
             raise ValueError("DADATA_PROXY_URL must be an HTTP or HTTPS proxy URL")

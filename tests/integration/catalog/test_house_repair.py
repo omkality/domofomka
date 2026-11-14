@@ -4,9 +4,9 @@ import sqlite3
 
 import pytest
 
-from src.code_service.services.v2.engine import Catalog
 from tools.catalog.build_catalog import SCHEMA, index_streets
 from tools.catalog.repair_house_identity import repair
+from tools.catalog.sqlite_catalog import SqliteCatalog
 
 
 @pytest.mark.parametrize(
@@ -118,7 +118,7 @@ def test_repair_splits_source_codes_and_keeps_the_old_physical_identity(
     assert report["source_rows"] == 4
     assert report["source_house_conflicts"] == 0
     assert report["moved_source_rows"] == 2
-    engine = Catalog(str(output))
+    engine = SqliteCatalog(str(output))
     for house, code in [(houses[0], "FLAT"), (houses[1], "RANGE")]:
         result = engine.resolve("Санкт-Петербург Гражданская " + house)
         assert result["status"] == "found"
