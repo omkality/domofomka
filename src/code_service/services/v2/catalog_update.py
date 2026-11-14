@@ -55,8 +55,18 @@ def migrate(dsn: str, patch: dict, reverse: bool = False) -> dict:
     with psycopg.connect(dsn, connect_timeout=5) as db:
         db.execute("SET LOCAL statement_timeout='180s'")
         db.execute("SET LOCAL lock_timeout='5s'")
-        db.execute("SELECT pg_advisory_xact_lock(20261109,1)")
-        revision = db.execute("SELECT value FROM metadata WHERE key='source_catalog_sha256'").fetchone()[0]
+        db.execute(r"""
+            SELECT
+              pg_advisory_xact_lock(20261109, 1)
+            """)
+        revision = db.execute(r"""
+            SELECT
+              value
+            FROM
+              metadata
+            WHERE
+              key = 'source_catalog_sha256'
+            """).fetchone()[0]
         if revision == target:
             return {"changed": False, "revision": target}
         if revision != source:
@@ -79,13 +89,13 @@ def migrate(dsn: str, patch: dict, reverse: bool = False) -> dict:
             projection = sql.SQL(",").join(map(sql.Identifier, columns))
             indexes = [columns.index(k) for k in keys]
             expected_name, keys_name = "patch_expected_" + table, "patch_keys_" + table
+            db.execute(sql.SQL(r"""
+                CREATE TEMP TABLE {} (LIKE {}) ON COMMIT DROP
+                """).format(sql.Identifier(expected_name), sql.Identifier(table)))
             db.execute(
-                sql.SQL("CREATE TEMP TABLE {} (LIKE {}) ON COMMIT DROP").format(
-                    sql.Identifier(expected_name), sql.Identifier(table)
-                )
-            )
-            db.execute(
-                sql.SQL("CREATE TEMP TABLE {} ON COMMIT DROP AS SELECT {} FROM {} WITH NO DATA").format(
+                sql.SQL(r"""
+                CREATE TEMP TABLE {} ON COMMIT DROP AS SELECT {} FROM {} WITH NO DATA
+                """).format(
                     sql.Identifier(keys_name), sql.SQL(",").join(map(sql.Identifier, keys)), sql.Identifier(table)
                 )
             )
@@ -106,7 +116,9 @@ def migrate(dsn: str, patch: dict, reverse: bool = False) -> dict:
             )
             for temporary in (expected_name, keys_name):
                 db.execute(sql.SQL("ANALYZE {}").format(sql.Identifier(temporary)))
-            current = sql.SQL("SELECT {} FROM {} a JOIN {} k USING ({})").format(
+            current = sql.SQL(r"""
+                SELECT {} FROM {} a JOIN {} k USING ({})
+                """).format(
                 sql.SQL(",").join(sql.SQL("a.{}").format(sql.Identifier(c)) for c in columns),
                 sql.Identifier(table),
                 sql.Identifier(keys_name),
@@ -126,7 +138,9 @@ def migrate(dsn: str, patch: dict, reverse: bool = False) -> dict:
                 if row is None:
                     continue
                 db.execute(
-                    sql.SQL("INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO UPDATE SET {}").format(
+                    sql.SQL(r"""
+                    INSERT INTO {} ({}) VALUES ({}) ON CONFLICT ({}) DO UPDATE SET {}
+                    """).format(
                         sql.Identifier(table),
                         sql.SQL(",").join(map(sql.Identifier, columns)),
                         sql.SQL(",").join(sql.Placeholder() for _ in columns),
@@ -142,8 +156,18 @@ def migrate(dsn: str, patch: dict, reverse: bool = False) -> dict:
         for pair in changes.get("codes", []):
             row = pair[after]
             if row:
-                db.execute("INSERT INTO code_sources VALUES(%s) ON CONFLICT DO NOTHING", (row[2],))
-                db.execute("INSERT INTO entrances VALUES(%s,%s) ON CONFLICT DO NOTHING", (row[0], row[1]))
+                db.execute(
+                    r"""
+                    INSERT INTO code_sources VALUES (%s) ON CONFLICT DO NOTHING
+                    """,
+                    (row[2],),
+                )
+                db.execute(
+                    r"""
+                    INSERT INTO entrances VALUES (%s, %s) ON CONFLICT DO NOTHING
+                    """,
+                    (row[0], row[1]),
+                )
         for table in ("codes", "aliases", "alias_search", "provenance", "street_houses", "metadata", "vocabulary"):
             columns, keys = TABLES[table]
             pairs = changes.get(table, [])
@@ -168,17 +192,30 @@ def migrate(dsn: str, patch: dict, reverse: bool = False) -> dict:
             db.execute(r"""
                 DELETE
                 FROM entrances e
-                WHERE NOT EXISTS
-                        (SELECT 1
-                         FROM codes c
-                         WHERE c.building_id = e.building_id
-                             AND c.entrance = e.number)
+                WHERE
+                  NOT EXISTS
+                  (
+                    SELECT
+                      1
+                    FROM
+                      codes AS c
+                    WHERE
+                      c.building_id = e.building_id
+                      AND c.entrance = e.number
+                  )
                 """)
         for table in ("buildings", "streets"):
             for pair in changes.get(table, []):
                 if pair[after] is None:
                     db.execute(sql.SQL("DELETE FROM {} WHERE id=%s").format(sql.Identifier(table)), (pair[before][0],))
-        db.execute("UPDATE metadata SET value=%s WHERE key='source_catalog_sha256'", (target,))
+        db.execute(
+            r"""
+            UPDATE metadata SET value = %s
+            WHERE
+              key = 'source_catalog_sha256'
+            """,
+            (target,),
+        )
         expected = patch["source_counts"] if reverse else patch["target_counts"]
         for table, count in expected.items():
             if table not in TABLES:

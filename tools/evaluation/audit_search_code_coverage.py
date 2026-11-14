@@ -42,7 +42,15 @@ def initialize(catalog_path, legacy, legacy_index, baseline=None):
     """Подготовить входные данные и читатели процесса сравнения."""
     codes = collections.defaultdict(set)
     with Catalog(str(catalog_path)).connect() as db:
-        for building_id, entrance, kind, code in db.execute("SELECT building_id,entrance,kind,code FROM codes"):
+        for building_id, entrance, kind, code in db.execute(r"""
+            SELECT
+              building_id,
+              entrance,
+              kind,
+              code
+            FROM
+              codes
+            """):
             codes[building_id].add((str(entrance), str(kind), str(code)))
     worker_context.update(codes=codes, legacy=str(legacy), index=str(legacy_index), baseline=baseline)
 

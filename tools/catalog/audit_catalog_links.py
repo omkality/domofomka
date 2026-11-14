@@ -17,34 +17,46 @@ def audit(path: Path, output: Path):
         (output / "review.jsonl").open("w", encoding="utf8") as review,
     ):
         rows = db.execute(r"""
-            SELECT b.id,
-                   b.city_key,
-                   b.street_key,
-                   b.house,
-                   b.display,
-                   p.resolution,
-                   p.n
+            SELECT
+              b.id,
+              b.city_key,
+              b.street_key,
+              b.house,
+              b.display,
+              p.resolution,
+              p.n
             FROM
-                (SELECT building_id,
-                        resolution,
-                        count(*) n
-                 FROM provenance
-                 WHERE resolution <> 'gar_exact'
-                 GROUP BY building_id,
-                          resolution) p
-            JOIN buildings b ON b.id = p.building_id
+              (
+                SELECT
+                  building_id,
+                  resolution,
+                  count(*) AS n
+                FROM
+                  provenance
+                WHERE
+                  resolution <> 'gar_exact'
+                GROUP BY
+                  building_id,
+                  resolution
+              ) AS p
+            INNER JOIN
+              buildings AS b
+              ON b.id = p.building_id
             """)
         for i, (bid, city, street, house, display, resolution, count) in enumerate(rows):
             candidates = db.execute(
                 r"""
-                SELECT id,
-                       city_key,
-                       display,
-                       lineage
-                FROM buildings
-                WHERE street_key = ?
-                    AND house = ?
-                    AND guid IS NOT NULL
+                SELECT
+                  id,
+                  city_key,
+                  display,
+                  lineage
+                FROM
+                  buildings
+                WHERE
+                  street_key = ?
+                  AND house = ?
+                  AND guid IS NOT NULL
                 """,
                 (street, house),
             ).fetchall()
@@ -57,12 +69,16 @@ def audit(path: Path, output: Path):
                 reason = "street_type_or_locality_conflict" if exact else "city_or_locality_conflict"
             elif db.execute(
                 r"""
-                SELECT 1
-                FROM buildings
-                WHERE city_key = ?
-                    AND street_key = ?
-                    AND guid IS NOT NULL
-                LIMIT 1
+                SELECT
+                  1
+                FROM
+                  buildings
+                WHERE
+                  city_key = ?
+                  AND street_key = ?
+                  AND guid IS NOT NULL
+                LIMIT
+                  1
                 """,
                 (city, street),
             ).fetchone():

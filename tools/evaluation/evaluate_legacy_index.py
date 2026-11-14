@@ -18,17 +18,21 @@ def initialize(source, index):
     paths[:] = [source, index]
     with sqlite3.connect(source) as db:
         reference.legacy_groups[:] = db.execute(r"""
-            SELECT min(id),
-                   city,
-                   street_type,
-                   street,
-                   house
-            FROM codes
-            GROUP BY city,
-                     street_type,
-                     street,
-                     house
-            ORDER BY min(id)
+            SELECT
+              min(id),
+              city,
+              street_type,
+              street,
+              house
+            FROM
+              codes
+            GROUP BY
+              city,
+              street_type,
+              street,
+              house
+            ORDER BY
+              min(id)
             """).fetchall()
 
 

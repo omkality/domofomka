@@ -65,12 +65,20 @@ def mappings(db: sqlite3.Connection, legacy: sqlite3.Connection) -> tuple[list[d
     sources = []
     skipped = collections.Counter()
     for row in db.execute(r"""
-        SELECT b.*
+        SELECT
+          b.*
         FROM
-            (SELECT DISTINCT building_id
-             FROM codes) c
-        JOIN buildings b ON b.id = c.building_id
-        WHERE b.guid IS NULL
+          (
+            SELECT DISTINCT
+              building_id
+            FROM
+              codes
+          ) AS c
+        INNER JOIN
+          buildings AS b
+          ON b.id = c.building_id
+        WHERE
+          b.guid IS NULL
         """):
         try:
             kind = address_fields(row["display"])["kind"]
@@ -81,12 +89,16 @@ def mappings(db: sqlite3.Connection, legacy: sqlite3.Connection) -> tuple[list[d
             if repeated_fields(row["city"], kind, row["street"]):
                 literal = db.execute(
                     r"""
-                    SELECT 1
-                    FROM buildings
-                    WHERE city_key = ?
-                        AND street_key = ?
-                        AND guid IS NOT NULL
-                    LIMIT 1
+                    SELECT
+                      1
+                    FROM
+                      buildings
+                    WHERE
+                      city_key = ?
+                      AND street_key = ?
+                      AND guid IS NOT NULL
+                    LIMIT
+                      1
                     """,
                     (text(row["city"]), text(row["street"])),
                 ).fetchone()
@@ -108,12 +120,15 @@ def mappings(db: sqlite3.Connection, legacy: sqlite3.Connection) -> tuple[list[d
             continue
         official = db.execute(
             r"""
-            SELECT *
-            FROM buildings
-            WHERE city_key = ?
-                AND street_key = ?
-                AND house = ?
-                AND guid IS NOT NULL
+            SELECT
+              *
+            FROM
+              buildings
+            WHERE
+              city_key = ?
+              AND street_key = ?
+              AND house = ?
+              AND guid IS NOT NULL
             """,
             (identity[0], next(iter(variants)), identity[3]),
         ).fetchall()
@@ -126,7 +141,20 @@ def mappings(db: sqlite3.Connection, legacy: sqlite3.Connection) -> tuple[list[d
             skipped["non_unique_gar_identity"] += 1
             continue
         target = same_kind[0]
-        ids = [r[0] for r in db.execute("SELECT source_id FROM provenance WHERE building_id=?", (row["id"],))]
+        ids = [
+            r[0]
+            for r in db.execute(
+                r"""
+            SELECT
+              source_id
+            FROM
+              provenance
+            WHERE
+              building_id = ?
+            """,
+                (row["id"],),
+            )
+        ]
         actual = []
         for start in range(0, len(ids), 500):
             batch = ids[start : start + 500]
@@ -177,7 +205,14 @@ def main() -> None:
         closing(sqlite3.connect("file:" + args.catalog.resolve().as_posix() + "?mode=ro", uri=True)) as db,
         closing(sqlite3.connect("file:" + args.legacy.resolve().as_posix() + "?mode=ro", uri=True)) as legacy,
     ):
-        stats = json.loads(db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()[0])
+        stats = json.loads(db.execute(r"""
+            SELECT
+              value
+            FROM
+              metadata
+            WHERE
+              key = 'build'
+            """).fetchone()[0])
         if stats["source_sha256"] != revision:
             raise ValueError("Legacy source revision differs")
         links, summary = mappings(db, legacy)

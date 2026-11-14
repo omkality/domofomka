@@ -64,12 +64,20 @@ def mappings(db: sqlite3.Connection, facts: list[dict]) -> tuple[list[dict], dic
     db.row_factory = sqlite3.Row
     forms = region_forms(facts)
     rows = db.execute(r"""
-        SELECT b.*
-        FROM buildings b
-        JOIN
-            (SELECT DISTINCT building_id
-             FROM codes) c ON c.building_id = b.id
-        WHERE b.guid IS NULL
+        SELECT
+          b.*
+        FROM
+          buildings AS b
+        INNER JOIN
+          (
+            SELECT DISTINCT
+              building_id
+            FROM
+              codes
+          ) AS c
+          ON c.building_id = b.id
+        WHERE
+          b.guid IS NULL
         """).fetchall()
     result = []
     skipped = collections.Counter()
@@ -91,15 +99,18 @@ def mappings(db: sqlite3.Connection, facts: list[dict]) -> tuple[list[dict], dic
             """Проверить официальную адресную форму по фактам каталога."""
             candidates = db.execute(
                 r"""
-                SELECT id,
-                       guid,
-                       display,
-                       region
-                FROM buildings
-                WHERE city_key = ?
-                    AND street_key = ?
-                    AND house = ?
-                    AND guid IS NOT NULL
+                SELECT
+                  id,
+                  guid,
+                  display,
+                  region
+                FROM
+                  buildings
+                WHERE
+                  city_key = ?
+                  AND street_key = ?
+                  AND house = ?
+                  AND guid IS NOT NULL
                 """,
                 (city, name, house),
             ).fetchall()
@@ -121,12 +132,15 @@ def mappings(db: sqlite3.Connection, facts: list[dict]) -> tuple[list[dict], dic
         if not exact and embedded:
             literal_street = db.execute(
                 r"""
-                SELECT display,
-                       region
-                FROM buildings
-                WHERE city_key = ?
-                    AND street_key = ?
-                    AND guid IS NOT NULL
+                SELECT
+                  display,
+                  region
+                FROM
+                  buildings
+                WHERE
+                  city_key = ?
+                  AND street_key = ?
+                  AND guid IS NOT NULL
                 """,
                 (city, street),
             )
@@ -202,9 +216,23 @@ def main():
     if args.output:
         apply(args.catalog, args.output, links, resolution="gar_source_syntax", schema_version=6)
         with sqlite3.connect(args.output) as db:
-            stats = json.loads(db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()[0])
+            stats = json.loads(db.execute(r"""
+                SELECT
+                  value
+                FROM
+                  metadata
+                WHERE
+                  key = 'build'
+                """).fetchone()[0])
             stats["source_syntax_region_facts_sha256"] = facts_digest
-            db.execute("UPDATE metadata SET value=? WHERE key='build'", (json.dumps(stats),))
+            db.execute(
+                r"""
+                UPDATE metadata SET value = ?
+                WHERE
+                  key = 'build'
+                """,
+                (json.dumps(stats),),
+            )
 
 
 if __name__ == "__main__":

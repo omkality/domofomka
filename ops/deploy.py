@@ -183,7 +183,11 @@ class Deployment:
             return
         command = ["docker", "exec", f"{self.project}-queue-1", "psql", "-U", "domofomka", "-d", "domofomka", "-Atc"]
         exists = run(
-            command + ["SELECT to_regclass('public.bot_inbox') IS NOT NULL"], capture_output=True
+            command + [r"""
+            SELECT
+              to_regclass('public.bot_inbox') IS NOT NULL
+            """],
+            capture_output=True,
         ).stdout.strip()
         if exists == "f":
             return
@@ -192,7 +196,9 @@ class Deployment:
         pending = run(
             command
             + [
-                "SELECT (SELECT count(*) FROM bot_inbox WHERE group_id=" + self.group + " AND status<>'done')+"
+                r"""
+            SELECT (SELECT count(*) FROM bot_inbox WHERE group_id=
+            """ + self.group + " AND status<>'done')+"
                 "(SELECT count(*) FROM bot_outbox WHERE group_id=" + self.group + " AND status<>'done')"
             ],
             capture_output=True,
@@ -213,7 +219,14 @@ class Deployment:
                 "-d",
                 database,
                 "-Atc",
-                "SELECT value FROM metadata WHERE key='source_catalog_sha256'",
+                r"""
+            SELECT
+              value
+            FROM
+              metadata
+            WHERE
+              key = 'source_catalog_sha256'
+            """,
             ],
             capture_output=True,
         ).stdout.strip()
@@ -295,21 +308,44 @@ class Deployment:
                 + [
                     "-c",
                     r"""
-            SELECT json_build_object('revision',
-                                         (SELECT value
-                                          FROM metadata
-                                          WHERE KEY = 'source_catalog_sha256'),'state',
-                                         (SELECT value
-                                          FROM metadata
-                                          WHERE KEY = 'publication_state'),'schema',
-                                         (SELECT value
-                                          FROM metadata
-                                          WHERE KEY = 'catalog_schema_version'),'layout',
-                                         (SELECT value
-                                          FROM metadata
-                                          WHERE KEY = 'street_layout'),
-                                               'bytes',
-                                               pg_total_relation_size('public.streets'))
+            SELECT
+              json_build_object(
+                'revision',
+                (
+                  SELECT
+                    value
+                  FROM
+                    metadata
+                  WHERE
+                    KEY = 'source_catalog_sha256'
+                ), 'state',
+                (
+                  SELECT
+                    value
+                  FROM
+                    metadata
+                  WHERE
+                    KEY = 'publication_state'
+                ), 'schema',
+                (
+                  SELECT
+                    value
+                  FROM
+                    metadata
+                  WHERE
+                    KEY = 'catalog_schema_version'
+                ), 'layout',
+                (
+                  SELECT
+                    value
+                  FROM
+                    metadata
+                  WHERE
+                    KEY = 'street_layout'
+                ),
+                'bytes',
+                pg_total_relation_size('public.streets')
+              )
             """,
                 ],
                 capture_output=True,

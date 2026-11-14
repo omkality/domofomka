@@ -1,4 +1,5 @@
 import sqlite3
+import threading
 from functools import partial
 
 import pytest
@@ -8,6 +9,44 @@ from src.code_service.services.v1.codes import get_data_from_db, scan_data_from_
 from src.code_service.services.v1.index import lookup
 from src.code_service.services.v2.constraints import legacy_source_matches
 from tools.catalog.build_legacy_index import build
+
+
+@pytest.mark.asyncio
+async def test_source_scan_uses_read_only_connection_outside_event_loop(tmp_path, monkeypatch):
+    source = tmp_path / "source.db"
+    with sqlite3.connect(source) as db:
+        db.execute(
+            "CREATE TABLE codes(id INTEGER PRIMARY KEY,city TEXT,street_type TEXT,street TEXT,house TEXT,"
+            "entrance TEXT,code_type TEXT,code TEXT)"
+        )
+        db.execute("INSERT INTO codes VALUES(1,'Москва','улица','Перерва','62к1','2','test','A')")
+    monkeypatch.setattr(settings, "db_name", str(source))
+    original_connect, calls = sqlite3.connect, []
+
+    def connect(database, **kwargs: object):
+        calls.append((threading.get_ident(), database, kwargs))
+        connection = original_connect(database, **kwargs)
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            connection.execute("DELETE FROM codes")
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    answer = await scan_data_from_db("перерва 62к1")
+    assert answer["data"] == {"2": [("A", "test")]}
+    assert len(calls) == 1
+    worker, uri, options = calls[0]
+    assert worker != threading.get_ident()
+    assert uri.endswith("?mode=ro")
+    assert options == {"uri": True}
+
+
+@pytest.mark.asyncio
+async def test_source_scan_does_not_create_missing_database(tmp_path, monkeypatch):
+    source = tmp_path / "missing.db"
+    monkeypatch.setattr(settings, "db_name", str(source))
+    with pytest.raises(sqlite3.OperationalError):
+        await scan_data_from_db("перерва 62к1")
+    assert not source.exists()
 
 
 @pytest.mark.asyncio

@@ -25,14 +25,17 @@ CREATE INDEX alias_words ON alias_search USING GIN (to_tsvector('simple', words)
 
 INSERT INTO entrances
 SELECT DISTINCT
-    building_id,
-    entrance
-FROM codes;
+  building_id,
+  entrance
+FROM
+  codes;
 
 
 INSERT INTO code_sources
-SELECT DISTINCT kind
-FROM codes;
+SELECT DISTINCT
+  kind
+FROM
+  codes;
 
 
 ALTER TABLE codes ADD

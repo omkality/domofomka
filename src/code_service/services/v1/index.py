@@ -18,7 +18,14 @@ from src.infrastructure.telemetry import measured, span
 def compatible(source: str, index: str, source_stamp: tuple, index_stamp: tuple) -> bool:
     """Проверить, соответствует ли индекс используемой исходной SQLite."""
     with closing(sqlite3.connect(f"file:{Path(index).resolve().as_posix()}?mode=ro", uri=True)) as db:
-        metadata = json.loads(db.execute("SELECT value FROM metadata WHERE key='source'").fetchone()[0])
+        metadata = json.loads(db.execute(r"""
+            SELECT
+              value
+            FROM
+              metadata
+            WHERE
+              key = 'source'
+            """).fetchone()[0])
     with open(source, "rb") as stream:
         return metadata["sha256"] == hashlib.file_digest(stream, "sha256").hexdigest()
 
@@ -50,19 +57,21 @@ def lookup(
             groups = db.execute(
                 r"""
                 SELECT g.id,
-                       g.city,
-                       g.kind,
-                       g.street,
-                       g.house
-                FROM legacy_search f
-                JOIN groups g ON g.id = f.rowid
-                WHERE legacy_search MATCH ?
-                ORDER BY g.id
+                                       g.city,
+                                       g.kind,
+                                       g.street,
+                                       g.house
+                                FROM legacy_search f
+                                JOIN groups g ON g.id = f.rowid
+                                WHERE legacy_search MATCH ?
+                                ORDER BY g.id
                 """,
                 ('"' + word.replace('"', '""') + '"',),
             )
         else:
-            groups = db.execute("SELECT id,city,kind,street,house FROM groups ORDER BY id")
+            groups = db.execute(r"""
+                SELECT id,city,kind,street,house FROM groups ORDER BY id
+                """)
         with span("search.v1.candidates_match"):
             matching = [
                 r
@@ -81,7 +90,20 @@ def lookup(
         ids = [r[0] for r in selected]
         source_ids = []
         for gid in ids:
-            source_ids.extend(r[0] for r in db.execute("SELECT source_id FROM source_rows WHERE group_id=?", (gid,)))
+            source_ids.extend(
+                r[0]
+                for r in db.execute(
+                    r"""
+                SELECT
+                  source_id
+                FROM
+                  source_rows
+                WHERE
+                  group_id = ?
+                """,
+                    (gid,),
+                )
+            )
     result = {}
     with (
         span("search.v1.read_codes"),

@@ -29,7 +29,13 @@ def compact(source: Path, output: Path):
     db.execute("PRAGMA cache_size=-262144")
     db.execute("ATTACH DATABASE ? AS source", (str(source.resolve()),))
     db.executescript(read_sql("compact-sqlite.sql"))
-    coded = {(r[0], r[1]) for r in db.execute("SELECT DISTINCT city_key,street_key FROM buildings")}
+    coded = {(r[0], r[1]) for r in db.execute(r"""
+        SELECT DISTINCT
+          city_key,
+          street_key
+        FROM
+          buildings
+        """)}
     count = 0
     houses = 0
     for street in src.execute("SELECT * FROM streets"):
@@ -37,15 +43,18 @@ def compact(source: Path, output: Path):
         row_count = 0
         for house in src.execute(
             r"""
-            SELECT display,
-                   house,
-                   city,
-                   street,
-                   region,
-                   lineage
-            FROM buildings
-            WHERE city_key = ?
-                AND street_key = ?
+            SELECT
+              display,
+              house,
+              city,
+              street,
+              region,
+              lineage
+            FROM
+              buildings
+            WHERE
+              city_key = ?
+              AND street_key = ?
             """,
             (street["city_key"], street["street_key"]),
         ):

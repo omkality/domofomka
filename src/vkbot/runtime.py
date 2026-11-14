@@ -79,7 +79,11 @@ class Runtime:
         guard.autocommit = True
         row = await asyncio.to_thread(
             lambda: guard.execute(
-                "SELECT pg_try_advisory_lock(20261021,%s) AS locked", (self.store.group_id,)
+                r"""
+            SELECT
+              pg_try_advisory_lock(20261021, %s) AS locked
+            """,
+                (self.store.group_id,),
             ).fetchone()
         )
         if not row["locked"]:

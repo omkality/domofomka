@@ -47,23 +47,35 @@ def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_c
     search_config.update(query_config or {})
     with sqlite3.connect(legacy) as db:
         legacy_groups[:] = db.execute(r"""
-            SELECT min(id),
-                   city,
-                   street_type,
-                   street,
-                   house
-            FROM codes
-            GROUP BY city,
-                     street_type,
-                     street,
-                     house
-            ORDER BY min(id)
+            SELECT
+              min(id),
+              city,
+              street_type,
+              street,
+              house
+            FROM
+              codes
+            GROUP BY
+              city,
+              street_type,
+              street,
+              house
+            ORDER BY
+              min(id)
             """).fetchall()
     catalogs[:] = [Catalog(catalog_path)]
     if opensearch_url:
         search_clients[:] = [(opensearch_url, httpx.Client(trust_env=False, timeout=2))]
     with catalogs[0].connect() as db:
-        for r in db.execute("SELECT building_id,city_key,street_key,house FROM aliases"):
+        for r in db.execute(r"""
+            SELECT
+              building_id,
+              city_key,
+              street_key,
+              house
+            FROM
+              aliases
+            """):
             expected_ids.setdefault((address_words(r["city_key"] + " " + r["street_key"]), r["house"]), set()).add(
                 r["building_id"]
             )

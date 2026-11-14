@@ -23,7 +23,18 @@ def build(source: Path, output: Path) -> dict:
     ):
         db.executescript(read_sql("legacy-sqlite.sql"))
         count = 0
-        for row in origin.execute("SELECT id,city,street_type,street,house FROM codes ORDER BY id"):
+        for row in origin.execute(r"""
+            SELECT
+              id,
+              city,
+              street_type,
+              street,
+              house
+            FROM
+              codes
+            ORDER BY
+              id
+            """):
             sid, *fields = row
             key = tuple(fields)
             if key not in groups:
@@ -34,7 +45,9 @@ def build(source: Path, output: Path) -> dict:
                 )
             db.execute("INSERT INTO source_rows VALUES(?,?)", (groups[key], sid))
             count += 1
-        db.execute("INSERT INTO legacy_search(legacy_search) VALUES('rebuild')")
+        db.execute(r"""
+            INSERT INTO legacy_search (legacy_search) VALUES ('rebuild')
+            """)
         with source.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
         summary = {"sha256": digest, "source_rows": count, "groups": len(groups)}

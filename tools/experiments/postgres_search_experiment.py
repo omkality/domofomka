@@ -65,7 +65,14 @@ class PostgresExperiment(Catalog):
     @cached_property
     def vocabulary(self):
         """Лениво загрузить словарь каталога один раз на экземпляр читателя."""
-        return [row[0] for row in self.connection.execute('SELECT term FROM vocabulary ORDER BY term COLLATE "C"')]
+        return [row[0] for row in self.connection.execute(r"""
+            SELECT
+              term
+            FROM
+              vocabulary
+            ORDER BY
+              term COLLATE "C"
+            """)]
 
     def vocabulary_terms(self):
         """Получить близкие словарные формы без изменения числовых ограничений."""
@@ -130,14 +137,21 @@ class PostgresExperiment(Catalog):
             return []
         rows = self.connection.execute(
             r"""
-            SELECT b.*,
-                   s.words AS alias_words
-            FROM alias_search s
-            JOIN buildings b ON b.id = s.building_id
-            WHERE to_tsvector('simple', s.words) @@ to_tsquery('simple', %s)
-                AND s.house = %s
-            ORDER BY s.seq
-            LIMIT 100
+            SELECT
+              b.*,
+              s.words AS alias_words
+            FROM
+              alias_search AS s
+            INNER JOIN
+              buildings AS b
+              ON b.id = s.building_id
+            WHERE
+              to_tsvector('simple', s.words) @@ to_tsquery('simple', %s)
+              AND s.house = %s
+            ORDER BY
+              s.seq
+            LIMIT
+              100
             """,
             (self.query(query.words.split(), True), query.house),
         )

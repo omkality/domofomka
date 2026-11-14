@@ -86,7 +86,13 @@ class QueueStore:
 
     def _queue_lock(self, conn: psycopg.Connection[DictRow]) -> None:
         """Сериализовать изменение связанных очередей одного сообщества."""
-        conn.execute("SELECT pg_advisory_xact_lock(20261106,%s)", (self.group_id,))
+        conn.execute(
+            r"""
+            SELECT
+              pg_advisory_xact_lock(20261106, %s)
+            """,
+            (self.group_id,),
+        )
 
     def _trim_pending(self, conn: psycopg.Connection[DictRow], peer: int) -> set[int]:
         """Оставить актуальный хвост неначатых запросов одного пользователя."""
@@ -96,85 +102,145 @@ class QueueStore:
         # delivered outbox must retain its stable random_id and remaining pages.
         rows = conn.execute(
             r"""
-            WITH waiting_ids AS
-                (SELECT id
-                 FROM bot_inbox
-                 WHERE group_id = %s
-                     AND peer_id = %s
-                     AND kind = 'message_new'
-                     AND status = 'pending'
-                 UNION SELECT inbox_id
-                 FROM bot_outbox
-                 WHERE group_id = %s
-                     AND peer_id = %s
-                     AND status = 'pending'),
-                 waiting AS
-                (SELECT i.id,
-                        i.occurred_at,
-                        coalesce((i.payload #>> '{message,conversation_message_id}')::bigint,
-                             (i.payload #>> '{message,id}')::bigint,
-                             i.id) AS message_order,
+            WITH waiting_ids AS (
+              SELECT
+                id
+              FROM
+                bot_inbox
+              WHERE
+                group_id = %s
+                AND peer_id = %s
+                AND kind = 'message_new'
+                AND status = 'pending'
+              UNION
+              SELECT
+                inbox_id
+              FROM
+                bot_outbox
+              WHERE
+                group_id = %s
+                AND peer_id = %s
+                AND status = 'pending'
+            ),
 
-                        jsonb_build_object('text',
-                             btrim(regexp_replace(lower(coalesce(i.payload #>> '{message,text}',
-                             '')),
-                             '\s+',
-                             ' ',
-                             'g')),
-                             'geo',
-                             i.payload #> '{message,geo}',
-                             'attachments',
-                             i.payload #> '{message,attachments}',
-                             'payload',
-                             i.payload #> '{message,payload}',
-                             'reply',
-                             i.payload #> '{message,reply_message}',
-                             'forwarded',
-                             i.payload #> '{message,fwd_messages}') AS signature
-                 FROM waiting_ids w
-                 JOIN bot_inbox i ON i.id = w.id
-                 WHERE i.kind = 'message_new'
-                     AND (i.status = 'pending'
-                          OR (i.status = 'done'
-                              AND NOT EXISTS
-                                  (SELECT 1
-                                   FROM bot_outbox o
-                                   WHERE o.inbox_id = i.id
-                                       AND (o.status <> 'pending'
-                                            OR o.attempts > 0
-                                            OR o.result IS NOT NULL))))),
-                 duplicates AS
-                (SELECT *,
-                        row_number() OVER(PARTITION BY signature
-                                          ORDER BY occurred_at DESC,
-                                               message_order DESC,
-                                               id DESC) AS duplicate_order
-                 FROM waiting),
-                 latest AS
-                (SELECT id,
-                        row_number() OVER(
-                                          ORDER BY occurred_at DESC,
-                                               message_order DESC,
-                                               id DESC) AS POSITION
-                 FROM duplicates
-                 WHERE duplicate_order = 1),
-                 obsolete AS
-                (SELECT id,
-                        'superseded_duplicate' AS reason
-                 FROM duplicates
-                 WHERE duplicate_order > 1
-                 UNION ALL SELECT id,
-                                  'pending_limit' AS reason
-                 FROM latest
-                 WHERE POSITION > %s)
+            waiting AS (
+              SELECT
+                i.id,
+                i.occurred_at,
+                coalesce(
+                  (i.payload #>> '{message,conversation_message_id}')::bigint,
+                  (i.payload #>> '{message,id}')::bigint,
+                  i.id
+                ) AS message_order,
+
+                jsonb_build_object(
+                  'text',
+                  btrim(regexp_replace(lower(coalesce(
+                    i.payload #>> '{message,text}',
+                    ''
+                  )),
+                  '\s+',
+                  ' ',
+                  'g')),
+                  'geo',
+                  i.payload #> '{message,geo}',
+                  'attachments',
+                  i.payload #> '{message,attachments}',
+                  'payload',
+                  i.payload #> '{message,payload}',
+                  'reply',
+                  i.payload #> '{message,reply_message}',
+                  'forwarded',
+                  i.payload #> '{message,fwd_messages}'
+                ) AS signature
+              FROM
+                waiting_ids AS w
+              INNER JOIN
+                bot_inbox AS i
+                ON i.id = w.id
+              WHERE
+                i.kind = 'message_new'
+                AND (
+                  i.status = 'pending'
+                  OR (
+                    i.status = 'done'
+                    AND NOT EXISTS
+                    (
+                      SELECT
+                        1
+                      FROM
+                        bot_outbox AS o
+                      WHERE
+                        o.inbox_id = i.id
+                        AND (
+                          o.status <> 'pending'
+                          OR o.attempts > 0
+                          OR o.result IS NOT NULL
+                        )
+                    )
+                  )
+                )
+            ),
+
+            duplicates AS (
+              SELECT
+                *,
+                row_number() OVER (
+                  PARTITION BY signature
+                  ORDER BY
+                    occurred_at DESC,
+                    message_order DESC,
+                    id DESC
+                ) AS duplicate_order
+              FROM
+                waiting
+            ),
+
+            latest AS (
+              SELECT
+                id,
+                row_number() OVER (
+                  ORDER BY
+                    occurred_at DESC,
+                    message_order DESC,
+                    id DESC
+                ) AS POSITION
+              FROM
+                duplicates
+              WHERE
+                duplicate_order = 1
+            ),
+
+            obsolete AS (
+              SELECT
+                id,
+                'superseded_duplicate' AS reason
+              FROM
+                duplicates
+              WHERE
+                duplicate_order > 1
+              UNION ALL
+              SELECT
+                id,
+                'pending_limit' AS reason
+              FROM
+                latest
+              WHERE
+                POSITION > %s
+            )
+
             UPDATE bot_inbox i
-            SET status = 'done',
-                completed_at = %s,
-                OWNER = NULL,
-                        lease_until = NULL,
-                        payload = jsonb_set(i.payload, '{_queue_disposition}', to_jsonb(o.reason))
-            FROM obsolete o
-            WHERE i.id = o.id RETURNING i.id
+            SET
+              status = 'done',
+              completed_at = %s,
+              owner = NULL,
+              lease_until = NULL,
+              payload = jsonb_set(i.payload, '{_queue_disposition}', to_jsonb(o.reason))
+            FROM
+              obsolete AS o
+            WHERE
+              i.id = o.id
+            RETURNING i.id
             """,
             (self.group_id, peer, self.group_id, peer, self.max_pending_messages_per_peer, time.time()),
         ).fetchall()
@@ -183,10 +249,12 @@ class QueueStore:
             conn.execute(
                 r"""
                 UPDATE bot_outbox
-                SET status = 'done',
-                    completed_at = %s
-                WHERE inbox_id = ANY(%s)
-                    AND group_id = %s
+                SET
+                  status = 'done',
+                  completed_at = %s
+                WHERE
+                  inbox_id = any(%s)
+                  AND group_id = %s
                 """,
                 (time.time(), list(ids), self.group_id),
             )
@@ -198,7 +266,14 @@ class QueueStore:
         """Рассчитать допуск следующего исходящего действия пользователя."""
         name = f"reply_gate:{peer}"
         row = conn.execute(
-            "SELECT value FROM bot_state WHERE group_id=%s AND name=%s",
+            r"""
+            SELECT
+              value
+            FROM
+              bot_state
+            WHERE
+              group_id = %s AND name = %s
+            """,
             (self.group_id, name),
         ).fetchone()
         return float(row["value"]) if row else 0
@@ -207,7 +282,15 @@ class QueueStore:
         """До внешних вызовов; очередь сериализует бюджет отдельно для каждого peer."""
         name = f"message_rate:{row['peer_id']}"
         saved = conn.execute(
-            "SELECT value FROM bot_state WHERE group_id=%s AND name=%s", (self.group_id, name)
+            r"""
+            SELECT
+              value
+            FROM
+              bot_state
+            WHERE
+              group_id = %s AND name = %s
+            """,
+            (self.group_id, name),
         ).fetchone()
         state = saved["value"] if saved else {}
         previous = state.get("updated_at", now)
@@ -223,34 +306,44 @@ class QueueStore:
                 self._state(conn, name, {"tokens": tokens, "updated_at": timestamp, "delayed": True})
             latest = conn.execute(
                 r"""
-                SELECT id
-                FROM bot_inbox
-                WHERE group_id = %s
-                    AND peer_id = %s
-                    AND kind = 'message_new'
-                    AND status = 'pending'
-                    AND attempts = 0
-                ORDER BY occurred_at DESC,
-                         coalesce((payload #>> '{message,conversation_message_id}')::bigint,
-                              (payload #>> '{message,id}')::bigint,
-                              id) DESC,
-                              id DESC
-                LIMIT 1
+                SELECT
+                  id
+                FROM
+                  bot_inbox
+                WHERE
+                  group_id = %s
+                  AND peer_id = %s
+                  AND kind = 'message_new'
+                  AND status = 'pending'
+                  AND attempts = 0
+                ORDER BY
+                  occurred_at DESC,
+                  coalesce(
+                    (payload #>> '{message,conversation_message_id}')::bigint,
+                    (payload #>> '{message,id}')::bigint,
+                    id
+                  ) DESC,
+                  id DESC
+                LIMIT
+                  1
                 """,
                 (self.group_id, row["peer_id"]),
             ).fetchone()["id"]
             cancelled = conn.execute(
                 r"""
                 UPDATE bot_inbox
-                SET status = 'done',
-                    completed_at = %s,
-                    payload = jsonb_set(payload, '{_queue_disposition}', '"message_rate_coalesced"'::JSONB)
-                WHERE group_id = %s
-                    AND peer_id = %s
-                    AND kind = 'message_new'
-                    AND status = 'pending'
-                    AND attempts = 0
-                    AND id <> %s RETURNING id
+                SET
+                  status = 'done',
+                  completed_at = %s,
+                  payload = jsonb_set(payload, '{_queue_disposition}', '"message_rate_coalesced"'::JSONB)
+                WHERE
+                  group_id = %s
+                  AND peer_id = %s
+                  AND kind = 'message_new'
+                  AND status = 'pending'
+                  AND attempts = 0
+                  AND id <> %s
+                RETURNING id
                 """,
                 (now, self.group_id, row["peer_id"], latest),
             ).fetchall()
@@ -261,9 +354,11 @@ class QueueStore:
                 conn.execute(
                     r"""
                     UPDATE bot_inbox
-                    SET next_at = %s,
-                        payload = jsonb_set(payload, '{_message_rate_delayed}', 'true')
-                    WHERE id = %s
+                    SET
+                      next_at = %s,
+                      payload = jsonb_set(payload, '{_message_rate_delayed}', 'true')
+                    WHERE
+                      id = %s
                     """,
                     (eligible, latest),
                 )
@@ -276,18 +371,29 @@ class QueueStore:
         name = f"message_hint:{job['peer_id']}"
         signature = hashlib.sha256(effect["params"]["message"].encode()).hexdigest()
         saved = conn.execute(
-            "SELECT value FROM bot_state WHERE group_id=%s AND name=%s", (self.group_id, name)
+            r"""
+            SELECT
+              value
+            FROM
+              bot_state
+            WHERE
+              group_id = %s AND name = %s
+            """,
+            (self.group_id, name),
         ).fetchone()
         state = saved["value"] if saved else {}
         if state.get("signature") == signature:
             previous = conn.execute(
                 r"""
-                SELECT status,
-                       completed_at
-                FROM bot_outbox
-                WHERE inbox_id = %s
-                    AND effect_index = %s
-                    AND group_id = %s
+                SELECT
+                  status,
+                  completed_at
+                FROM
+                  bot_outbox
+                WHERE
+                  inbox_id = %s
+                  AND effect_index = %s
+                  AND group_id = %s
                 """,
                 (state["inbox_id"], state["effect_index"], self.group_id),
             ).fetchone()
@@ -302,7 +408,8 @@ class QueueStore:
                     r"""
                     UPDATE bot_inbox
                     SET payload = jsonb_set(payload, '{_hint_suppressed}', 'true')
-                    WHERE id = %s
+                    WHERE
+                      id = %s
                     """,
                     (job["id"],),
                 )
@@ -336,10 +443,13 @@ class QueueStore:
                     refresh(conn, self.group_id, inbox_id)
                     parent = conn.execute(
                         r"""
-                        SELECT payload ->> '_geo_source_id' AS id
-                        FROM bot_inbox
-                        WHERE id = %s
-                            AND group_id = %s
+                        SELECT
+                          payload ->> '_geo_source_id' AS id
+                        FROM
+                          bot_inbox
+                        WHERE
+                          id = %s
+                          AND group_id = %s
                         """,
                         (inbox_id, self.group_id),
                     ).fetchone()
@@ -378,16 +488,17 @@ class QueueStore:
                     rf"""
                     UPDATE {table}
                     SET completed_at = %s
-                    WHERE group_id = %s
-                        AND status = 'done'
-                        AND completed_at IS NULL
+                    WHERE
+                      group_id = %s
+                      AND status = 'done'
+                      AND completed_at IS NULL
                     """,
                     (time.time(), self.group_id),
                 )
             conn.execute(
                 r"""
                 INSERT INTO bot_state
-                VALUES (%s,'tracking_started',%s) ON CONFLICT DO NOTHING
+                VALUES (%s, 'tracking_started', %s) ON CONFLICT DO NOTHING
                 """,
                 (self.group_id, Jsonb(time.time())),
             )
@@ -395,16 +506,22 @@ class QueueStore:
                 self._queue_lock(conn)
                 peers = conn.execute(
                     r"""
-                    SELECT peer_id
-                    FROM bot_inbox
-                    WHERE group_id = %s
-                        AND kind = 'message_new'
-                        AND status = 'pending'
+                    SELECT
+                      peer_id
+                    FROM
+                      bot_inbox
+                    WHERE
+                      group_id = %s
+                      AND kind = 'message_new'
+                      AND status = 'pending'
                     UNION
-                    SELECT peer_id
-                    FROM bot_outbox
-                    WHERE group_id = %s
-                        AND status = 'pending'
+                    SELECT
+                      peer_id
+                    FROM
+                      bot_outbox
+                    WHERE
+                      group_id = %s
+                      AND status = 'pending'
                     """,
                     (self.group_id, self.group_id),
                 ).fetchall()
@@ -415,7 +532,15 @@ class QueueStore:
         """Прочитать именованное состояние сообщества с указанным значением по умолчанию."""
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT value FROM bot_state WHERE group_id=%s AND name=%s", (self.group_id, name)
+                r"""
+                SELECT
+                  value
+                FROM
+                  bot_state
+                WHERE
+                  group_id = %s AND name = %s
+                """,
+                (self.group_id, name),
             ).fetchone()
             return row["value"] if row else default
 
@@ -429,9 +554,9 @@ class QueueStore:
         conn.execute(
             r"""
             INSERT INTO bot_state
-            VALUES (%s,%s,%s) ON CONFLICT(group_id, name) DO
+            VALUES (%s, %s, %s) ON CONFLICT (group_id, name) DO
             UPDATE
-            SET value = excluded.value
+              SET value = excluded.value
             """,
             (self.group_id, name, Jsonb(value)),
         )
@@ -453,21 +578,32 @@ class QueueStore:
             for record in records:
                 assert record["group_id"] == self.group_id
                 if conn.execute(
-                    "SELECT 1 FROM bot_receipts WHERE group_id=%s AND event_key=%s",
+                    r"""
+                    SELECT
+                      1
+                    FROM
+                      bot_receipts
+                    WHERE
+                      group_id = %s AND event_key = %s
+                    """,
                     (self.group_id, record["event_key"]),
                 ).fetchone():
                     continue
                 row = conn.execute(
                     r"""
-                    INSERT INTO bot_inbox (group_id,
-                         event_key,
-                         peer_id,
-                         kind,
-                         payload,
-                         occurred_at,
-                         created_at,
-                         status)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(group_id, event_key) DO NOTHING RETURNING id
+                    INSERT INTO bot_inbox (
+                      group_id,
+                      event_key,
+                      peer_id,
+                      kind,
+                      payload,
+                      occurred_at,
+                      created_at,
+                      status
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (
+                      group_id, event_key
+                    ) DO NOTHING RETURNING id
                     """,
                     (
                         self.group_id,
@@ -492,7 +628,11 @@ class QueueStore:
                         )
                     except (KeyError, ValueError, TypeError) as exc:
                         conn.execute(
-                            "UPDATE bot_inbox SET status='failed',last_error=%s WHERE id=%s",
+                            r"""
+                            UPDATE bot_inbox SET status = 'failed', last_error = %s
+                            WHERE
+                              id = %s
+                            """,
                             (safe_error(exc), row["id"]),
                         )
                 added += bool(row)
@@ -501,20 +641,28 @@ class QueueStore:
                     conn.execute(
                         r"""
                         UPDATE bot_inbox
-                        SET status = 'done',
-                            completed_at = %s
-                        WHERE group_id = %s
-                            AND peer_id = %s
-                            AND kind = 'geo_retry'
-                            AND status IN ('deferred',
-                                           'failed')
-                            AND id < %s
+                        SET
+                          status = 'done',
+                          completed_at = %s
+                        WHERE
+                          group_id = %s
+                          AND peer_id = %s
+                          AND kind = 'geo_retry'
+                          AND status IN (
+                            'deferred',
+                            'failed'
+                          )
+                          AND id < %s
                         """,
                         (time.time(), self.group_id, record["peer_id"], row["id"]),
                     )
                 if row and record.get("status") == "done":
                     conn.execute(
-                        "UPDATE bot_inbox SET completed_at=%s WHERE id=%s",
+                        r"""
+                        UPDATE bot_inbox SET completed_at = %s
+                        WHERE
+                          id = %s
+                        """,
                         (time.time(), row["id"]),
                     )
                 if row and self.telemetry:
@@ -553,38 +701,71 @@ class QueueStore:
             target = "page:" + str(int(action["choice_page"]))
         signature = f"{int(obj['conversation_message_id'])}:{target}"
         name = f"callback_gate:{record['peer_id']}"
-        conn.execute("INSERT INTO bot_state VALUES (%s,%s,'{}') ON CONFLICT DO NOTHING", (self.group_id, name))
+        conn.execute(
+            r"""
+            INSERT INTO bot_state VALUES (%s, %s, '{}') ON CONFLICT DO NOTHING
+            """,
+            (self.group_id, name),
+        )
         state = conn.execute(
-            "SELECT value FROM bot_state WHERE group_id=%s AND name=%s FOR UPDATE", (self.group_id, name)
+            r"""
+            SELECT
+              value
+            FROM
+              bot_state
+            WHERE
+              group_id = %s AND name = %s
+            FOR UPDATE
+            """,
+            (self.group_id, name),
         ).fetchone()["value"]
         now = time.time()
         previous = None
         if state.get("canonical_id"):
             previous = conn.execute(
                 r"""
-                SELECT i.status,
-                       i.last_error,
-                       EXISTS
-                    (SELECT 1
-                     FROM bot_outbox o
-                     WHERE o.inbox_id = i.id
-                         AND o.status IN ('pending',
-                                          'processing')) AS active,
-                              EXISTS
-                    (SELECT 1
-                     FROM bot_outbox o
-                     WHERE o.inbox_id = i.id
-                         AND o.status = 'failed') AS failed,
-                                     EXISTS
-                    (SELECT 1
-                     FROM bot_outbox o
-                     WHERE o.inbox_id = i.id
-                         AND o.status IN ('pending',
-                                          'processing')
-                         AND o.last_error IS NOT NULL) AS delayed
-                FROM bot_inbox i
-                WHERE i.id = %s
-                    AND i.group_id = %s
+                SELECT
+                  i.status,
+                  i.last_error,
+                  exists(
+                    SELECT
+                      1
+                    FROM
+                      bot_outbox AS o
+                    WHERE
+                      o.inbox_id = i.id
+                      AND o.status IN (
+                        'pending',
+                        'processing'
+                      )
+                  ) AS active,
+                  exists(
+                    SELECT
+                      1
+                    FROM
+                      bot_outbox AS o
+                    WHERE
+                      o.inbox_id = i.id
+                      AND o.status = 'failed'
+                  ) AS failed,
+                  exists(
+                    SELECT
+                      1
+                    FROM
+                      bot_outbox AS o
+                    WHERE
+                      o.inbox_id = i.id
+                      AND o.status IN (
+                        'pending',
+                        'processing'
+                      )
+                      AND o.last_error IS NOT NULL
+                  ) AS delayed
+                FROM
+                  bot_inbox AS i
+                WHERE
+                  i.id = %s
+                  AND i.group_id = %s
                 """,
                 (state["canonical_id"], self.group_id),
             ).fetchone()
@@ -603,14 +784,21 @@ class QueueStore:
             # A known pending failure in this peer can delay a newly accepted click.
             blocked = conn.execute(
                 r"""
-                SELECT EXISTS
-                    (SELECT 1
-                     FROM bot_outbox
-                     WHERE group_id = %s
-                         AND peer_id = %s
-                         AND status IN ('pending',
-                                        'processing')
-                         AND last_error IS NOT NULL) AS blocked
+                SELECT
+                  exists(
+                    SELECT
+                      1
+                    FROM
+                      bot_outbox
+                    WHERE
+                      group_id = %s
+                      AND peer_id = %s
+                      AND status IN (
+                        'pending',
+                        'processing'
+                      )
+                      AND last_error IS NOT NULL
+                  ) AS blocked
                 """,
                 (self.group_id, record["peer_id"]),
             ).fetchone()["blocked"]
@@ -634,7 +822,11 @@ class QueueStore:
         }
         stored = dict(obj, _queue_receipt=receipt)
         conn.execute(
-            "UPDATE bot_inbox SET payload=%s,status=%s,completed_at=%s WHERE id=%s",
+            r"""
+            UPDATE bot_inbox SET payload = %s, status = %s, completed_at = %s
+            WHERE
+              id = %s
+            """,
             (
                 Jsonb(stored),
                 "done" if throttled else record.get("status", "pending"),
@@ -650,13 +842,16 @@ class QueueStore:
         with self.connect() as conn:
             row = conn.execute(
                 r"""
-                SELECT id,
-                       payload
-                FROM bot_inbox
-                WHERE group_id = %s
-                    AND event_key = %s
-                    FOR
-                    UPDATE
+                SELECT
+                  id,
+                  payload
+                FROM
+                  bot_inbox
+                WHERE
+                  group_id = %s
+                  AND event_key = %s
+                FOR
+                UPDATE
                 """,
                 (self.group_id, event_key),
             ).fetchone()
@@ -667,7 +862,14 @@ class QueueStore:
             if receipt.get("ack_reserved") or receipt.get("feedback", "skip") == "skip":
                 return None
             receipt["ack_reserved"] = True
-            conn.execute("UPDATE bot_inbox SET payload=%s WHERE id=%s", (Jsonb(obj), row["id"]))
+            conn.execute(
+                r"""
+                UPDATE bot_inbox SET payload = %s
+                WHERE
+                  id = %s
+                """,
+                (Jsonb(obj), row["id"]),
+            )
             return dict(receipt, inbox_id=row["id"])
 
     @staticmethod
@@ -693,55 +895,70 @@ class QueueStore:
                 conn.execute(
                     r"""
                     UPDATE bot_inbox i
-                    SET status = 'done',
-                        completed_at = %s
-                    WHERE i.group_id = %s
-                        AND i.status = 'deferred'
-                        AND EXISTS
-                            (SELECT 1
-                             FROM bot_inbox newer
-                             WHERE newer.group_id = i.group_id
-                                 AND newer.peer_id = i.peer_id
-                                 AND newer.kind = 'message_new'
-                                 AND newer.id > (i.payload ->> '_geo_source_id')::bigint)
+                    SET
+                      status = 'done',
+                      completed_at = %s
+                    WHERE
+                      i.group_id = %s
+                      AND i.status = 'deferred'
+                      AND EXISTS
+                      (
+                        SELECT
+                          1
+                        FROM
+                          bot_inbox AS newer
+                        WHERE
+                          newer.group_id = i.group_id
+                          AND newer.peer_id = i.peer_id
+                          AND newer.kind = 'message_new'
+                          AND newer.id > (i.payload ->> '_geo_source_id')::bigint
+                      )
                     """,
                     (now, self.group_id),
                 )
                 conn.execute(
                     r"""
                     UPDATE bot_inbox
-                    SET status = 'failed',
-                        last_error = %s
-                    WHERE group_id = %s
-                        AND status = 'deferred'
-                        AND (payload ->> '_geo_deadline')::double precision <= %s
+                    SET
+                      status = 'failed',
+                      last_error = %s
+                    WHERE
+                      group_id = %s
+                      AND status = 'deferred'
+                      AND (payload ->> '_geo_deadline')::double precision <= %s
                     """,
                     (json.dumps({"type": "GeoRetryExpired"}), self.group_id, now),
                 )
             while True:
                 row = conn.execute(
                     rf"""
-                    SELECT q.*
-                    FROM {table} q
-                    WHERE q.group_id = %s
-                        AND ((q.status IN ('pending',
-                                           'deferred')
-                              AND q.next_at <= %s)
-                             OR (q.status = 'processing'
-                                 AND q.lease_until < %s))
-                        AND NOT EXISTS
-                            (SELECT 1
-                             FROM {table} older
-                             WHERE older.group_id = q.group_id
-                                 AND older.peer_id = q.peer_id
-                                 AND older.id < q.id
-                                 AND older.status IN ('pending',
-                                                      'processing'))
-                    ORDER BY q.next_at,
-                             q.id
-                    FOR
-                    UPDATE OF q SKIP LOCKED
-                    LIMIT 1
+                    SELECT
+                      q.*
+                    FROM
+                      {table} AS q
+                    WHERE
+                      q.group_id = %s
+                      AND (
+                        (q.status IN ('pending', 'deferred') AND q.next_at <= %s)
+                        OR (q.status = 'processing' AND q.lease_until < %s)
+                      )
+                      AND NOT EXISTS (
+                        SELECT
+                          1
+                        FROM
+                          {table} AS older
+                        WHERE
+                          older.group_id = q.group_id
+                          AND older.peer_id = q.peer_id
+                          AND older.id < q.id
+                          AND older.status IN ('pending', 'processing')
+                      )
+                    ORDER BY
+                      q.next_at,
+                      q.id
+                    FOR UPDATE OF q SKIP LOCKED
+                    LIMIT
+                      1
                     """,
                     (self.group_id, now, now),
                 ).fetchone()
@@ -767,11 +984,13 @@ class QueueStore:
                     conn.execute(
                         r"""
                         UPDATE bot_outbox
-                        SET status = 'pending',
-                            OWNER = NULL,
-                                    lease_until = NULL,
-                                    next_at = %s
-                        WHERE id = %s
+                        SET
+                          status = 'pending',
+                          owner = NULL,
+                          lease_until = NULL,
+                          next_at = %s
+                        WHERE
+                          id = %s
                         """,
                         (eligible, row["id"]),
                     )
@@ -780,11 +999,13 @@ class QueueStore:
             conn.execute(
                 rf"""
                 UPDATE {table}
-                SET status = 'processing',
-                    OWNER = %s,
-                            lease_until = %s,
-                            attempts = attempts + 1
-                WHERE id = %s
+                SET
+                  status = 'processing',
+                  owner = %s,
+                  lease_until = %s,
+                  attempts = attempts + 1
+                WHERE
+                  id = %s
                 """,
                 (owner, now + self.lease_seconds, row["id"]),
             )
@@ -800,10 +1021,12 @@ class QueueStore:
                     rf"""
                 UPDATE {table}
                 SET lease_until = %s
-                WHERE id = %s
-                    AND group_id = %s
-                    AND OWNER = %s
-                    AND status = 'processing' RETURNING id
+                WHERE
+                  id = %s
+                  AND group_id = %s
+                  AND owner = %s
+                  AND status = 'processing'
+                RETURNING id
                 """,
                     (time.time() + self.lease_seconds, job["id"], self.group_id, job["owner"]),
                 ).fetchone()
@@ -823,7 +1046,8 @@ class QueueStore:
                     r"""
                     UPDATE bot_inbox
                     SET payload = jsonb_set(payload, '{_automatic_code}', 'true')
-                    WHERE id = %s
+                    WHERE
+                      id = %s
                     """,
                     (job["id"],),
                 )
@@ -839,16 +1063,20 @@ class QueueStore:
                     )
                     conn.execute(
                         r"""
-                        INSERT INTO bot_inbox (group_id,
-                             event_key,
-                             peer_id,
-                             kind,
-                             payload,
-                             occurred_at,
-                             created_at,
-                             status,
-                             next_at)
-                        VALUES(%s,%s,%s,'geo_retry',%s,%s,%s,'deferred',%s) ON CONFLICT DO NOTHING
+                        INSERT INTO bot_inbox (
+                          group_id,
+                          event_key,
+                          peer_id,
+                          kind,
+                          payload,
+                          occurred_at,
+                          created_at,
+                          status,
+                          next_at
+                        )
+                        VALUES (
+                          %s, %s, %s, 'geo_retry', %s, %s, %s, 'deferred', %s
+                        ) ON CONFLICT DO NOTHING
                         """,
                         (
                             self.group_id,
@@ -865,8 +1093,10 @@ class QueueStore:
                     self._state(conn, f"choices_closed:{job['peer_id']}:{cmid}", True)
                 conn.execute(
                     r"""
-                    INSERT INTO bot_outbox(inbox_id, group_id, peer_id, effect_index, METHOD, params, context)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(inbox_id, effect_index) DO NOTHING
+                    INSERT INTO bot_outbox (inbox_id, group_id, peer_id, effect_index, METHOD, params, context)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (
+                      inbox_id, effect_index
+                    ) DO NOTHING
                     """,
                     (
                         job["id"],
@@ -883,12 +1113,14 @@ class QueueStore:
             conn.execute(
                 r"""
                 UPDATE bot_inbox
-                SET status = 'done',
-                    OWNER = NULL,
-                            lease_until = NULL,
-                            last_error = NULL,
-                            completed_at = %s
-                WHERE id = %s
+                SET
+                  status = 'done',
+                  owner = NULL,
+                  lease_until = NULL,
+                  last_error = NULL,
+                  completed_at = %s
+                WHERE
+                  id = %s
                 """,
                 (time.time(), job["id"]),
             )
@@ -903,13 +1135,17 @@ class QueueStore:
             return False
         return not conn.execute(
             r"""
-            SELECT 1
-            FROM bot_inbox
-            WHERE group_id = %s
-                AND peer_id = %s
-                AND kind = 'message_new'
-                AND id > %s
-            LIMIT 1
+            SELECT
+              1
+            FROM
+              bot_inbox
+            WHERE
+              group_id = %s
+              AND peer_id = %s
+              AND kind = 'message_new'
+              AND id > %s
+            LIMIT
+              1
             """,
             (self.group_id, peer, payload["_geo_source_id"]),
         ).fetchone()
@@ -923,7 +1159,16 @@ class QueueStore:
         """Не допустить доставку устаревшего ответа на геометку."""
         with self.connect() as conn:
             parent = conn.execute(
-                "SELECT kind,payload FROM bot_inbox WHERE group_id=%s AND id=%s", (self.group_id, job["inbox_id"])
+                r"""
+                SELECT
+                  kind,
+                  payload
+                FROM
+                  bot_inbox
+                WHERE
+                  group_id = %s AND id = %s
+                """,
+                (self.group_id, job["inbox_id"]),
             ).fetchone()
             return parent["kind"] != "geo_retry" or not self._geo_superseded(conn, job["peer_id"], parent["payload"])
 
@@ -936,13 +1181,15 @@ class QueueStore:
             conn.execute(
                 r"""
                 UPDATE bot_inbox
-                SET status = %s,
-                    next_at = %s,
-                    OWNER = NULL,
-                            lease_until = NULL,
-                            completed_at = %s,
-                            last_error = %s
-                WHERE id = %s
+                SET
+                  status = %s,
+                  next_at = %s,
+                  owner = NULL,
+                  lease_until = NULL,
+                  completed_at = %s,
+                  last_error = %s
+                WHERE
+                  id = %s
                 """,
                 (
                     "deferred" if current else ("failed" if expired else "done"),
@@ -959,13 +1206,17 @@ class QueueStore:
         return bool(
             conn.execute(
                 r"""
-            SELECT 1
-            FROM bot_inbox
-            WHERE group_id = %s
-                AND peer_id = %s
-                AND kind = 'message_new'
-                AND id > %s
-            LIMIT 1
+            SELECT
+              1
+            FROM
+              bot_inbox
+            WHERE
+              group_id = %s
+              AND peer_id = %s
+              AND kind = 'message_new'
+              AND id > %s
+            LIMIT
+              1
             """,
                 (self.group_id, peer, payload["_geo_source_id"]),
             ).fetchone()
@@ -975,15 +1226,18 @@ class QueueStore:
         """Подтвердить владение действующей арендой и заблокировать строку задания."""
         row = conn.execute(
             rf"""
-            SELECT id
-            FROM {table}
-            WHERE id = %s
-                AND group_id = %s
-                AND OWNER = %s
-                AND status = 'processing'
-                AND lease_until > %s
-                FOR
-                UPDATE
+            SELECT
+              id
+            FROM
+              {table}
+            WHERE
+              id = %s
+              AND group_id = %s
+              AND owner = %s
+              AND status = 'processing'
+              AND lease_until > %s
+            FOR
+            UPDATE
             """,
             (job["id"], self.group_id, job["owner"], time.time()),
         ).fetchone()
@@ -994,7 +1248,14 @@ class QueueStore:
         """Сохранить промежуточный результат за владельцем аренды."""
         with self.connect() as conn:
             self._owned(conn, "bot_outbox", job)
-            conn.execute("UPDATE bot_outbox SET result=%s WHERE id=%s", (Jsonb(result), job["id"]))
+            conn.execute(
+                r"""
+                UPDATE bot_outbox SET result = %s
+                WHERE
+                  id = %s
+                """,
+                (Jsonb(result), job["id"]),
+            )
 
     @measured("outbox.finish")
     def finish(self, job: dict, context: tuple[int, dict] | None = None) -> None:
@@ -1012,23 +1273,28 @@ class QueueStore:
                         self._state(conn, f"choices_closed:{job['peer_id']}:{cmid}", False)
                 conn.execute(
                     r"""
-                    INSERT INTO bot_message_context(group_id, peer_id, conversation_message_id, RESULT, updated_at)
-                    VALUES (%s,%s,%s,%s,%s) ON CONFLICT(group_id, peer_id, conversation_message_id) DO
+                    INSERT INTO bot_message_context (group_id, peer_id, conversation_message_id, RESULT, updated_at)
+                    VALUES (%s, %s, %s, %s, %s) ON CONFLICT (
+                      group_id, peer_id, conversation_message_id
+                    ) DO
                     UPDATE
-                    SET RESULT = excluded.result,
-                                 updated_at = excluded.updated_at
+                      SET
+                        RESULT = excluded.result,
+                        updated_at = excluded.updated_at
                     """,
                     (self.group_id, job["peer_id"], cmid, Jsonb(result), time.time()),
                 )
             conn.execute(
                 r"""
                 UPDATE bot_outbox
-                SET status = 'done',
-                    OWNER = NULL,
-                            lease_until = NULL,
-                            last_error = NULL,
-                            completed_at = %s
-                WHERE id = %s
+                SET
+                  status = 'done',
+                  owner = NULL,
+                  lease_until = NULL,
+                  last_error = NULL,
+                  completed_at = %s
+                WHERE
+                  id = %s
                 """,
                 (time.time(), job["id"]),
             )
@@ -1040,18 +1306,33 @@ class QueueStore:
         """Обновить состояние ограничения после завершения канонического нажатия."""
         name = f"callback_gate:{peer}"
         row = conn.execute(
-            "SELECT value FROM bot_state WHERE group_id=%s AND name=%s FOR UPDATE", (self.group_id, name)
+            r"""
+            SELECT
+              value
+            FROM
+              bot_state
+            WHERE
+              group_id = %s AND name = %s
+            FOR UPDATE
+            """,
+            (self.group_id, name),
         ).fetchone()
         if not row or row["value"].get("canonical_id") != inbox_id:
             return
         pending = conn.execute(
             r"""
-            SELECT 1
-            FROM bot_outbox
-            WHERE inbox_id = %s
-                AND status IN ('pending',
-                               'processing')
-            LIMIT 1
+            SELECT
+              1
+            FROM
+              bot_outbox
+            WHERE
+              inbox_id = %s
+              AND status IN (
+                'pending',
+                'processing'
+              )
+            LIMIT
+              1
             """,
             (inbox_id,),
         ).fetchone()
@@ -1069,15 +1350,17 @@ class QueueStore:
             changed = conn.execute(
                 rf"""
                 UPDATE {table}
-                SET status = %s,
-                    next_at = %s,
-                    last_error = %s,
-                    OWNER = NULL,
-                            lease_until = NULL
-                WHERE id = %s
-                    AND group_id = %s
-                    AND OWNER = %s
-                    AND status = 'processing'
+                SET
+                  status = %s,
+                  next_at = %s,
+                  last_error = %s,
+                  owner = NULL,
+                  lease_until = NULL
+                WHERE
+                  id = %s
+                  AND group_id = %s
+                  AND owner = %s
+                  AND status = 'processing'
                 """,
                 (
                     "failed" if permanent else "pending",
@@ -1097,11 +1380,14 @@ class QueueStore:
         with self.connect() as conn:
             row = conn.execute(
                 r"""
-                SELECT RESULT
-                FROM bot_message_context
-                WHERE group_id = %s
-                    AND peer_id = %s
-                    AND conversation_message_id = %s
+                SELECT
+                  RESULT
+                FROM
+                  bot_message_context
+                WHERE
+                  group_id = %s
+                  AND peer_id = %s
+                  AND conversation_message_id = %s
                 """,
                 (self.group_id, peer, cmid),
             ).fetchone()
@@ -1115,7 +1401,16 @@ class QueueStore:
         """Израсходовать одно разрешённое dev-срабатывание подстановки отказа."""
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT value FROM bot_state WHERE group_id=%s AND name=%s FOR UPDATE", (self.group_id, "fault:" + name)
+                r"""
+                SELECT
+                  value
+                FROM
+                  bot_state
+                WHERE
+                  group_id = %s AND name = %s
+                FOR UPDATE
+                """,
+                (self.group_id, "fault:" + name),
             ).fetchone()
             if not row or not row["value"]:
                 return False
@@ -1131,11 +1426,15 @@ class QueueStore:
             for table in ("bot_inbox", "bot_outbox"):
                 result[table] = conn.execute(
                     rf"""
-                    SELECT status,
-                           count(*) AS COUNT
-                    FROM {table}
-                    WHERE group_id = %s
-                    GROUP BY status
+                    SELECT
+                      status,
+                      count(*) AS COUNT
+                    FROM
+                      {table}
+                    WHERE
+                      group_id = %s
+                    GROUP BY
+                      status
                     """,
                     (self.group_id,),
                 ).fetchall()
@@ -1149,9 +1448,10 @@ class QueueStore:
                 r"""
                 UPDATE bot_inbox
                 SET payload = jsonb_set(payload, '{_geo_deadline}', %s)
-                WHERE group_id = %s
-                    AND kind = 'geo_retry'
-                    AND status = 'failed'
+                WHERE
+                  group_id = %s
+                  AND kind = 'geo_retry'
+                  AND status = 'failed'
                 """,
                 (Jsonb(time.time() + geo_max_age), self.group_id),
             )
@@ -1159,11 +1459,13 @@ class QueueStore:
                 conn.execute(
                     rf"""
                     UPDATE {table}
-                    SET status = 'pending',
-                        next_at = 0,
-                        last_error = NULL
-                    WHERE group_id = %s
-                        AND status = 'failed'
+                    SET
+                      status = 'pending',
+                      next_at = 0,
+                      last_error = NULL
+                    WHERE
+                      group_id = %s
+                      AND status = 'failed'
                     """,
                     (self.group_id,),
                 )

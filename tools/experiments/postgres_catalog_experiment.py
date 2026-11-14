@@ -51,7 +51,10 @@ def load(catalog: Path, full_catalog: Path, output: Path):
     output.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     with connect() as db:
-        if db.execute("SELECT to_regclass('public.buildings') AS name").fetchone()["name"]:
+        if db.execute(r"""
+            SELECT
+              to_regclass('public.buildings') AS name
+            """).fetchone()["name"]:
             raise FileExistsError("Preserve the loaded experiment; choose another isolated database")
         with closing(sqlite3.connect(f"file:{catalog.resolve().as_posix()}?mode=ro", uri=True)) as source:
             db.execute(SCHEMA)
@@ -64,7 +67,15 @@ def load(catalog: Path, full_catalog: Path, output: Path):
                 ("street_houses", "SELECT * FROM street_houses", ["text", "bytea"]),
                 (
                     "alias_search",
-                    "SELECT rowid,building_id,house,words FROM alias_search",
+                    r"""
+                SELECT
+                  rowid,
+                  building_id,
+                  house,
+                  words
+                FROM
+                  alias_search
+                """,
                     ["int8", "text", "text", "text"],
                 ),
                 ("metadata", "SELECT * FROM metadata", ["text"] * 2),
@@ -86,19 +97,30 @@ def load(catalog: Path, full_catalog: Path, output: Path):
         db.execute("CHECKPOINT")
         with catalog.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
-        db.execute("INSERT INTO metadata VALUES('benchmark_source_sha256',%s)", (digest,))
+        db.execute(
+            r"""
+            INSERT INTO metadata VALUES ('benchmark_source_sha256', %s)
+            """,
+            (digest,),
+        )
         report = {
             "source_sha256": digest,
             "source_bytes": catalog.stat().st_size,
             "rows": counts,
             "seconds": round(time.perf_counter() - started, 2),
-            "database_bytes": db.execute("SELECT pg_database_size(current_database()) AS n").fetchone()["n"],
+            "database_bytes": db.execute(r"""
+            SELECT
+              pg_database_size(current_database()) AS n
+            """).fetchone()["n"],
             "tables": db.execute(r"""
-            SELECT relname,
-                   pg_total_relation_size(relid) AS total_bytes,
-                   pg_indexes_size(relid) AS index_bytes
-            FROM pg_stat_user_tables
-            ORDER BY relname
+            SELECT
+              relname,
+              pg_total_relation_size(relid) AS total_bytes,
+              pg_indexes_size(relid) AS index_bytes
+            FROM
+              pg_stat_user_tables
+            ORDER BY
+              relname
             """).fetchall(),
             "settings": {
                 key: db.execute("SHOW " + key).fetchone()[key]

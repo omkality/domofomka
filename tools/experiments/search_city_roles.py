@@ -249,7 +249,18 @@ def constrain_result(result, catalog, places):
         with catalog.connect() as db:
             aliases = [
                 {"street": r[1], "words": r[0] + " " + r[1]}
-                for r in db.execute("SELECT city_key,street_key FROM aliases WHERE building_id=?", (row["id"],))
+                for r in db.execute(
+                    r"""
+                SELECT
+                  city_key,
+                  street_key
+                FROM
+                  aliases
+                WHERE
+                  building_id = ?
+                """,
+                    (row["id"],),
+                )
             ]
         if any(role_locality_matches(place, row, aliases) for place in places):
             safe.append(option)

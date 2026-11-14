@@ -340,11 +340,15 @@ def build_index(
         if aliases:
             with Catalog(str(catalog)).connect() as db:
                 for row in db.execute(r"""
-                    SELECT a.*,
-                           b.city_key AS canonical_city,
-                           b.street_key AS canonical_street
-                    FROM aliases a
-                    JOIN buildings b ON b.id = a.building_id
+                    SELECT
+                      a.*,
+                      b.city_key AS canonical_city,
+                      b.street_key AS canonical_street
+                    FROM
+                      aliases AS a
+                    INNER JOIN
+                      buildings AS b
+                      ON b.id = a.building_id
                     """):
                     by_street[row["canonical_city"], row["canonical_street"]].append(
                         {
@@ -613,7 +617,18 @@ def reviewed_conflict(case, result, catalog):
             building = catalog.building(option["building_id"])
             with catalog.connect() as db:
                 aliases = [
-                    r[0] for r in db.execute("SELECT street_key FROM aliases WHERE building_id=?", (building["id"],))
+                    r[0]
+                    for r in db.execute(
+                        r"""
+                    SELECT
+                      street_key
+                    FROM
+                      aliases
+                    WHERE
+                      building_id = ?
+                    """,
+                        (building["id"],),
+                    )
                 ]
         else:
             building = address_fields(option["address"])

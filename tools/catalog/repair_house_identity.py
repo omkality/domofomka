@@ -30,7 +30,14 @@ def repair(source: Path, legacy: Path, output: Path, locality_facts: Path | None
     if shutil.disk_usage(output.parent).free < source.stat().st_size + 1073741824:
         raise ValueError("Not enough space for an independent candidate")
     with closing(sqlite3.connect(f"file:{source.resolve().as_posix()}?mode=ro", uri=True)) as db:
-        stats = json.loads(db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()[0])
+        stats = json.loads(db.execute(r"""
+            SELECT
+              value
+            FROM
+              metadata
+            WHERE
+              key = 'build'
+            """).fetchone()[0])
     if stats.get("normalization_schema", 0) > 7:
         raise ValueError("Repair house keys before source field alignment; use the preceding frozen snapshot")
     with legacy.open("rb") as stream:
@@ -45,46 +52,98 @@ def repair(source: Path, legacy: Path, output: Path, locality_facts: Path | None
         )
         before = db.execute("SELECT count(*) FROM provenance").fetchone()[0]
         changed = normalize_house_keys(db)
-        db.execute("CREATE TEMP TABLE affected(id TEXT PRIMARY KEY)")
+        db.execute(r"""
+            CREATE TEMP TABLE affected (id TEXT PRIMARY KEY)
+            """)
         db.executemany("INSERT INTO affected VALUES(?)", [(identity,) for identity in changed])
         # Also catch ranges previously linked to a plain-number GAR house.
         suspect = db.execute(r"""
-            SELECT c.house,
-                   p.building_id,
-                   b.house
-            FROM legacy.codes c
-            JOIN provenance p ON p.source_id = c.id
-            JOIN buildings b ON b.id = p.building_id
+            SELECT
+              c.house,
+              p.building_id,
+              b.house
+            FROM
+              legacy.codes AS c
+            INNER JOIN
+              provenance AS p
+              ON p.source_id = c.id
+            INNER JOIN
+              buildings AS b
+              ON b.id = p.building_id
             """)
         mismatched = {identity for raw, identity, actual in suspect if normalized_house(raw) != actual}
         db.executemany(
-            "INSERT OR IGNORE INTO affected VALUES(?)",
+            r"""
+            INSERT OR IGNORE INTO affected VALUES (?)
+            """,
             [(identity,) for identity in mismatched],
         )
         db.row_factory = sqlite3.Row
         rows = db.execute(r"""
-            SELECT c.*,
-                   p.building_id AS previous_building,
-                   p.resolution AS previous_resolution,
-                   b.house AS target_house
-            FROM affected a
-            JOIN provenance p ON p.building_id = a.id
-            JOIN legacy.codes c ON c.id = p.source_id
-            JOIN buildings b ON b.id = a.id
-            ORDER BY c.id
+            SELECT
+              c.*,
+              p.building_id AS previous_building,
+              p.resolution AS previous_resolution,
+              b.house AS target_house
+            FROM
+              affected AS a
+            INNER JOIN
+              provenance AS p
+              ON p.building_id = a.id
+            INNER JOIN
+              legacy.codes AS c
+              ON c.id = p.source_id
+            INNER JOIN
+              buildings AS b
+              ON b.id = a.id
+            ORDER BY
+              c.id
             """).fetchall()
-        db.execute("DELETE FROM codes WHERE building_id IN(SELECT id FROM affected)")
-        db.execute("DELETE FROM aliases WHERE building_id IN(SELECT id FROM affected)")
+        db.execute(r"""
+            DELETE
+            FROM
+              codes
+            WHERE
+              building_id IN (
+                SELECT
+                  id
+                FROM
+                  affected
+              )
+            """)
+        db.execute(r"""
+            DELETE
+            FROM
+              aliases
+            WHERE
+              building_id IN (
+                SELECT
+                  id
+                FROM
+                  affected
+              )
+            """)
         moved = []
         for row in rows:
             identity = row["previous_building"]
             house = normalized_house(row["house"])
             if house != row["target_house"]:
                 moved.append(row["id"])
-                db.execute("DELETE FROM provenance WHERE source_id=?", (row["id"],))
+                db.execute(
+                    r"""
+                    DELETE
+                    FROM
+                      provenance
+                    WHERE
+                      source_id = ?
+                    """,
+                    (row["id"],),
+                )
                 continue
             db.execute(
-                "INSERT OR IGNORE INTO codes VALUES(?,?,?,?)",
+                r"""
+                INSERT OR IGNORE INTO codes VALUES (?, ?, ?, ?)
+                """,
                 (
                     identity,
                     str(row["entrance"]),
@@ -97,15 +156,28 @@ def repair(source: Path, legacy: Path, output: Path, locality_facts: Path | None
                 source_street(row["street"], row["city"]),
             }:
                 db.execute(
-                    "INSERT OR IGNORE INTO aliases VALUES(?,?,?,?)",
+                    r"""
+                    INSERT OR IGNORE INTO aliases VALUES (?, ?, ?, ?)
+                    """,
                     (identity, text(row["city"]), street, house),
                 )
         with closing(sqlite3.connect(subset)) as selected:
-            schema = db.execute("SELECT sql FROM legacy.sqlite_master WHERE name='codes'").fetchone()[0]
+            schema = db.execute(r"""
+                SELECT
+                  sql
+                FROM
+                  legacy.sqlite_master
+                WHERE
+                  name = 'codes'
+                """).fetchone()[0]
             selected.execute(schema)
             wanted = set(moved)
             selected.executemany(
-                "INSERT INTO codes VALUES(?,?,?,?,?,?,?,?)",
+                r"""
+                INSERT INTO codes VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
                 [tuple(row)[:8] for row in rows if row["id"] in wanted],
             )
             selected.commit()
@@ -119,11 +191,17 @@ def repair(source: Path, legacy: Path, output: Path, locality_facts: Path | None
         assert db.execute("SELECT count(*) FROM provenance").fetchone()[0] == before
         conflicts = 0
         for raw, actual in db.execute(r"""
-            SELECT DISTINCT c.house,
-                            b.house
-            FROM legacy.codes c
-            JOIN provenance p ON p.source_id = c.id
-            JOIN buildings b ON b.id = p.building_id
+            SELECT DISTINCT
+              c.house,
+              b.house
+            FROM
+              legacy.codes AS c
+            INNER JOIN
+              provenance AS p
+              ON p.source_id = c.id
+            INNER JOIN
+              buildings AS b
+              ON b.id = p.building_id
             """):
             conflicts += normalized_house(raw) != actual
         if conflicts:
@@ -136,10 +214,22 @@ def repair(source: Path, legacy: Path, output: Path, locality_facts: Path | None
             house_source_rows_rebuilt=len(rows),
             house_source_rows_moved=len(moved),
             unique_codes=db.execute("SELECT count(*) FROM codes").fetchone()[0],
-            buildings_with_codes=db.execute("SELECT count(DISTINCT building_id) FROM codes").fetchone()[0],
+            buildings_with_codes=db.execute(r"""
+            SELECT
+              count(DISTINCT building_id)
+            FROM
+              codes
+            """).fetchone()[0],
             street_documents=db.execute("SELECT count(*) FROM streets").fetchone()[0],
         )
-        db.execute("UPDATE metadata SET value=? WHERE key='build'", (json.dumps(stats),))
+        db.execute(
+            r"""
+            UPDATE metadata SET value = ?
+            WHERE
+              key = 'build'
+            """,
+            (json.dumps(stats),),
+        )
         db.commit()
         assert db.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     work.replace(output)

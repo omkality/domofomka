@@ -8,7 +8,6 @@ dependencies = []
 
 [dependency-groups]
 api = [
-    "aiosqlite>=0.22.1",
     "granian>=2.7.4,<3",
     "litestar>=2.22.0,<3",
     "pydantic>=2.12.5",

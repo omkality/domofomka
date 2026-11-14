@@ -19,7 +19,17 @@ def rows(db, table):
     """Прочитать строки указанной таблицы для сравнения снимков каталога."""
     columns, keys = TABLES[table]
     if table == "alias_search":
-        return db.execute("SELECT rowid,building_id,house,words FROM alias_search ORDER BY rowid")
+        return db.execute(r"""
+            SELECT
+              rowid,
+              building_id,
+              house,
+              words
+            FROM
+              alias_search
+            ORDER BY
+              rowid
+            """)
     return db.execute("SELECT " + ",".join(columns) + " FROM " + table + " ORDER BY " + ",".join(keys))
 
 

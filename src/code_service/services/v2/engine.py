@@ -61,7 +61,14 @@ class Catalog:
 
     def _compact(self, db: sqlite3.Connection) -> bool:
         """Проверить компактный формат каталога и его версию."""
-        return db.execute("SELECT value FROM metadata WHERE key='format'").fetchone() is not None
+        return db.execute(r"""
+            SELECT
+              value
+            FROM
+              metadata
+            WHERE
+              key = 'format'
+            """).fetchone() is not None
 
     def _expand(self, db: sqlite3.Connection, ids: list[str], house: str, include_known: bool = True) -> list[dict]:
         """Распаковать ограниченный набор домов выбранных улиц."""
@@ -256,13 +263,20 @@ class Catalog:
         with self.connect() as db:
             rows = db.execute(
                 r"""
-                SELECT t.city_key,
-                       t.street_key
-                FROM SEARCH s
-                JOIN streets t ON t.id = s.id
-                WHERE SEARCH MATCH ?
-                ORDER BY t.id
-                LIMIT 1000
+                SELECT
+                  t.city_key,
+                  t.street_key
+                FROM
+                  SEARCH AS s
+                INNER JOIN
+                  streets AS t
+                  ON t.id = s.id
+                WHERE
+                  SEARCH MATCH ?
+                ORDER BY
+                  t.id
+                LIMIT
+                  1000
                 """,
                 (match,),
             )
@@ -278,12 +292,18 @@ class Catalog:
             return (
                 db.execute(
                     r"""
-                SELECT 1
-                FROM SEARCH s
-                JOIN streets t ON t.id = s.id
-                WHERE SEARCH MATCH ?
-                    AND instr(' ' || t.city_key || ' ', ' ' || ? || ' ') > 0
-                LIMIT 1
+                SELECT
+                  1
+                FROM
+                  SEARCH AS s
+                INNER JOIN
+                  streets AS t
+                  ON t.id = s.id
+                WHERE
+                  SEARCH MATCH ?
+                  AND instr(' ' || t.city_key || ' ', ' ' || ? || ' ') > 0
+                LIMIT
+                  1
                 """,
                     ('"' + word.replace('"', '""') + '"', word),
                 ).fetchone()
@@ -359,24 +379,43 @@ class Catalog:
     def alias_candidates(self, query: Query) -> list[dict]:
         """Получить дома по исходным вариантам названия и точному номеру."""
         with self.connect() as db:
-            if not db.execute("SELECT 1 FROM sqlite_master WHERE name='alias_search'").fetchone():
+            if not db.execute(r"""
+                SELECT
+                  1
+                FROM
+                  sqlite_master
+                WHERE
+                  name = 'alias_search'
+                """).fetchone():
                 return []
             match = " AND ".join('"' + w + '"*' for w in query.words.split())
             rows = db.execute(
                 r"""
-                SELECT b.*,
-                       s.words AS alias_words,
-                    (SELECT a.street_key
-                     FROM aliases a
-                     WHERE a.building_id = b.id
-                         AND a.house = s.house
-                         AND a.city_key || ' ' || a.street_key = s.words
-                     LIMIT 1) AS alias_street
-                FROM alias_search s
-                JOIN buildings b ON b.id = s.building_id
-                WHERE alias_search MATCH ?
-                    AND s.house = ?
-                LIMIT ?
+                SELECT
+                  b.*,
+                  s.words AS alias_words,
+                  (
+                    SELECT
+                      a.street_key
+                    FROM
+                      aliases AS a
+                    WHERE
+                      a.building_id = b.id
+                      AND a.house = s.house
+                      AND a.city_key || ' ' || a.street_key = s.words
+                    LIMIT
+                      1
+                  ) AS alias_street
+                FROM
+                  alias_search AS s
+                INNER JOIN
+                  buildings AS b
+                  ON b.id = s.building_id
+                WHERE
+                  alias_search MATCH ?
+                  AND s.house = ?
+                LIMIT
+                  ?
                 """,
                 (match, query.house, self.candidate_limit),
             )
@@ -397,7 +436,14 @@ class Catalog:
             row = db.execute("SELECT * FROM buildings WHERE id=?", (id,)).fetchone()
             if row:
                 return dict(row)
-            redirects = db.execute("SELECT value FROM metadata WHERE key='building_redirects'").fetchone()
+            redirects = db.execute(r"""
+                SELECT
+                  value
+                FROM
+                  metadata
+                WHERE
+                  key = 'building_redirects'
+                """).fetchone()
             if redirects:
                 target = json.loads(redirects[0]).get(id)
                 if isinstance(target, str) and target != id:
@@ -429,14 +475,18 @@ class Catalog:
         with self.connect() as db:
             rows = db.execute(
                 r"""
-                SELECT entrance,
-                       kind,
-                       code
-                FROM codes
-                WHERE building_id = ?
-                ORDER BY entrance,
-                         kind,
-                         code
+                SELECT
+                  entrance,
+                  kind,
+                  code
+                FROM
+                  codes
+                WHERE
+                  building_id = ?
+                ORDER BY
+                  entrance,
+                  kind,
+                  code
                 """,
                 (building["id"],),
             ).fetchall()
@@ -696,18 +746,32 @@ def documents(path: str, *, structured: bool = False) -> Iterator[dict]:
         compact = catalog._compact(db)
         for row in db.execute("SELECT * FROM streets"):
             if compact:
-                packed = db.execute("SELECT data FROM street_houses WHERE id=?", (row["id"],)).fetchone()[0]
+                packed = db.execute(
+                    r"""
+                    SELECT
+                      data
+                    FROM
+                      street_houses
+                    WHERE
+                      id = ?
+                    """,
+                    (row["id"],),
+                ).fetchone()[0]
                 houses = sorted({house for b in json.loads(zlib.decompress(packed)) for house in b["houses"]})
             else:
                 houses = [
                     r[0]
                     for r in db.execute(
                         r"""
-                    SELECT DISTINCT house
-                    FROM buildings
-                    WHERE city_key = ?
-                        AND street_key = ?
-                    ORDER BY house
+                    SELECT DISTINCT
+                      house
+                    FROM
+                      buildings
+                    WHERE
+                      city_key = ?
+                      AND street_key = ?
+                    ORDER BY
+                      house
                     """,
                         (row["city_key"], row["street_key"]),
                     )
@@ -722,14 +786,22 @@ def documents(path: str, *, structured: bool = False) -> Iterator[dict]:
                             r[0]
                             for r in db.execute(
                                 r"""
-                    SELECT DISTINCT house
-                    FROM buildings
-                    WHERE city_key = ?
-                        AND street_key = ?
-                        AND EXISTS
-                            (SELECT 1
-                             FROM codes c
-                             WHERE c.building_id = buildings.id)
+                    SELECT DISTINCT
+                      house
+                    FROM
+                      buildings
+                    WHERE
+                      city_key = ?
+                      AND street_key = ?
+                      AND EXISTS
+                      (
+                        SELECT
+                          1
+                        FROM
+                          codes AS c
+                        WHERE
+                          c.building_id = buildings.id
+                      )
                     """,
                                 (row["city_key"], row["street_key"]),
                             )

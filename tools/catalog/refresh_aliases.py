@@ -11,9 +11,11 @@ def refresh(db: sqlite3.Connection) -> int:
     """Перестроить FTS-индекс исходных вариантов адреса, сохранив дома и коды."""
     db.execute("DROP TABLE IF EXISTS alias_search")
     db.execute(r"""
-        CREATE VIRTUAL TABLE alias_search USING fts5(building_id UNINDEXED,
-                                                     house UNINDEXED,
-                                                     words)
+        CREATE VIRTUAL TABLE alias_search USING fts5 (
+          building_id UNINDEXED,
+          house UNINDEXED,
+          words
+        )
         """)
     count = 0
     for building, city, street, house in db.execute("SELECT * FROM aliases"):

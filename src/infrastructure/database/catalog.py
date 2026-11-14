@@ -30,43 +30,59 @@ def definition(conn: psycopg.Connection) -> dict:
         (
             "columns",
             r"""
-        SELECT TABLE_NAME,
-               COLUMN_NAME,
-               data_type,
-               is_nullable,
-               column_default
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-            AND TABLE_NAME = ANY(%s)
-        ORDER BY TABLE_NAME,
-                 ordinal_position
+        SELECT
+          TABLE_NAME,
+          COLUMN_NAME,
+          data_type,
+          is_nullable,
+          column_default
+        FROM
+          information_schema.columns
+        WHERE
+          table_schema = 'public'
+          AND TABLE_NAME = any(%s)
+        ORDER BY
+          TABLE_NAME,
+          ordinal_position
         """,
         ),
         (
             "constraints",
             r"""
-        SELECT c.relname,
-               pg_get_constraintdef(k.oid)
-        FROM pg_constraint AS k
-        JOIN pg_class AS c ON c.oid = k.conrelid
-        JOIN pg_namespace AS n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public'
-            AND c.relname = ANY(%s)
-        ORDER BY c.relname,
-                 pg_get_constraintdef(k.oid)
+        SELECT
+          c.relname,
+          pg_get_constraintdef(k.oid)
+        FROM
+          pg_constraint AS k
+        INNER JOIN
+          pg_class AS c
+          ON c.oid = k.conrelid
+        INNER JOIN
+          pg_namespace AS n
+          ON n.oid = c.relnamespace
+        WHERE
+          n.nspname = 'public'
+          AND c.relname = any(%s)
+        ORDER BY
+          c.relname,
+          pg_get_constraintdef(k.oid)
         """,
         ),
         (
             "indexes",
             r"""
-        SELECT tablename,
-               indexname,
-               indexdef
-        FROM pg_indexes
-        WHERE schemaname = 'public'
-            AND tablename = ANY(%s)
-        ORDER BY tablename,
-                 indexname
+        SELECT
+          tablename,
+          indexname,
+          indexdef
+        FROM
+          pg_indexes
+        WHERE
+          schemaname = 'public'
+          AND tablename = any(%s)
+        ORDER BY
+          tablename,
+          indexname
         """,
         ),
     ]:
@@ -81,19 +97,32 @@ def adopt_baseline(dsn: str) -> None:
     expected = json.loads((Path(__file__).parent / "catalog-baseline.json").read_text(encoding="utf-8"))
     with psycopg.connect(dsn, connect_timeout=network_settings.queue_db_connect_timeout_seconds) as conn:
         conn.execute("SET TRANSACTION READ ONLY")
-        tracked = conn.execute("SELECT to_regclass('public._yoyo_migration')").fetchone()[0]
+        tracked = conn.execute(r"""
+            SELECT
+              to_regclass('public._yoyo_migration')
+            """).fetchone()[0]
         if tracked:
-            applied = {row[0] for row in conn.execute("SELECT migration_id FROM _yoyo_migration")}
+            applied = {row[0] for row in conn.execute(r"""
+                SELECT
+                  migration_id
+                FROM
+                  _yoyo_migration
+                """)}
             if "0001-catalog-tables" in applied:
                 return
         if definition(conn) != expected:
             raise RuntimeError("Catalog differs from the reviewed baseline; automatic adoption is forbidden")
         metadata = dict(conn.execute(r"""
-            SELECT KEY,
-                   value
-            FROM metadata
-            WHERE KEY IN ('publication_state',
-                          'catalog_schema_version')
+            SELECT
+              KEY,
+              value
+            FROM
+              metadata
+            WHERE
+              KEY IN (
+                'publication_state',
+                'catalog_schema_version'
+              )
             """))
         if metadata != {"publication_state": "ready", "catalog_schema_version": "1"}:
             raise RuntimeError("Only a published schema version 1 can be adopted")

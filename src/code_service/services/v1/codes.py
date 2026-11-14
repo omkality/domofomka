@@ -5,8 +5,8 @@ import logging
 import re
 import sqlite3
 from collections.abc import Callable
-
-import aiosqlite
+from contextlib import closing
+from pathlib import Path
 
 from src.code_service.config import settings
 from src.code_service.services.v1 import index as source_index
@@ -47,6 +47,11 @@ async def _get_data_from_db(msg: str, *, accept_source: Callable[[str, str, str,
 
 
 async def scan_data_from_db(msg: str, *, accept_source: Callable[[str, str, str, str], bool] | None = None) -> dict:
+    """Прочитать SQLite вне цикла событий, сохранив асинхронный контракт v1."""
+    return await asyncio.to_thread(_scan_data_from_db, msg, accept_source=accept_source)
+
+
+def _scan_data_from_db(msg: str, *, accept_source: Callable[[str, str, str, str], bool] | None = None) -> dict:
     """Выполнить исходное чтение SQLite с прежними правилами совпадения адреса."""
     result: dict = {}
 
@@ -65,20 +70,24 @@ async def scan_data_from_db(msg: str, *, accept_source: Callable[[str, str, str,
     longest_word = max(msg_array, key=len).lower()
 
     try:
-        async with aiosqlite.connect(settings.db_name) as connection:
-            await connection.create_function("street_or_city_exists", 3, street_or_city_exists)
+        uri = Path(settings.db_name).resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True)) as connection:
+            connection.create_function("street_or_city_exists", 3, street_or_city_exists)
 
             query = r"""
-                SELECT *
-                FROM codes
-                WHERE street_or_city_exists(?, city, street)
+                SELECT
+                  *
+                FROM
+                  codes
+                WHERE
+                  street_or_city_exists(?, city, street)
                 """
 
             data = []
-            connection.row_factory = aiosqlite.Row
+            connection.row_factory = sqlite3.Row
 
-            async with connection.execute(query, (longest_word,)) as cursor:
-                async for row in cursor:
+            with closing(connection.execute(query, (longest_word,))) as cursor:
+                for row in cursor:
                     if address_exists(msg, row["city"], row["street"], row["house"], row["street_type"]):
                         data.append(row)
 

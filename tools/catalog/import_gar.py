@@ -44,7 +44,14 @@ def region_job(args):
     if target.exists():
         db = sqlite3.connect(target)
         try:
-            if db.execute("select value from metadata where key='schema'").fetchone() == ("4",):
+            if db.execute(r"""
+                SELECT
+                  value
+                FROM
+                  metadata
+                WHERE
+                  key = 'schema'
+                """).fetchone() == ("4",):
                 db.close()
                 return {"region": region, "resumed": True}
         except sqlite3.Error:
@@ -66,7 +73,9 @@ def region_job(args):
     for row in records(file("ADDR_OBJ")):
         if row.get("ISACTUAL") == "1" and row.get("ISACTIVE") == "1":
             db.execute(
-                "INSERT OR REPLACE INTO nodes VALUES(?,?,?,?)",
+                r"""
+                INSERT OR REPLACE INTO nodes VALUES (?, ?, ?, ?)
+                """,
                 (int(row["OBJECTID"]), row["NAME"], row["TYPENAME"], int(row["LEVEL"])),
             )
     db.commit()
@@ -80,15 +89,35 @@ def region_job(args):
                 number += additions.get(row.get("ADDTYPE" + n), "тип" + str(row.get("ADDTYPE" + n))) + row["ADDNUM" + n]
         if not number:
             continue
-        db.execute("INSERT OR REPLACE INTO houses VALUES(?,?,?)", (int(row["OBJECTID"]), row["OBJECTGUID"], number))
+        db.execute(
+            r"""
+            INSERT OR REPLACE INTO houses VALUES (?, ?, ?)
+            """,
+            (int(row["OBJECTID"]), row["OBJECTGUID"], number),
+        )
         count += 1
         if count % 50000 == 0:
             db.commit()
     db.commit()
-    wanted = {r[0] for r in db.execute("SELECT id FROM houses UNION SELECT id FROM nodes")}
+    wanted = {r[0] for r in db.execute(r"""
+        SELECT
+          id
+        FROM
+          houses
+        UNION
+        SELECT
+          id
+        FROM
+          nodes
+        """)}
     for row in records(file("ADM_HIERARCHY")):
         if row.get("ISACTIVE") == "1" and int(row["OBJECTID"]) in wanted:
-            db.execute("INSERT OR REPLACE INTO parents VALUES(?,?)", (int(row["OBJECTID"]), int(row["PARENTOBJID"])))
+            db.execute(
+                r"""
+                INSERT OR REPLACE INTO parents VALUES (?, ?)
+                """,
+                (int(row["OBJECTID"]), int(row["PARENTOBJID"])),
+            )
     db.commit()
     nodes = {r[0]: r[1:] for r in db.execute("SELECT * FROM nodes")}
     parents = dict(db.execute("SELECT * FROM parents"))
@@ -113,12 +142,23 @@ def region_job(args):
         display = ", ".join(dict.fromkeys([city, street_node[1] + " " + street, "дом " + number]))
         lineage = " ".join(dict.fromkeys(text(n[0]) for n in chain if n is not street_node))
         db.execute(
-            "INSERT OR REPLACE INTO buildings VALUES(?,?,?,?,?,?,?,?,?,?)",
+            r"""
+            INSERT OR REPLACE INTO buildings VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
             ("gar:" + guid, guid, display, city, street, house_key(number), text(street), text(city), region, lineage),
         )
         inserted += 1
-    db.execute("INSERT INTO metadata VALUES('complete',?)", (str(time.time()),))
-    db.execute("INSERT INTO metadata VALUES('schema','4')")
+    db.execute(
+        r"""
+        INSERT INTO metadata VALUES ('complete', ?)
+        """,
+        (str(time.time()),),
+    )
+    db.execute(r"""
+        INSERT INTO metadata VALUES ('schema', '4')
+        """)
     db.executescript("DROP TABLE houses; DROP TABLE parents; DROP TABLE nodes; VACUUM;")
     db.commit()
     db.close()

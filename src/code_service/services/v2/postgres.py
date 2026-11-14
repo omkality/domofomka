@@ -121,12 +121,17 @@ class PostgresCatalog(Catalog):
                 self._connection.deadline = deadline
                 if fresh:
                     metadata = {r["key"]: r["value"] for r in self._connection.execute(r"""
-                        SELECT KEY,
-                               value
-                        FROM metadata
-                        WHERE KEY IN ('catalog_schema_version',
-                                      'publication_state',
-                                      'source_catalog_sha256')
+                        SELECT
+                          KEY,
+                          value
+                        FROM
+                          metadata
+                        WHERE
+                          KEY IN (
+                            'catalog_schema_version',
+                            'publication_state',
+                            'source_catalog_sha256'
+                          )
                         """)}
                     if metadata.get("catalog_schema_version") != "1" or metadata.get("publication_state") != "ready":
                         raise ValueError("Incompatible or incomplete catalog")
@@ -159,7 +164,14 @@ class PostgresCatalog(Catalog):
     def vocabulary(self) -> list[str]:
         """Лениво загрузить словарь каталога один раз на экземпляр читателя."""
         with self.connect() as db:
-            return [row[0] for row in db.execute('SELECT term FROM vocabulary ORDER BY term COLLATE "C"')]
+            return [row[0] for row in db.execute(r"""
+                SELECT
+                  term
+                FROM
+                  vocabulary
+                ORDER BY
+                  term COLLATE "C"
+                """)]
 
     def vocabulary_terms(self) -> list[str]:
         """Получить близкие словарные формы без изменения числовых ограничений."""
@@ -171,11 +183,15 @@ class PostgresCatalog(Catalog):
             return (
                 db.execute(
                     r"""
-                SELECT 1
-                FROM streets
-                WHERE to_tsvector('simple', words) @@ to_tsquery('simple', %s)
-                    AND strpos(' ' || city_key || ' ', ' ' || %s || ' ') > 0
-                LIMIT 1
+                SELECT
+                  1
+                FROM
+                  streets
+                WHERE
+                  to_tsvector('simple', words) @@ to_tsquery('simple', %s)
+                  AND strpos(' ' || city_key || ' ', ' ' || %s || ' ') > 0
+                LIMIT
+                  1
                 """,
                     (self.token(word), word),
                 ).fetchone()
@@ -247,20 +263,33 @@ class PostgresCatalog(Catalog):
         with self.connect() as db:
             rows = db.execute(
                 r"""
-                SELECT b.*,
-                       s.words AS alias_words,
-                    (SELECT a.street_key
-                     FROM aliases a
-                     WHERE a.building_id = b.id
-                         AND a.house = s.house
-                         AND a.city_key || ' ' || a.street_key = s.words
-                     LIMIT 1) AS alias_street
-                FROM alias_search s
-                JOIN buildings b ON b.id = s.building_id
-                WHERE to_tsvector('simple', s.words) @@ to_tsquery('simple', %s)
-                    AND s.house = %s
-                ORDER BY s.seq
-                LIMIT %s
+                SELECT
+                  b.*,
+                  s.words AS alias_words,
+                  (
+                    SELECT
+                      a.street_key
+                    FROM
+                      aliases AS a
+                    WHERE
+                      a.building_id = b.id
+                      AND a.house = s.house
+                      AND a.city_key || ' ' || a.street_key = s.words
+                    LIMIT
+                      1
+                  ) AS alias_street
+                FROM
+                  alias_search AS s
+                INNER JOIN
+                  buildings AS b
+                  ON b.id = s.building_id
+                WHERE
+                  to_tsvector('simple', s.words) @@ to_tsquery('simple', %s)
+                  AND s.house = %s
+                ORDER BY
+                  s.seq
+                LIMIT
+                  %s
                 """,
                 (self.query(query.words.split(), True), query.house, self.candidate_limit),
             )
@@ -285,12 +314,17 @@ class PostgresCatalog(Catalog):
         with self.connect() as db:
             rows = db.execute(
                 r"""
-                SELECT city_key,
-                       street_key
-                FROM streets
-                WHERE to_tsvector('simple', words) @@ to_tsquery('simple', %s)
-                ORDER BY id
-                LIMIT 1000
+                SELECT
+                  city_key,
+                  street_key
+                FROM
+                  streets
+                WHERE
+                  to_tsvector('simple', words) @@ to_tsquery('simple', %s)
+                ORDER BY
+                  id
+                LIMIT
+                  1000
                 """,
                 (self.query(words, False),),
             )

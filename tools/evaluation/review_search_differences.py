@@ -67,7 +67,18 @@ def score_context_run(args):
         if row:
             with catalog.connect() as db:
                 row["aliases"] = [
-                    r[0] for r in db.execute("SELECT street_key FROM aliases WHERE building_id=?", (identifier,))
+                    r[0]
+                    for r in db.execute(
+                        r"""
+                    SELECT
+                      street_key
+                    FROM
+                      aliases
+                    WHERE
+                      building_id = ?
+                    """,
+                        (identifier,),
+                    )
                 ]
         return row
 

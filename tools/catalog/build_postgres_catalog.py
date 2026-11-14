@@ -54,7 +54,10 @@ def load(catalog: Path, full_catalog: Path, output: Path):
     output.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     with connect() as db:
-        if db.execute("SELECT to_regclass('public.buildings') AS name").fetchone()["name"]:
+        if db.execute(r"""
+            SELECT
+              to_regclass('public.buildings') AS name
+            """).fetchone()["name"]:
             raise FileExistsError("Preserve the loaded experiment; choose another isolated database")
         with closing(sqlite3.connect(f"file:{catalog.resolve().as_posix()}?mode=ro", uri=True)) as source:
             dsn = os.environ.get("CATALOG_BUILD_DSN") or os.environ["CATALOG_BENCHMARK_DSN"]
@@ -68,15 +71,23 @@ def load(catalog: Path, full_catalog: Path, output: Path):
                     "streets",
                     r"""
                 SELECT *
-                FROM streets
-                ORDER BY street_key COLLATE BINARY,city_key COLLATE BINARY,id
+                                FROM streets
+                                ORDER BY street_key COLLATE BINARY,city_key COLLATE BINARY,id
                 """,
                     ["text"] * 4 + ["int4"],
                 ),
                 ("street_houses", "SELECT * FROM street_houses", ["text", "bytea"]),
                 (
                     "alias_search",
-                    "SELECT rowid,building_id,house,words FROM alias_search",
+                    r"""
+                SELECT
+                  rowid,
+                  building_id,
+                  house,
+                  words
+                FROM
+                  alias_search
+                """,
                     ["int8", "text", "text", "text"],
                 ),
                 ("metadata", "SELECT * FROM metadata", ["text"] * 2),
@@ -84,8 +95,22 @@ def load(catalog: Path, full_catalog: Path, output: Path):
             ]:
                 counts[table] = copy_table(source, db, table, select, types)
         with closing(sqlite3.connect(f"file:{full_catalog.resolve().as_posix()}?mode=ro", uri=True)) as source:
-            expected = source.execute("SELECT value FROM metadata WHERE key='build'").fetchone()
-            actual = db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()
+            expected = source.execute(r"""
+                SELECT
+                  value
+                FROM
+                  metadata
+                WHERE
+                  key = 'build'
+                """).fetchone()
+            actual = db.execute(r"""
+                SELECT
+                  value
+                FROM
+                  metadata
+                WHERE
+                  key = 'build'
+                """).fetchone()
             if (json.loads(expected[0]) if expected else None) != (json.loads(actual["value"]) if actual else None):
                 raise ValueError("Compact catalog and provenance belong to different builds")
             counts["provenance"] = copy_table(
@@ -96,21 +121,36 @@ def load(catalog: Path, full_catalog: Path, output: Path):
         db.execute("CHECKPOINT")
         with catalog.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
-        db.execute("INSERT INTO metadata VALUES('source_catalog_sha256',%s)", (digest,))
-        db.execute("INSERT INTO metadata VALUES('catalog_schema_version','1')")
-        db.execute("INSERT INTO metadata VALUES('publication_state','ready')")
+        db.execute(
+            r"""
+            INSERT INTO metadata VALUES ('source_catalog_sha256', %s)
+            """,
+            (digest,),
+        )
+        db.execute(r"""
+            INSERT INTO metadata VALUES ('catalog_schema_version', '1')
+            """)
+        db.execute(r"""
+            INSERT INTO metadata VALUES ('publication_state', 'ready')
+            """)
         report = {
             "source_sha256": digest,
             "source_bytes": catalog.stat().st_size,
             "rows": counts,
             "seconds": round(time.perf_counter() - started, 2),
-            "database_bytes": db.execute("SELECT pg_database_size(current_database()) AS n").fetchone()["n"],
+            "database_bytes": db.execute(r"""
+            SELECT
+              pg_database_size(current_database()) AS n
+            """).fetchone()["n"],
             "tables": db.execute(r"""
-            SELECT relname,
-                   pg_total_relation_size(relid) AS total_bytes,
-                   pg_indexes_size(relid) AS index_bytes
-            FROM pg_stat_user_tables
-            ORDER BY relname
+            SELECT
+              relname,
+              pg_total_relation_size(relid) AS total_bytes,
+              pg_indexes_size(relid) AS index_bytes
+            FROM
+              pg_stat_user_tables
+            ORDER BY
+              relname
             """).fetchall(),
             "settings": {
                 key: db.execute("SHOW " + key).fetchone()[key]

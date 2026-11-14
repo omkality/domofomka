@@ -26,12 +26,20 @@ def mappings(db: sqlite3.Connection) -> tuple[list[dict], dict]:
     """Подготовить только однозначно проверенные перенаправления исходных адресов."""
     db.row_factory = sqlite3.Row
     rows = db.execute(r"""
-        SELECT b.*
-        FROM buildings b
-        JOIN
-            (SELECT DISTINCT building_id
-             FROM codes) c ON c.building_id = b.id
-        WHERE b.guid IS NULL
+        SELECT
+          b.*
+        FROM
+          buildings AS b
+        INNER JOIN
+          (
+            SELECT DISTINCT
+              building_id
+            FROM
+              codes
+          ) AS c
+          ON c.building_id = b.id
+        WHERE
+          b.guid IS NULL
         """).fetchall()
     wanted = {key(row["city_key"], row["street_key"]) for row in rows if len(row["street_key"].split()) > 1}
     variants = collections.defaultdict(set)
@@ -46,12 +54,16 @@ def mappings(db: sqlite3.Connection) -> tuple[list[dict], dict]:
             for name in variants_for_street
             if db.execute(
                 r"""
-            SELECT 1
-            FROM buildings
-            WHERE city_key = ?
-                AND street_key = ?
-                AND guid IS NOT NULL
-            LIMIT 1
+            SELECT
+              1
+            FROM
+              buildings
+            WHERE
+              city_key = ?
+              AND street_key = ?
+              AND guid IS NOT NULL
+            LIMIT
+              1
             """,
                 (identity[0], name),
             ).fetchone()
@@ -72,14 +84,17 @@ def mappings(db: sqlite3.Connection) -> tuple[list[dict], dict]:
         candidates = []
         for target in db.execute(
             r"""
-            SELECT id,
-                   guid,
-                   display
-            FROM buildings
-            WHERE city_key = ?
-                AND street_key = ?
-                AND house = ?
-                AND guid IS NOT NULL
+            SELECT
+              id,
+              guid,
+              display
+            FROM
+              buildings
+            WHERE
+              city_key = ?
+              AND street_key = ?
+              AND house = ?
+              AND guid IS NOT NULL
             """,
             (row["city_key"], canonical, row["house"]),
         ):
@@ -125,7 +140,7 @@ def apply(
     with closing(sqlite3.connect(work)) as db:
         db.executescript("PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; PRAGMA cache_size=-524288;")
         db.execute(r"""
-            CREATE INDEX IF NOT EXISTS provenance_building ON provenance(building_id)
+            CREATE INDEX IF NOT EXISTS provenance_building ON provenance (building_id)
             """)
         before = db.execute("SELECT count(*) FROM provenance").fetchone()[0]
         for link in links:
@@ -135,12 +150,15 @@ def apply(
                 INSERT
                 OR
                 IGNORE INTO codes
-                SELECT ?,
-                       entrance,
-                       kind,
-                       code
-                FROM codes
-                WHERE building_id = ?
+                SELECT
+                  ?,
+                  entrance,
+                  kind,
+                  code
+                FROM
+                  codes
+                WHERE
+                  building_id = ?
                 """,
                 (new, old),
             )
@@ -150,28 +168,56 @@ def apply(
                 INSERT
                 OR
                 IGNORE INTO aliases
-                SELECT ?,
-                       city_key,
-                       street_key,
-                       house
-                FROM aliases
-                WHERE building_id = ?
+                SELECT
+                  ?,
+                  city_key,
+                  street_key,
+                  house
+                FROM
+                  aliases
+                WHERE
+                  building_id = ?
                 """,
                 (new, old),
             )
             db.execute("DELETE FROM aliases WHERE building_id=?", (old,))
             db.execute(
-                "UPDATE provenance SET building_id=?,resolution=? WHERE building_id=?",
+                r"""
+                UPDATE provenance SET building_id = ?, resolution = ?
+                WHERE
+                  building_id = ?
+                """,
                 (new, link.get("resolution", resolution), old),
             )
-            db.execute("DELETE FROM buildings WHERE id=? AND guid IS NULL", (old,))
+            db.execute(
+                r"""
+                DELETE
+                FROM
+                  buildings
+                WHERE
+                  id = ? AND guid IS NULL
+                """,
+                (old,),
+            )
         assert db.execute("SELECT count(*) FROM provenance").fetchone()[0] == before
         index_streets(db)
-        stats = json.loads(db.execute("SELECT value FROM metadata WHERE key='build'").fetchone()[0])
+        stats = json.loads(db.execute(r"""
+            SELECT
+              value
+            FROM
+              metadata
+            WHERE
+              key = 'build'
+            """).fetchone()[0])
         stats.update(
             normalization_schema=max(schema_version, stats.get("normalization_schema", 0)),
             unique_codes=db.execute("SELECT count(*) FROM codes").fetchone()[0],
-            buildings_with_codes=db.execute("SELECT count(DISTINCT building_id) FROM codes").fetchone()[0],
+            buildings_with_codes=db.execute(r"""
+            SELECT
+              count(DISTINCT building_id)
+            FROM
+              codes
+            """).fetchone()[0],
             street_documents=db.execute("SELECT count(*) FROM streets").fetchone()[0],
         )
         prefix = {"gar_street_word_order": "street_order", "gar_source_field_alignment": "source_fields"}.get(
@@ -180,20 +226,42 @@ def apply(
         stats[prefix + "_linked_groups"] = stats.get(prefix + "_linked_groups", 0) + len(links)
         stats[prefix + "_linked_source_rows"] = db.execute(
             r"""
-            SELECT count(*)
-            FROM provenance
-            WHERE resolution = ?
-                OR substr(resolution, 1, ?) = ?
+            SELECT
+              count(*)
+            FROM
+              provenance
+            WHERE
+              resolution = ?
+              OR substr(resolution, 1, ?) = ?
             """,
             (resolution, len(resolution) + 1, resolution + "_"),
         ).fetchone()[0]
-        previous_redirects = db.execute("SELECT value FROM metadata WHERE key='building_redirects'").fetchone()
+        previous_redirects = db.execute(r"""
+            SELECT
+              value
+            FROM
+              metadata
+            WHERE
+              key = 'building_redirects'
+            """).fetchone()
         redirects = json.loads(previous_redirects[0]) if previous_redirects else {}
         remap = {link["source"]: link["target"] for link in links}
         redirects = {old: remap.get(target, target) for old, target in redirects.items()}
         redirects.update(remap)
-        db.execute("INSERT OR REPLACE INTO metadata VALUES('building_redirects',?)", (json.dumps(redirects),))
-        db.execute("UPDATE metadata SET value=? WHERE key='build'", (json.dumps(stats),))
+        db.execute(
+            r"""
+            INSERT OR REPLACE INTO metadata VALUES ('building_redirects', ?)
+            """,
+            (json.dumps(redirects),),
+        )
+        db.execute(
+            r"""
+            UPDATE metadata SET value = ?
+            WHERE
+              key = 'build'
+            """,
+            (json.dumps(stats),),
+        )
         db.commit()
         assert db.execute("PRAGMA quick_check").fetchone()[0] == "ok"
     work.replace(output)

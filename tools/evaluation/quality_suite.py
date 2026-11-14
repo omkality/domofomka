@@ -22,31 +22,43 @@ def prepare(catalog: Path, output: Path):
     cities = collections.Counter()
     with closing(sqlite3.connect(f"file:{catalog.resolve().as_posix()}?mode=ro", uri=True)) as db:
         rows = db.execute(r"""
-            SELECT b.id,
-                   b.display,
-                   b.city,
-                   b.street,
-                   b.house,
-                   b.city_key,
-                   b.street_key
-            FROM buildings b
-            JOIN
-                (SELECT DISTINCT building_id
-                 FROM codes) c ON c.building_id = b.id
-            WHERE b.guid IS NOT NULL
-            ORDER BY b.id
+            SELECT
+              b.id,
+              b.display,
+              b.city,
+              b.street,
+              b.house,
+              b.city_key,
+              b.street_key
+            FROM
+              buildings AS b
+            INNER JOIN
+              (
+                SELECT DISTINCT
+                  building_id
+                FROM
+                  codes
+              ) AS c
+              ON c.building_id = b.id
+            WHERE
+              b.guid IS NOT NULL
+            ORDER BY
+              b.id
             """)
         for bid, display, city, street, house, ck, sk in rows:
             if cities[city] >= 2:
                 continue
             identities = db.execute(
                 r"""
-                SELECT count(DISTINCT id)
-                FROM buildings
-                WHERE city_key = ?
-                    AND street_key = ?
-                    AND house = ?
-                    AND guid IS NOT NULL
+                SELECT
+                  count(DISTINCT id)
+                FROM
+                  buildings
+                WHERE
+                  city_key = ?
+                  AND street_key = ?
+                  AND house = ?
+                  AND guid IS NOT NULL
                 """,
                 (ck, sk, house),
             ).fetchone()[0]
@@ -222,7 +234,17 @@ def review_evaluate(catalog: Path, output: Path):
                 with engine.connect() as db:
                     streets = [
                         r[0]
-                        for r in db.execute("SELECT street_key FROM aliases WHERE building_id=?", (building["id"],))
+                        for r in db.execute(
+                            r"""
+                        SELECT
+                          street_key
+                        FROM
+                          aliases
+                        WHERE
+                          building_id = ?
+                        """,
+                            (building["id"],),
+                        )
                     ]
             else:
                 building = address_fields(option["address"])
