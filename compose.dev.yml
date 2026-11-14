@@ -1,136 +1,21 @@
+# Общие сервисы определены один раз; здесь только отличия dev.
+# !override требует Docker Compose >= 2.24.4 и не подмешивает .env prod.
 name: domofomka-dev
-x-logging: &id001
-  driver: json-file
-  options:
-    max-size: ${DOCKER_LOG_MAX_SIZE:-10m}
-    max-file: ${DOCKER_LOG_MAX_FILES:-3}
 services:
   queue:
-    image: postgres:17.11-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
-    command:
-    - postgres
-    - -c
-    - shared_buffers=${QUEUE_SHARED_BUFFERS:-32MB}
-    - -c
-    - work_mem=${QUEUE_WORK_MEM:-2MB}
-    - -c
-    - maintenance_work_mem=${QUEUE_MAINTENANCE_WORK_MEM:-16MB}
-    - -c
-    - autovacuum_max_workers=${QUEUE_AUTOVACUUM_WORKERS:-1}
-    - -c
-    - max_connections=${QUEUE_MAX_CONNECTIONS:-30}
-    - -c
-    - max_wal_size=${QUEUE_MAX_WAL_SIZE:-128MB}
-    - -c
-    - min_wal_size=${QUEUE_MIN_WAL_SIZE:-32MB}
-    - -c
-    - temp_file_limit=${QUEUE_TEMP_FILE_LIMIT:-128MB}
-    init: true
-    ulimits:
-      core:
-        soft: 0
-        hard: 0
-    restart: always
-    mem_limit: ${QUEUE_MEM_LIMIT:-192m}
-    memswap_limit: ${QUEUE_MEMSWAP_LIMIT:-256m}
-    pids_limit: ${QUEUE_PIDS_LIMIT:-64}
-    logging: *id001
-    environment:
-      POSTGRES_DB: domofomka
-      POSTGRES_USER: domofomka
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-    volumes:
-    - queue-data:/var/lib/postgresql/data
-    healthcheck:
-      test:
-      - CMD-SHELL
-      - pg_isready -U domofomka -d domofomka
-      interval: ${QUEUE_HEALTH_INTERVAL:-5s}
-      timeout: ${QUEUE_HEALTH_TIMEOUT:-3s}
-      retries: ${QUEUE_HEALTH_RETRIES:-10}
+    extends:
+      file: docker-compose.yml
+      service: queue
   api:
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    read_only: true
-    tmpfs:
-    - /tmp:size=16m,mode=1777
-    build:
-      context: .
-      dockerfile: Dockerfile.api
-    init: true
-    ulimits:
-      core:
-        soft: 0
-        hard: 0
-    restart: always
-    mem_limit: ${API_MEM_LIMIT:-384m}
-    memswap_limit: ${API_MEMSWAP_LIMIT:-512m}
-    pids_limit: ${API_PIDS_LIMIT:-128}
-    logging: *id001
-    command: uv run --frozen granian --interface asgi src.code_service.app:app --host ${API_HOST:-0.0.0.0}
-      --port ${API_PORT:-8000} --workers ${WORKERS_NUM:-1} --log --access-log
-    environment:
-      PYTHONDONTWRITEBYTECODE: '1'
-      SEARCH_CATALOG_PATH: ${SEARCH_CATALOG_PATH:-/backend/catalog/serving.db}
-      OPENSEARCH_URL: ${OPENSEARCH_URL:-}
-      POSTGRES_PASSWORD: ''
-      QUEUE_DATABASE_URL: ''
-      VK_GROUP_TOKEN: ''
-    env_file:
-    - ${DOMOFOMKA_ENV_FILE:-.env.dev}
-    ports:
-    - 127.0.0.1:${API_PUBLISH_PORT:-${DEV_API_PORT:-18000}}:${API_PORT:-8000}
-    volumes:
-    - ./src:/backend/src:ro
-    - ./codes.db:/backend/codes.db:ro
-    - ./artifacts/search:/backend/catalog:ro
-    depends_on: {}
-    healthcheck:
-      test:
-      - CMD
-      - python
-      - -c
-      - |
-        import http.client, os
-        client = http.client.HTTPConnection('127.0.0.1', int(os.environ.get('API_PORT', '8000')))
-        client.request('GET', '/version')
-        assert client.getresponse().status == 200
-      interval: ${API_HEALTH_INTERVAL:-20s}
-      timeout: ${API_HEALTH_TIMEOUT:-5s}
-      retries: ${API_HEALTH_RETRIES:-5}
-      start_period: ${API_HEALTH_START_PERIOD:-60s}
+    extends:
+      file: docker-compose.yml
+      service: api
+    env_file: !override ['${DOMOFOMKA_ENV_FILE:-.env.dev}']
+    ports: !override ['127.0.0.1:${API_PUBLISH_PORT:-${DEV_API_PORT:-18000}}:${API_PORT:-8000}']
   vkbot:
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    read_only: true
-    tmpfs:
-    - /tmp:size=16m,mode=1777
-    build:
-      context: .
-      dockerfile: Dockerfile.vkbot
-    init: true
-    ulimits:
-      core:
-        soft: 0
-        hard: 0
-    restart: always
-    mem_limit: ${BOT_MEM_LIMIT:-128m}
-    memswap_limit: ${BOT_MEMSWAP_LIMIT:-192m}
-    pids_limit: ${BOT_PIDS_LIMIT:-64}
-    logging: *id001
-    command: uv run --frozen python -m src.vkbot.main
-    environment:
-      PYTHONDONTWRITEBYTECODE: '1'
-      SEARCH_API_VERSION: ${SEARCH_API_VERSION:-v2}
-    env_file:
-    - ${DOMOFOMKA_ENV_FILE:-.env.dev}
-    volumes:
-    - ./src:/backend/src:ro
-    - ./start_message.txt:/backend/start_message.txt:ro
-    depends_on:
-      queue:
-        condition: service_healthy
-      api:
-        condition: service_healthy
+    extends:
+      file: docker-compose.yml
+      service: vkbot
+    env_file: !override ['${DOMOFOMKA_ENV_FILE:-.env.dev}']
 volumes:
-  queue-data: null
+  queue-data:

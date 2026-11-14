@@ -47,8 +47,6 @@ ignore = [
     "PT023", # `@pytest.fixture` without value is not allowed
     "D415", # First line should end with a period, question mark, or exclamation point
     "D205", # 1 blank line required between summary line and description
-    "ANN101", # Missing type annotation for `self` in method
-    "ANN102", # Missing type annotation for `cls` in method
     "ANN204", # Missing return type annotation for `__init__`
     "ANN401", # Dynamically typed expressions (typing.Any) are disallowed in `run_coroutine`
     "SIM102", # Use a single `if` statement instead of nested `if` statements
@@ -87,16 +85,6 @@ combine-as-imports = true
 # Pydocstyle configuration
 [lint.pydocstyle]
 convention = "google"
-
-# Flake8-bugbear configuration
-[lint.flake8-bugbear]
-extend-immutable-calls = [
-    "fastapi.Depends",
-    "fastapi.Query",
-    "fastapi.Path",
-    "fastapi.Header",
-    "fastapi.Body"
-]
 
 # Pylint configuration
 [lint.pylint]

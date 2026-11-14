@@ -8,22 +8,14 @@ services:
     image: postgres:17.11-alpine@sha256:3540c0362c809df084ffac0ae69fe794515f9de92692f02178bcdce0ef0302ac
     command:
     - postgres
-    - -c
-    - shared_buffers=${QUEUE_SHARED_BUFFERS:-32MB}
-    - -c
-    - work_mem=${QUEUE_WORK_MEM:-2MB}
-    - -c
-    - maintenance_work_mem=${QUEUE_MAINTENANCE_WORK_MEM:-16MB}
-    - -c
-    - autovacuum_max_workers=${QUEUE_AUTOVACUUM_WORKERS:-1}
-    - -c
-    - max_connections=${QUEUE_MAX_CONNECTIONS:-30}
-    - -c
-    - max_wal_size=${QUEUE_MAX_WAL_SIZE:-128MB}
-    - -c
-    - min_wal_size=${QUEUE_MIN_WAL_SIZE:-32MB}
-    - -c
-    - temp_file_limit=${QUEUE_TEMP_FILE_LIMIT:-128MB}
+    - --shared_buffers=${QUEUE_SHARED_BUFFERS:-32MB}
+    - --work_mem=${QUEUE_WORK_MEM:-2MB}
+    - --maintenance_work_mem=${QUEUE_MAINTENANCE_WORK_MEM:-16MB}
+    - --autovacuum_max_workers=${QUEUE_AUTOVACUUM_WORKERS:-1}
+    - --max_connections=${QUEUE_MAX_CONNECTIONS:-30}
+    - --max_wal_size=${QUEUE_MAX_WAL_SIZE:-128MB}
+    - --min_wal_size=${QUEUE_MIN_WAL_SIZE:-32MB}
+    - --temp_file_limit=${QUEUE_TEMP_FILE_LIMIT:-128MB}
     init: true
     ulimits:
       core:
@@ -42,8 +34,12 @@ services:
     - queue-data:/var/lib/postgresql/data
     healthcheck:
       test:
-      - CMD-SHELL
-      - pg_isready -U domofomka -d domofomka
+      - CMD
+      - pg_isready
+      - -U
+      - domofomka
+      - -d
+      - domofomka
       interval: ${QUEUE_HEALTH_INTERVAL:-5s}
       timeout: ${QUEUE_HEALTH_TIMEOUT:-3s}
       retries: ${QUEUE_HEALTH_RETRIES:-10}
@@ -66,7 +62,7 @@ services:
     memswap_limit: ${API_MEMSWAP_LIMIT:-512m}
     pids_limit: ${API_PIDS_LIMIT:-128}
     logging: *id001
-    command: uv run --frozen granian --interface asgi src.code_service.app:app --host ${API_HOST:-0.0.0.0}
+    command: /backend/.venv/bin/granian --interface asgi src.code_service.app:app --host ${API_HOST:-0.0.0.0}
       --port ${API_PORT:-8000} --workers ${WORKERS_NUM:-1} --log --access-log
     environment:
       PYTHONDONTWRITEBYTECODE: '1'
@@ -87,13 +83,13 @@ services:
     healthcheck:
       test:
       - CMD
-      - python
-      - -c
-      - |
-        import http.client, os
-        client = http.client.HTTPConnection('127.0.0.1', int(os.environ.get('API_PORT', '8000')))
-        client.request('GET', '/version')
-        assert client.getresponse().status == 200
+      - wget
+      - -q
+      - -T
+      - ${API_HEALTH_REQUEST_TIMEOUT_SECONDS:-3}
+      - -O
+      - /dev/null
+      - http://127.0.0.1:${API_PORT:-8000}/version
       interval: ${API_HEALTH_INTERVAL:-20s}
       timeout: ${API_HEALTH_TIMEOUT:-5s}
       retries: ${API_HEALTH_RETRIES:-5}
@@ -117,7 +113,7 @@ services:
     memswap_limit: ${BOT_MEMSWAP_LIMIT:-192m}
     pids_limit: ${BOT_PIDS_LIMIT:-64}
     logging: *id001
-    command: uv run --frozen python -m src.vkbot.main
+    command: /backend/.venv/bin/python -m src.vkbot.main
     environment:
       PYTHONDONTWRITEBYTECODE: '1'
       SEARCH_API_VERSION: ${SEARCH_API_VERSION:-v2}

@@ -3,6 +3,7 @@
 import importlib
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from tempfile import TemporaryFile
@@ -25,6 +26,10 @@ def main() -> None:
         stream.write(b"bounded temporary storage")
     for module in modules:
         importlib.import_module(module)
+    assert shutil.which("uv") is None, "Build tools must stay in the build stage"
+    assert shutil.which("uvx") is None, "Build tools must stay in the build stage"
+    unused = "vkbot" if sys.argv[1] == "api" else "code_service"
+    assert not Path("src", unused).exists(), "Do not package the other application"
     print(json.dumps({"uid": os.getuid(), "capabilities": 0, "no_new_privileges": True, "root_readonly": True}))
 
 
