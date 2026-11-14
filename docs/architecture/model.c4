@@ -23,6 +23,9 @@ model {
   actions = external 'GitHub Actions и GHCR' {
     description 'Проверяет код и документацию, собирает образы, публикует неизменяемые digest и разворачивает dev. Prod выпускается отдельно.'
   }
+  documentation = external 'Документация GitHub Pages' {
+    description 'Публичный статический сайт Astro/Starlight и LikeC4. Проверенная сборка публикуется после push dev; ресурсы VDS не используются.'
+  }
 
   domofomka = system 'domofomka' {
     bot = container 'Бот VK' {
@@ -97,6 +100,8 @@ model {
   domofomka.api.geo -> dadata 'Координаты → адрес'
   domofomka.api.geo -> domofomka.api.v2 'Тот же текстовый поиск'
   maintainer -> actions 'Изменение dev'
+  actions -> documentation 'Проверенный статический сайт'
+  maintainer -> documentation 'Читает статьи и схемы'
   actions -> domofomka.api 'Проверенный образ'
   actions -> domofomka.bot 'Проверенный образ'
   domofomka.postgres.catalog.buildings -> domofomka.postgres.catalog.entrances '1 : N'
@@ -112,7 +117,7 @@ model {
 views {
   view index {
     title 'L1 · Контекст domofomka'
-    include user, maintainer, vk, dadata, proxy, actions, domofomka
+    include user, maintainer, vk, dadata, proxy, actions, documentation, domofomka
     style domofomka { size xlarge }
   }
   view containers of domofomka {
