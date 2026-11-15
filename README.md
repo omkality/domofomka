@@ -1,5 +1,17 @@
 # domofomka
 
+[![Release](https://img.shields.io/github/v/release/omkality/domofomka?logo=github&label=release)](https://github.com/omkality/domofomka/releases/latest)
+[![CI master](https://img.shields.io/github/actions/workflow/status/omkality/domofomka/dev-tests.yml?branch=master&event=push&label=CI%20master&logo=githubactions&logoColor=white)](https://github.com/omkality/domofomka/actions/workflows/dev-tests.yml?query=branch%3Amaster+event%3Apush)
+[![CI dev](https://img.shields.io/github/actions/workflow/status/omkality/domofomka/dev-tests.yml?branch=dev&event=push&label=CI%20dev&logo=githubactions&logoColor=white)](https://github.com/omkality/domofomka/actions/workflows/dev-tests.yml?query=branch%3Adev+event%3Apush)
+[![Документация](https://img.shields.io/badge/docs-GitHub%20Pages-222222?logo=astro&logoColor=white)](https://omkality.github.io/domofomka/)
+
+[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Litestar 2](https://img.shields.io/badge/Litestar-2-EDB641)](https://litestar.dev/)
+[![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![SQLite 3](https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
+[![RapidFuzz](https://img.shields.io/badge/RapidFuzz-3E8B91)](https://rapidfuzz.github.io/RapidFuzz/)
+[![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+
 Бот для поиска кодов домофонов по адресу.
 Технологии рабочего окружения: *Litestar*, *Granian*, *PostgreSQL* (`tsvector` / GIN для кандидатов v2, очередь и диагностика), *RapidFuzz* (опечатки и ранжирование), *SQLite* (источник v1), *VK API*.
 
