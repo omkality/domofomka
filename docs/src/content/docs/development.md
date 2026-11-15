@@ -116,7 +116,7 @@ SQL-тесты запускают PostgreSQL через Testcontainers и исп
 uv sync --frozen --all-groups
 uv run --frozen --all-groups pre-commit install
 uv run --frozen --all-groups pre-commit run --all-files
-uv run --frozen --all-groups python -m pytest
+uv run --frozen --all-groups python -m pytest -n 2
 ```
 
 `.env.example` задаёт общий порядок и состав полей; `.env.dev.example` отличается
@@ -148,13 +148,16 @@ rollback вокруг теста не подменяет работу незав
 
 ```powershell
 uv sync --frozen --all-groups
-uv run --frozen --all-groups python -X utf8 -m pytest
+uv run --frozen --all-groups python -X utf8 -m pytest -n 2
 ```
 
 `pytest-xdist` находится только в группе зависимостей `dev`. Число процессов
 задаётся явно: `pytest -n 2` или `pytest -n 4`; `pytest -n 0` выполняет проверки
 последовательно без worker. `-n auto` не используется: он может создать лишние
 контейнеры PostgreSQL. Тесты запускаются на ПК или GitHub-hosted runner, а не на VDS.
+Полный набор в CI запускается с двумя worker. Обычный `pytest` без `-n` остаётся
+последовательным, что удобно для короткой выборки и отладки. Два процесса выбраны
+по [сравнению длительности и ресурсов](research/pytest-xdist-2026-11-15.md).
 
 Внешний DSN SQL-тестам не передаётся; `TEST_QUEUE_DATABASE_URL` больше не используется.
 Недоступный Docker означает ошибку интеграционной фикстуры, а не успешный прогон

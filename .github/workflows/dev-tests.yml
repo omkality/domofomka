@@ -145,7 +145,7 @@ jobs:
         env:
           TEST_API_IMAGE: domofomka-api-check
           TEST_VKBOT_IMAGE: domofomka-bot-check
-        run: uv run --frozen --all-groups python -m pytest -q -p no:cacheprovider
+        run: uv run --frozen --all-groups python -m pytest -q -n 2 -p no:cacheprovider
       - name: Check runtime imports and least privilege
         run: |
           docker run --rm -i --network none --read-only --tmpfs /tmp:size=16m --cap-drop ALL --security-opt no-new-privileges -e API_HOST -e API_PORT -e DB_NAME -e DADATA_TOKEN domofomka-api-check python - api < tools/operations/check_runtime_image.py
