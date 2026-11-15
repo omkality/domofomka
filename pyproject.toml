@@ -27,6 +27,7 @@ dev = [
     "sqlparse>=0.6.1,<0.7",
     "sqlfluff>=4.5,<5",
     "testcontainers>=4.15,<5",
+    "pytest-xdist>=3.8,<4",
 ]
 migrations = [
     "psycopg[binary]>=3.3.6,<4",
