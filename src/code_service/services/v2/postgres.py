@@ -473,9 +473,9 @@ class PostgresCatalog(Ranker):
                 query, variants, list({row["id"]: row for row in [*(candidates or []), *cheap]}.values())
             )
             selected = self.canonical_selection(query, fast, cheap_by_id)
-            if self.can_use_coded_selection(query, selected):
+            if selected:
                 return fast
-            if not selected and self.joined_pairs(query):
+            if self.joined_pairs(query):
                 variants.extend(
                     await asyncio.to_thread(
                         super().joined_variants, query, candidates or [], await self.vocabulary_terms()
