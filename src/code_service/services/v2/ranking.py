@@ -190,13 +190,10 @@ class Ranker:
             if coded:
                 name = literal_name_tokens(query.name_words or query.words)
                 homonyms = {row["id"] for row in close if name in street_name_keys(row)}
-                if len(homonyms) > 1 and len(homonyms & coded) == 1:
-                    return {
-                        "status": "incomplete_query",
-                        "fallback_rejected": "ambiguous_locality",
-                        "data": {},
-                        "engine": "v2",
-                    }
+                coded_homonyms = homonyms & coded
+                if len(homonyms) > 1 and len(coded_homonyms) == 1:
+                    # A street-and-house query may prefer the sole exact address with codes.
+                    coded = coded_homonyms
                 close = [row for row in close if row["id"] in coded]
             else:
                 return {"status": "no_codes_ambiguous", "data": {}, "engine": "v2"}
@@ -239,11 +236,6 @@ class Ranker:
         if any(row is None or not complete_name_match(query, row) for row in rows):
             return []
         return [row for row in rows if row is not None]
-
-    @staticmethod
-    def can_use_coded_selection(query: Query, rows: list[dict]) -> bool:
-        """Потребовать проверку домов без кодов перед автоматическим выбором без города."""
-        return len(rows) > 1 or bool(rows and whole_location_match(query, rows[0]["city"], rows[0]["street"]))
 
     @staticmethod
     def format_answer(building: dict, rows: list, entrance: str | None = None) -> dict:

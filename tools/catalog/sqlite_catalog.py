@@ -440,10 +440,9 @@ class SqliteCatalog(Ranker):
             query, variants, list({r["id"]: r for r in [*(candidates or []), *cheap]}.values())
         )
         selected = self.canonical_selection(query, fast, cheap_by_id)
-        if self.can_use_coded_selection(query, selected):
+        if selected:
             return fast
-        if not selected:
-            variants.extend(self.joined_variants(query, candidates or []))
+        variants.extend(self.joined_variants(query, candidates or []))
         indexed = [row for variant in variants for row in [*self.candidates(variant), *self.alias_candidates(variant)]]
         all_candidates = list({r["id"]: r for r in [*(candidates or []), *indexed, *cheap]}.values())
         result = self._resolve_candidates(query, variants, all_candidates)

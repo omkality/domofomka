@@ -525,13 +525,16 @@ async def test_http_postgres_cache_without_sqlite_catalog_and_building_endpoint(
         building = (await client.get("/api/v2/buildings/a")).json()
         assert building["data"] == first["data"]
         assert (await client.get("/api/v2/buildings/missing")).status_code == 404
-        homonym = (await client.get("/api/v2/codes/msg", params={"message": "Коломенская 2"})).json()
-        assert homonym == {
-            "status": "incomplete_query",
-            "fallback_rejected": "ambiguous_locality",
-            "data": {},
-            "engine": "v2",
-        }
+        homonym = (await client.get("/api/v2/codes/msg", params={"message": "Коломенская 2 подъезд 8"})).json()
+        assert homonym["status"] == "found"
+        assert homonym["engine"] == "v2"
+        assert homonym["building_id"] == "homonym"
+        assert homonym["address"] == "Подольск, улица Коломенская, дом 2"
+        assert homonym["requested_entrance"] == "8"
+        specified_city = (await client.get("/api/v2/codes/msg", params={"message": "Москва Коломенская 2"})).json()
+        assert specified_city["status"] == "no_codes"
+        assert specified_city["address"] == "Москва, улица Коломенская, дом 2"
+        assert specified_city["data"] == {}
         fallback.assert_not_called()
         monkeypatch.setattr(settings, "catalog_database_url", SecretStr("postgresql://unused@127.0.0.1:1/unavailable"))
         monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)
