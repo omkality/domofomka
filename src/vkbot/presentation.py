@@ -26,11 +26,26 @@ def code_answer(result: dict, entrance: str) -> str:
     return f"{result['address']}\nПодъезд {entrance}\n" + "\n".join(lines)
 
 
+def restrict_entrance(result: dict, entrance: str | None) -> dict:
+    """Оставить в ответе данные только явно запрошенного подъезда."""
+    if entrance is None or not result.get("data"):
+        return result
+    codes = result["data"].get(entrance)
+    if codes:
+        return dict(result, requested_entrance=entrance, data={entrance: codes})
+    return dict(result, status="no_entrance_codes", requested_entrance=entrance, data={})
+
+
 def building_answer(result: dict) -> str:
-    """Показать адрес и сразу раскрыть коды единственного подъезда."""
+    """Показать адрес, выбранный подъезд и наличие его кодов."""
     data = result.get("data", {})
     if len(data) == 1:
         return code_answer(result, next(iter(data)))
+    if result.get("status") == "no_entrance_codes":
+        return (
+            f"{result['address']}\nПодъезд {result['requested_entrance']}"
+            "\nПо этому подъезду кодов в нашей базе пока нет."
+        )
     if not data:
         return result["address"] + "\nПо этому адресу кодов в нашей базе пока нет."
     return result["address"]

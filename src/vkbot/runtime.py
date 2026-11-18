@@ -7,7 +7,6 @@ import logging
 import time
 from typing import Any
 
-from vk_api import VkApi
 from vk_api.bot_longpoll import VkBotLongPoll
 
 from src.infrastructure.network import network_settings
@@ -17,7 +16,7 @@ from src.infrastructure.telemetry import (
     settings as telemetry_settings,
     span,
 )
-from src.vkbot.http import RateGate, RateSession, call_vk
+from src.vkbot.http import VK_RATE_LIMIT_CODES, RateGate, RateSession, VkApi, call_vk
 from src.vkbot.processor import Processor
 from src.vkbot.queue import QueueStore, event_record, retry_delay, safe_error
 from src.vkbot.recovery import Reconciler
@@ -154,8 +153,15 @@ class Runtime:
 
         def create() -> VkBotLongPoll:
             """Запросить сервер Long Poll в потоке синхронного VK SDK."""
-            vk = VkApi(token=self.settings.vk_group_token, api_version="5.199", session=RateSession(self.gate))
-            poll = VkBotLongPoll(vk=vk, group_id=self.store.group_id, wait=network_settings.vk_longpoll_wait_seconds)
+            session = RateSession(self.gate)
+            try:
+                vk = VkApi(token=self.settings.vk_group_token, api_version="5.199", session=session)
+                poll = VkBotLongPoll(
+                    vk=vk, group_id=self.store.group_id, wait=network_settings.vk_longpoll_wait_seconds
+                )
+            except Exception:
+                session.close()
+                raise
             poll.session.close()
             poll.session = RateSession(self.gate, longpoll=True)
             return poll
@@ -198,10 +204,8 @@ class Runtime:
                         await call_vk(vk.messages.sendMessageEventAnswer, **params)
                 except Exception as exc:
                     logger.info("Callback acknowledgement unavailable error=%s", safe_error(exc))
-                    if getattr(exc, "code", None) in {6, 9, 29}:
-                        await self.store.set_state(
-                            "vk_paused_until", time.time() + self.settings.vk_error_pause_seconds
-                        )
+                    if getattr(exc, "code", None) in VK_RATE_LIMIT_CODES:
+                        await self.store.pause_vk_until(time.time() + self.settings.vk_error_pause_seconds)
                         break
         finally:
             session.close()
@@ -212,6 +216,10 @@ class Runtime:
         while True:
             try:
                 if poll is None:
+                    remaining = (await self.store.get_state("vk_paused_until", 0)) - time.time()
+                    if remaining > 0:
+                        await asyncio.sleep(remaining)
+                        continue
                     poll = await self._longpoll()
                 events = await asyncio.to_thread(poll.check)
                 records = []
@@ -246,6 +254,10 @@ class Runtime:
                 raise
             except Exception as exc:
                 logger.warning("Long Poll unavailable error=%s", safe_error(exc))
+                if getattr(exc, "code", None) in VK_RATE_LIMIT_CODES:
+                    await self.store.pause_vk_until(time.time() + self.settings.vk_error_pause_seconds)
+                    await asyncio.sleep(self.settings.vk_error_pause_seconds)
+                    continue
                 await asyncio.sleep(network_settings.bot_restart_delay_seconds)
 
     async def _reconcile(self) -> None:
@@ -255,10 +267,16 @@ class Runtime:
         try:
             while True:
                 try:
+                    remaining = (await self.store.get_state("vk_paused_until", 0)) - time.time()
+                    if remaining > 0:
+                        await asyncio.sleep(remaining)
+                        continue
                     added = await reconciler.run()
                     logger.info("History reconciliation complete inserted=%d", added)
                 except Exception as exc:
                     logger.warning("History reconciliation deferred error=%s", safe_error(exc))
+                    if getattr(exc, "code", None) in VK_RATE_LIMIT_CODES:
+                        await self.store.pause_vk_until(time.time() + self.settings.vk_error_pause_seconds)
                 await asyncio.sleep(self.settings.recovery_interval_seconds)
         finally:
             await processor.close()
@@ -309,12 +327,11 @@ class Runtime:
                             self.settings.queue_retry_base_seconds,
                             self.settings.queue_retry_max_seconds,
                         )
-                        await self.store.fail(table, job, safe_error(exc), delay, permanent)
-                        if code in {5, 6, 9, 27, 29}:
-                            await self.store.set_state(
-                                "vk_paused_until",
+                        if code in VK_RATE_LIMIT_CODES or code in {5, 27}:
+                            await self.store.pause_vk_until(
                                 time.time() + max(self.settings.vk_error_pause_seconds, delay),
                             )
+                        await self.store.fail(table, job, safe_error(exc), delay, permanent)
                         logger.warning(
                             "Queue job deferred queue=%s id=%s permanent=%s error=%s",
                             table,

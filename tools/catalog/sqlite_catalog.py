@@ -13,7 +13,6 @@ from rapidfuzz.fuzz import ratio
 from rapidfuzz.process import extract
 
 from src.code_service.services.v2.constraints import (
-    complete_name_match,
     has_misaligned_source_fields,
     locality_prefix_match,
     whole_location_match,
@@ -440,16 +439,11 @@ class SqliteCatalog(Ranker):
         fast = self._resolve_candidates(
             query, variants, list({r["id"]: r for r in [*(candidates or []), *cheap]}.values())
         )
-        selected = (
-            [fast["building_id"]]
-            if fast["status"] == "found"
-            else [r["building_id"] for r in fast.get("candidates", [])]
-        )
-        if selected and all((row := cheap_by_id.get(bid)) and complete_name_match(query, row) for bid in selected):
-            # Only a complete canonical name permits this shortcut. A source
-            # alias may explain split words; joined candidates must be read too.
+        selected = self.canonical_selection(query, fast, cheap_by_id)
+        if self.can_use_coded_selection(query, selected):
             return fast
-        variants.extend(self.joined_variants(query, candidates or []))
+        if not selected:
+            variants.extend(self.joined_variants(query, candidates or []))
         indexed = [row for variant in variants for row in [*self.candidates(variant), *self.alias_candidates(variant)]]
         all_candidates = list({r["id"]: r for r in [*(candidates or []), *indexed, *cheap]}.values())
         result = self._resolve_candidates(query, variants, all_candidates)

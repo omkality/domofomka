@@ -103,6 +103,17 @@ async def test_back_restores_original_page_after_selection_and_code(processor, e
 
 
 @pytest.mark.asyncio
+async def test_address_selection_retains_explicit_entrance_and_back_button(processor):
+    result = dict(choices(), requested_entrance="8")
+    (effect,) = await click(processor, result, {"select_building": 6})
+    assert "Подъезд 8" in effect["params"]["message"]
+    assert "По этому подъезду кодов" in effect["params"]["message"]
+    assert "TEST" not in effect["params"]["message"]
+    assert payload_for(effect, "return_to_choices") == {"return_to_choices": True}
+    assert effect["context"]["data"] == {}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("count", [0, 1, 7, 8, 10, 13, 100])
 async def test_selected_building_paginates_entrances_and_keeps_back(processor, count):
     processor._get.return_value.json.return_value = {

@@ -192,6 +192,7 @@ def test_legacy_readiness_uses_v1_dependencies_without_starting_another_collecto
 @pytest.mark.parametrize("engine", ["v1", "v2"])
 def test_v2_readiness_uses_http_and_rejects_a_masked_catalog_failure(tmp_path, monkeypatch, engine):
     import http.client
+    from urllib.parse import parse_qs, urlsplit
 
     deployment, _, release, _ = prepare(tmp_path)
     probes = []
@@ -225,7 +226,9 @@ def test_v2_readiness_uses_http_and_rejects_a_masked_catalog_failure(tmp_path, m
         exec(probes[0], {})
     assert len(requested) == (2 if engine == "v1" else 3)
     assert requested[0] == ("GET", "/version")
-    assert requested[1][1].startswith("/api/v2/codes/msg?")
+    lookup = urlsplit(requested[1][1])
+    assert lookup.path == "/api/v2/codes/msg"
+    assert parse_qs(lookup.query) == {"message": ["Королёв, улица Мичурина, дом 1А"]}
     if engine == "v2":
         assert requested[2] == ("GET", "/api/v2/buildings/gar%3Atest")
 

@@ -1,6 +1,6 @@
 """Replay a dialog-split corpus against an exact in-memory v1 snapshot and v2.
 
-Snapshot selection mirrors the unchanged legacy matcher, without scanning one
+Snapshot selection mirrors the current v1 matcher, without scanning one
 million identical street/code rows for every query. Only aggregate metrics publish.
 """
 
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import httpx
 
-from src.code_service.services.v1.matching import STREET_TYPES, address_exists
+from src.code_service.services.v1.matching import STREET_TYPES, address_exists, select_addresses
 from src.code_service.services.v2.normalize import address_words, legacy_house_matches, parse_query
 from src.code_service.services.v2.opensearch import search_body
 from tools.catalog.sqlite_catalog import SqliteCatalog
@@ -85,8 +85,8 @@ def initialize(legacy: str, catalog_path: str, opensearch_url: str = "", query_c
             )
 
 
-def legacy_lookup(message: str, *, accept_source: Callable[[tuple], bool] | None = None) -> str | None:
-    """Воспроизвести прежнее совпадение v1 на неизменённых исходных группах."""
+def legacy_lookup(message: str, *, accept_source: Callable[[str, str, str, str], bool] | None = None) -> str | None:
+    """Воспроизвести текущее совпадение v1 на неизменённых исходных группах."""
     if not message:
         return None
     parts = re.split("[^а-я]", message)
@@ -99,19 +99,11 @@ def legacy_lookup(message: str, *, accept_source: Callable[[tuple], bool] | None
     if word not in legacy_cache:
         legacy_cache[word] = [r for r in legacy_groups if word in r[1].lower() or word in r[3].lower()]
     rows = [r for r in legacy_cache[word] if address_exists(message, r[1], r[3], r[4], r[2])]
-    if not rows:
-        return None
-    city = min((r[1] for r in rows), key=len)
-    selected = [r for r in rows if city in r[1]]
-    if accept_source:
-        first = selected[0]
-        if not accept_source(city, first[2], first[3], first[4]):
-            return None
-        selected = [r for r in selected if accept_source(r[1], r[2], r[3], r[4])]
+    selected = select_addresses(message, (row[1:] for row in rows), accept_source)
     if not selected:
         return None
-    r = selected[0]
-    return f"{city}, {r[2]} {r[3]}, дом {r[4]}"
+    _, city, kind, street, house = next(row for row in rows if row[1:] in selected)
+    return f"{city}, {kind} {street}, дом {house}"
 
 
 def evaluate(record: dict) -> dict:

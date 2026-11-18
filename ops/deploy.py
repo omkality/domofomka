@@ -477,7 +477,7 @@ info=json.loads(r.read()); assert info['name']=='domofomka'
         else:
             probe += """
 from urllib.parse import quote,urlencode
-c.request('GET','/api/v2/codes/msg?'+urlencode({'message':'мичурина 1а'}))
+c.request('GET','/api/v2/codes/msg?'+urlencode({'message':'Королёв, улица Мичурина, дом 1А'}))
 r=c.getresponse(); assert r.status==200
 result=json.loads(r.read())
 assert result['status']=='found' and result['engine']=='v2'

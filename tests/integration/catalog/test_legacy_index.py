@@ -31,7 +31,7 @@ async def test_source_scan_uses_read_only_connection_outside_event_loop(tmp_path
         return connection
 
     monkeypatch.setattr(sqlite3, "connect", connect)
-    answer = await scan_data_from_db("перерва 62к1")
+    answer = await scan_data_from_db("Москва перерва 62к1")
     assert answer["data"] == {"2": [("A", "test")]}
     assert len(calls) == 1
     worker, uri, options = calls[0]
@@ -107,11 +107,11 @@ async def test_index_preserves_codes_order_duplicates_and_legacy_matching(tmp_pa
             "Парнас заречная 33",
             [("Санкт-Петербург", "ЗАРЕЧНАЯ", "ПАРНАС33"), ("Санкт-Петербург, ЗАРЕЧНАЯ УЛ.", "ПАРНАС", "33")],
             False,
-            ["A", "B"],
+            [],
         ),
     ],
 )
-async def test_opt_in_fallback_checks_each_source_group_without_changing_v1(
+async def test_legacy_search_does_not_join_different_source_addresses(
     tmp_path, monkeypatch, with_index, query, addresses, whole_location, retained
 ):
     source, index = tmp_path / "source.db", tmp_path / "index.db"
@@ -132,11 +132,45 @@ async def test_opt_in_fallback_checks_each_source_group_without_changing_v1(
     monkeypatch.setattr(settings, "db_name", str(source))
     monkeypatch.setattr(settings, "legacy_index_path", str(index))
     original = await get_data_from_db(query)
-    assert [code for code, _ in original["data"]["1"]] == ["A", "B"]
     accept = partial(legacy_source_matches, query, whole_location=whole_location)
     filtered = await get_data_from_db(query, accept_source=accept)
-    assert [code for code, _ in filtered["data"]["1"]] == retained
-    assert await get_data_from_db(query) == original
+    assert [code for code, _ in filtered.get("data", {}).get("1", [])] == retained
+    assert all(len(result.get("data", {}).get("1", [])) <= 1 for result in [original, filtered])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("with_index", [False, True])
+async def test_explicit_city_does_not_inherit_another_city_and_bare_street_asks_for_city(
+    tmp_path, monkeypatch, with_index
+):
+    from src.code_service.services.v2 import search
+
+    source, index = tmp_path / "source.db", tmp_path / "index.db"
+    with sqlite3.connect(source) as db:
+        db.execute(
+            "CREATE TABLE codes(id INTEGER PRIMARY KEY,city TEXT,street_type TEXT,street TEXT,house TEXT,"
+            "entrance TEXT,code_type TEXT,code TEXT)"
+        )
+        db.executemany(
+            "INSERT INTO codes VALUES(?,?,?,?,?,?,?,?)",
+            [
+                (1, "Новый Синтоград", "улица", "Макетная", "17", "1", "test", "other"),
+                (2, "Синтоград", "улица", "Макетная", "17", "1", "test", "first"),
+                (3, "Синтоград", "улица", "Макетная", "17", "1", "test", "second"),
+            ],
+        )
+    if with_index:
+        build(source, index)
+    monkeypatch.setattr(settings, "db_name", str(source))
+    monkeypatch.setattr(settings, "legacy_index_path", str(index))
+    monkeypatch.setattr(settings, "catalog_database_url", None)
+    for find in [get_data_from_db, search.uncached_lookup]:
+        explicit = await find("Синтоград, улица Макетная, дом 17")
+        assert explicit["address"] == "Синтоград, улица Макетная, дом 17"
+        assert explicit["data"] == {"1": [("first", "test"), ("second", "test")]}
+        ambiguous = await find("Макетная 17")
+        assert ambiguous["status"] == "incomplete_query"
+        assert ambiguous["data"] == {}
 
 
 @pytest.mark.parametrize(

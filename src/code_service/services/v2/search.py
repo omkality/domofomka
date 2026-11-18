@@ -110,8 +110,14 @@ async def uncached_lookup(message: str) -> dict:
             result = await catalog.resolve(message, candidates)
             detail["result"] = search_result(result)
         note(result=search_result(result))
-        recoverable_incomplete = result["status"] == "incomplete_query" and bool(parse_query(message).house)
+        recoverable_incomplete = (
+            result["status"] == "incomplete_query"
+            and not result.get("fallback_rejected")
+            and bool(parse_query(message).house)
+        )
         if result["status"] != "not_found" and not recoverable_incomplete:
+            if result["status"] == "ambiguous" and (entrance := parse_query(message).entrance) is not None:
+                return dict(result, requested_entrance=entrance)
             return result
         whole_location = result.get("fallback_rejected") == "known_street_without_requested_house"
         reason = result["status"]
@@ -135,11 +141,13 @@ async def uncached_lookup(message: str) -> dict:
             return rejected
     answer = dict(
         result,
-        status="found" if result.get("data") else "not_found",
+        status=result.get("status", "found" if result.get("data") else "not_found"),
         engine="v1",
         fallback_reason=reason,
         data=result.get("data", {}),
     )
+    if answer["status"] == "found" and (entrance := parse_query(message).entrance) is not None:
+        answer["requested_entrance"] = entrance
     note(result=search_result(answer))
     return answer
 

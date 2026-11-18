@@ -10,10 +10,22 @@ from urllib.parse import urlsplit
 
 from requests import Response, Session
 from requests.exceptions import ConnectionError, ConnectTimeout, ProxyError, Timeout
+from vk_api import VkApi as SDKVkApi
+from vk_api.exceptions import ApiError
 
 from src.infrastructure.network import network_settings
 from src.infrastructure.proxy import proxy_health
 from src.infrastructure.telemetry import active, measured, span
+
+VK_RATE_LIMIT_CODES = frozenset({6, 9, 29})
+
+
+class VkApi(SDKVkApi):
+    """Оставить повтор после ограничения VK планировщику приложения."""
+
+    def too_many_rps_handler(self, error: ApiError) -> None:
+        """Передать первое ограничение вызывающей корутине без ожидания в SDK."""
+        raise error
 
 
 async def call_vk[T](operation: Callable[..., T], *args: Any, **kwargs: Any) -> T:

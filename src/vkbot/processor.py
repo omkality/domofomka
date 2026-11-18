@@ -6,11 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from vk_api import VkApi
 
 from src.infrastructure.network import network_settings, tls_context
 from src.infrastructure.telemetry import active, measured, merge, note, search_result, span
-from src.vkbot.http import RateGate, RateSession, call_vk
+from src.vkbot.http import RateGate, RateSession, VkApi, call_vk
 from src.vkbot.keyboard import (
     INLINE_BUTTON_LIMIT,
     get_location_keyboard,
@@ -22,6 +21,7 @@ from src.vkbot.presentation import (
     building_answer,
     code_answer,
     inline_keyboard,
+    restrict_entrance,
     selected_keyboard,
 )
 from src.vkbot.queue import QueueStore
@@ -150,6 +150,7 @@ class Processor:
             geo = message.get("geo", {}).get("coordinates")
             try:
                 result = await self.lookup(message.get("text"), geo)
+                result = restrict_entrance(result, result.get("requested_entrance"))
                 note(result=search_result(result))
                 if active():
                     from src.vkbot.telemetry import identity
@@ -226,13 +227,11 @@ class Processor:
                         ),
                     }
                 )
-            elif result.get("status") == "no_codes":
+            elif result.get("status") in {"no_codes", "no_entrance_codes"}:
                 effects.append(
                     {
                         "method": "send",
-                        "params": dict(
-                            base, message=f"{result['address']}\nПо этому адресу кодов в нашей базе пока нет."
-                        ),
+                        "params": dict(base, message=building_answer(result)),
                     }
                 )
             elif result.get("status") == "ambiguous":
@@ -435,7 +434,7 @@ class Processor:
                 return
             if response.status_code != 200:
                 raise LookupUnavailable("Building lookup unavailable")
-            answer = response.json()
+            answer = restrict_entrance(response.json(), result.get("requested_entrance"))
             answer = dict(answer, _address_choice=navigation)
             if active():
                 packet = answer.pop("_diagnostics", None)
