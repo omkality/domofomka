@@ -6,8 +6,27 @@ from unittest.mock import patch
 import pytest
 from requests import Response, Session
 from requests.exceptions import ReadTimeout
+from vk_api.exceptions import ApiError
 
-from src.vkbot.http import TimeoutSession
+from src.vkbot.http import RateGate, RateSession, TimeoutSession, VkApi, call_vk
+
+
+@pytest.mark.asyncio
+async def test_sdk_rate_limit_returns_first_error_to_scheduler_without_sleep():
+    response = Response()
+    response.status_code = 200
+    response._content = b'{"error":{"error_code":6,"error_msg":"Too many requests"}}'
+    with (
+        RateSession(RateGate(0)) as session,
+        patch.object(Session, "send", return_value=response) as send,
+        patch("vk_api.vk_api.time.sleep") as sleep,
+    ):
+        vk = VkApi(token="synthetic", session=session)
+        with pytest.raises(ApiError) as error:
+            await call_vk(vk.method, "messages.send", {"peer_id": 1, "random_id": 23})
+    assert error.value.code == 6
+    send.assert_called_once()
+    sleep.assert_not_called()
 
 
 def test_vk_api_calls_have_connect_and_read_timeouts() -> None:

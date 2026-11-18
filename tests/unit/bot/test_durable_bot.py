@@ -223,6 +223,23 @@ async def test_single_entrance_codes_are_sent_without_a_button(processor, geo):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("entrance", ["1", "8"])
+async def test_explicit_entrance_is_respected_before_automatic_reply(processor, entrance):
+    processor.lookup = AsyncMock(
+        return_value={"address": "Тестовый адрес", "data": {"1": [["CONTROL", "test"]]}, "requested_entrance": entrance}
+    )
+    await processor.plan(
+        {"kind": "message_new", "peer_id": 100, "payload": {"message": {"text": f"адрес 17 подъезд {entrance}"}}}
+    )
+    (effect,) = processor.store.plan.call_args.args[1]
+    assert f"Подъезд {entrance}" in effect["params"]["message"]
+    assert ("CONTROL" in effect["params"]["message"]) == (entrance == "1")
+    assert bool(effect.get("automatic_code")) == (entrance == "1")
+    if entrance == "8":
+        assert "По этому подъезду кодов" in effect["params"]["message"]
+
+
+@pytest.mark.asyncio
 async def test_last_batch_with_one_of_many_entrances_still_requires_selection(processor):
     result = {"address": "Адрес", "data": {str(i): [["TEST", "test"]] for i in range(11)}}
     processor.lookup = AsyncMock(return_value=result)
@@ -390,7 +407,7 @@ async def test_vk_limit_on_callback_ack_pauses_all_requests_without_immediate_re
         ]
     )
     client.get_api.return_value.messages.sendMessageEventAnswer.assert_called_once()
-    runtime.store.set_state.assert_called_once_with("vk_paused_until", 130)
+    runtime.store.pause_vk_until.assert_awaited_once_with(130)
 
 
 @pytest.mark.asyncio
@@ -449,7 +466,7 @@ async def test_acknowledgement_flood_response_pauses_vk_and_stops_batch(
     ]
     await runtime._acknowledge(events)
     client.get_api.return_value.messages.sendMessageEventAnswer.assert_called_once()
-    assert runtime.store.set_state.call_args.args[0] == "vk_paused_until"
+    runtime.store.pause_vk_until.assert_awaited_once()
 
 
 @pytest.mark.asyncio

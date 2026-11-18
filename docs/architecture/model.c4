@@ -35,12 +35,12 @@ model {
       planner = component 'Планирование ответа' { description 'processor.py: запрос к HTTP API, выбор адреса и подъезда, подготовка эффектов без отправки.' }
       presentation = component 'Текст и клавиатуры' { description 'presentation.py и keyboard.py: чистые функции; лимит кнопок, отмена, возврат к адресам.' }
       sender = component 'Доставка' { description 'Асинхронный processor.py deliver: постоянный random_id для send; повтор того же edit; async-транзакция завершения после подтверждения. Лимит соединений QueueStore задаёт QUEUE_DB_MAX_CONCURRENT.' }
-      transport = component 'Транспорт VK' { description 'http.py: sync SDK vk-api / requests в потоках, общий RateGate, ограниченные повторы и маршрутизация. Отмена worker ждёт завершения начатого запроса SDK.' }
+      transport = component 'Транспорт VK' { description 'http.py: sync SDK vk-api / requests в потоках, общий RateGate, ограниченные сетевые повторы и маршрутизация. Код 6 передаётся планировщику для общей паузы и отложенной попытки. Отмена worker ждёт завершения начатого запроса SDK.' }
       policy = component 'Лимиты пользователя' { description 'queue.py: ограничения входящих и исходящих задач по peer_id; объединение лишних ожидающих запросов.' }
     }
     api = container 'HTTP-сервис кодов' {
       description 'main.py собирает Litestar / Granian; api/routes/v1 и v2 связывают HTTP с отдельными services/v1 и v2.'
-      v2 = component 'Поиск v2' { description 'services/v2: нормализация → кандидаты → точная проверка города и дома → ранжирование RapidFuzz.' }
+      v2 = component 'Поиск v2' { description 'services/v2: нормализация → кандидаты → точная проверка города и дома → ранжирование RapidFuzz. Если один адрес с кодами совпал с одноимённым домом без кодов, требуется уточнение города.' }
       reader = component 'Чтение каталога' { description 'Рабочий v2 всегда использует PostgresCatalog: одно асинхронное соединение Psycopg на процесс, роль только для чтения, дедлайны и проверка ревизии. Общий ранжировщик выполняет CPU-работу вне цикла событий; SQLite-эталон находится в tools вне рабочего API.' }
       cache = component 'Ограниченный кеш' { description 'Процессный TTL/LRU с пределами количества и байтов; ключ включает ревизию каталога и параметры поиска.' }
       v1 = component 'Совместимый поиск v1' { description 'services/v1: SQLite-индекс кандидатов; при его недоступности — исходный поиск. Fallback v2 проверяет идентичность адреса.' }

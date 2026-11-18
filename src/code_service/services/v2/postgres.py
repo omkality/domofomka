@@ -14,7 +14,6 @@ from rapidfuzz.fuzz import ratio
 from rapidfuzz.process import extract
 
 from src.code_service.services.v2.constraints import (
-    complete_name_match,
     has_misaligned_source_fields,
     locality_prefix_match,
     whole_location_match,
@@ -473,14 +472,10 @@ class PostgresCatalog(Ranker):
             fast = await self._resolve_candidates(
                 query, variants, list({row["id"]: row for row in [*(candidates or []), *cheap]}.values())
             )
-            selected = (
-                [fast["building_id"]]
-                if fast["status"] == "found"
-                else [row["building_id"] for row in fast.get("candidates", [])]
-            )
-            if selected and all((row := cheap_by_id.get(id)) and complete_name_match(query, row) for id in selected):
+            selected = self.canonical_selection(query, fast, cheap_by_id)
+            if self.can_use_coded_selection(query, selected):
                 return fast
-            if self.joined_pairs(query):
+            if not selected and self.joined_pairs(query):
                 variants.extend(
                     await asyncio.to_thread(
                         super().joined_variants, query, candidates or [], await self.vocabulary_terms()

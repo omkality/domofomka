@@ -589,6 +589,19 @@ class QueueStore:
         async with self.connect() as conn:
             await self._state(conn, name, value)
 
+    async def pause_vk_until(self, deadline: float) -> None:
+        """Обновить общую паузу VK, сохраняя более поздний дедлайн."""
+        async with self.connect() as conn:
+            await conn.execute(
+                r"""
+                INSERT INTO bot_state (group_id, name, value)
+                VALUES (%s, 'vk_paused_until', %s)
+                ON CONFLICT (group_id, name) DO UPDATE
+                  SET value = GREATEST(bot_state.value, excluded.value)
+                """,
+                (self.group_id, Jsonb(deadline)),
+            )
+
     async def _state(self, conn: psycopg.AsyncConnection[DictRow], name: str, value: Any) -> None:
         """Обновить именованное состояние в текущей транзакции."""
         await conn.execute(

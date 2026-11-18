@@ -257,13 +257,16 @@ def test_street_number_is_not_a_missing_house(message, catalog):
     assert catalog.resolve(message)["status"] == "incomplete_query"
 
 
-def test_one_coded_address_opens_without_listing_empty_houses(catalog):
+def test_same_address_in_two_cities_requires_clarification_even_with_one_coded_house(catalog):
     with sqlite3.connect(catalog.path) as db:
         db.execute("DELETE FROM codes WHERE building_id='c'")
     answer = catalog.resolve("Перерва 62к1")
-    assert answer["status"] == "found"
-    assert answer["building_id"] == "a"
+    assert answer["status"] == "incomplete_query"
+    assert answer["fallback_rejected"] == "ambiguous_locality"
+    assert answer["data"] == {}
     assert "candidates" not in answer
+    assert catalog.resolve("Москва Перерва 62к1")["building_id"] == "a"
+    assert catalog.resolve("Подольск Перерва 62к1")["status"] == "no_codes"
 
 
 def test_only_coded_candidates_are_offered(catalog):

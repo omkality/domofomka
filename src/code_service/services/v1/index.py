@@ -9,7 +9,7 @@ from contextlib import closing
 from functools import lru_cache
 from pathlib import Path
 
-from src.code_service.services.v1.matching import STREET_TYPES, address_exists
+from src.code_service.services.v1.matching import STREET_TYPES, address_exists, select_addresses
 from src.infrastructure.telemetry import measured, span
 
 
@@ -80,14 +80,10 @@ def lookup(
             ]
         if not matching:
             return {}
-        city = min((r[1] for r in matching), key=len)
-        selected = [r for r in matching if city in r[1]]
-        if accept_source:
-            first = selected[0]
-            if not accept_source(city, first[2], first[3], first[4]):
-                return {}
-            selected = [r for r in selected if accept_source(r[1], r[2], r[3], r[4])]
-        ids = [r[0] for r in selected]
+        selected = select_addresses(message, (r[1:] for r in matching), accept_source)
+        if selected is None:
+            return {"status": "incomplete_query", "data": {}}
+        ids = [r[0] for r in matching if r[1:] in selected]
         source_ids = []
         for gid in ids:
             source_ids.extend(
@@ -113,7 +109,7 @@ def lookup(
         for offset in range(0, len(source_ids), 500):
             batch = source_ids[offset : offset + 500]
             rows.extend(db.execute("SELECT * FROM codes WHERE id IN (" + ",".join("?" for _ in batch) + ")", batch))
-        for _, _, kind, street, house, entrance, code_type, code in sorted(rows, key=lambda r: r[0]):
+        for _, city, kind, street, house, entrance, code_type, code in sorted(rows, key=lambda r: r[0]):
             result.setdefault("address", f"{city}, {kind} {street}, дом {house}")
             result.setdefault("data", {}).setdefault(entrance, []).append((code, code_type))
     return result

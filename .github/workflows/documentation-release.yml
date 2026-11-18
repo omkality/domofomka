@@ -38,7 +38,7 @@ jobs:
         run: npm ci --engine-strict --ignore-scripts --no-fund
       - name: Audit documentation dependencies
         working-directory: docs
-        run: npm audit --audit-level=moderate
+        run: npm run audit:dependencies
       - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - name: Fetch releases, validate and build the site
         working-directory: docs

@@ -504,6 +504,15 @@ async def test_http_postgres_cache_without_sqlite_catalog_and_building_endpoint(
     monkeypatch.setattr(settings, "search_cache_ttl_seconds", 120)
     fallback = AsyncMock(return_value={"data": {}})
     monkeypatch.setattr(search, "get_data_from_db", fallback)
+    with importer.connect() as db:
+        db.execute("""
+            INSERT INTO buildings VALUES
+            ('homonym', 'homonym', 'Подольск, улица Коломенская, дом 2',
+             'Подольск', 'Коломенская', '2', 'коломенская', 'подольск', '50', 'подольск')
+            """)
+        db.execute("INSERT INTO entrances VALUES ('homonym','1')")
+        db.execute("INSERT INTO codes VALUES ('homonym','1','source','HOMONYM-CONTROL')")
+        db.execute("INSERT INTO streets VALUES ('homonym','подольск','коломенская','подольск коломенская',1)")
     search.result_cache.entries.clear()
     async with AsyncTestClient(app) as client:
         first = (await client.get("/api/v2/codes/msg", params={"message": "Москва Перерва 62к1"})).json()
@@ -516,6 +525,13 @@ async def test_http_postgres_cache_without_sqlite_catalog_and_building_endpoint(
         building = (await client.get("/api/v2/buildings/a")).json()
         assert building["data"] == first["data"]
         assert (await client.get("/api/v2/buildings/missing")).status_code == 404
+        homonym = (await client.get("/api/v2/codes/msg", params={"message": "Коломенская 2"})).json()
+        assert homonym == {
+            "status": "incomplete_query",
+            "fallback_rejected": "ambiguous_locality",
+            "data": {},
+            "engine": "v2",
+        }
         fallback.assert_not_called()
         monkeypatch.setattr(settings, "catalog_database_url", SecretStr("postgresql://unused@127.0.0.1:1/unavailable"))
         monkeypatch.setattr(settings, "search_cache_ttl_seconds", 0)

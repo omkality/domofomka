@@ -5,12 +5,16 @@ import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from urllib.parse import parse_qs
 
 import pytest
+from requests import Response, Session
 
 from src.infrastructure.network import network_settings
+from src.vkbot.http import RateGate
 from src.vkbot.processor import Processor
 from src.vkbot.queue import QueueStore, event_record
+from src.vkbot.runtime import Runtime
 
 
 def incoming(store: QueueStore, number: int = 1) -> dict:
@@ -66,6 +70,70 @@ async def test_async_transactions_respect_connection_limit(store):
     await asyncio.gather(*(query() for _ in range(network_settings.queue_db_max_concurrent * 2)))
     assert maximum == network_settings.queue_db_max_concurrent
     assert active == 0
+
+
+@pytest.mark.asyncio
+async def test_vk_pause_cannot_be_shortened_by_a_concurrent_response(store):
+    await asyncio.gather(*(store.pause_vk_until(deadline) for deadline in (120, 140, 130)))
+    assert await store.get_state("vk_paused_until") == 140
+    await store.pause_vk_until(129)
+    assert await store.get_state("vk_paused_until") == 140
+
+
+@pytest.mark.asyncio
+async def test_vk_error_six_releases_worker_and_defers_persisted_send(store, monkeypatch):
+    await store.ingest([incoming(store)])
+    await store.plan(await store.claim("bot_inbox"), [{"method": "send", "params": {"peer_id": 10}}])
+    sent = []
+    deferred = asyncio.Event()
+    fail = store.fail
+
+    def send(_session, request, **_options: object):
+        sent.append(parse_qs(request.body)["random_id"][0])
+        response = Response()
+        response.status_code = 200
+        response._content = b'{"error":{"error_code":6,"error_msg":"Too many requests"}}'
+        return response
+
+    async def save_failure(table, job, error, delay, permanent):
+        await fail(table, job, error, delay, permanent)
+        deferred.set()
+
+    monkeypatch.setattr(Session, "send", send)
+    monkeypatch.setattr(store, "fail", save_failure)
+    runtime = object.__new__(Runtime)
+    runtime.store = store
+    runtime.gate = RateGate(0)
+    runtime.settings = SimpleNamespace(
+        vk_group_token="synthetic",
+        dev_faults_enabled=False,
+        queue_poll_seconds=0.01,
+        queue_lease_seconds=3,
+        queue_heartbeat_min_seconds=1,
+        queue_retry_base_seconds=5,
+        queue_retry_max_seconds=30,
+        vk_error_pause_seconds=30,
+    )
+    task = asyncio.create_task(runtime._worker("bot_outbox", 0))
+    try:
+        await asyncio.wait_for(deferred.wait(), timeout=5)
+        assert await store.get_state("vk_paused_until") > time.time()
+        assert await store.claim("bot_outbox") is None
+        async with store.connect() as db:
+            job = await (
+                await db.execute(
+                    "SELECT id, status, attempts, owner, result FROM bot_outbox WHERE group_id=%s", (store.group_id,)
+                )
+            ).fetchone()
+        assert sent == [str(job["id"])]
+        assert job["status"] == "pending"
+        assert job["attempts"] == 1
+        assert job["owner"] is None
+        assert job["result"] is None
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
 
 @pytest.mark.asyncio

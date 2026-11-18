@@ -10,7 +10,7 @@ from pathlib import Path
 
 from src.code_service.config import settings
 from src.code_service.services.v1 import index as source_index
-from src.code_service.services.v1.matching import STREET_TYPES, address_exists, street_or_city_exists
+from src.code_service.services.v1.matching import STREET_TYPES, address_exists, select_addresses, street_or_city_exists
 from src.infrastructure.telemetry import note, search_result, span
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ async def get_data_from_db(msg: str, *, accept_source: Callable[[str, str, str, 
             note(v1_validation="source_identity")
         result = await _get_data_from_db(msg, accept_source=accept_source)
         detail["result"] = search_result(
-            dict(result, status="found" if result.get("data") else "not_found", engine="v1")
+            dict(result, status=result.get("status", "found" if result.get("data") else "not_found"), engine="v1")
         )
         return result
 
@@ -81,6 +81,8 @@ def _scan_data_from_db(msg: str, *, accept_source: Callable[[str, str, str, str]
                   codes
                 WHERE
                   street_or_city_exists(?, city, street)
+                ORDER BY
+                  id
                 """
 
             data = []
@@ -91,29 +93,13 @@ def _scan_data_from_db(msg: str, *, accept_source: Callable[[str, str, str, str]
                     if address_exists(msg, row["city"], row["street"], row["house"], row["street_type"]):
                         data.append(row)
 
-            if data:
-                shortest_city = data[0][1]
-                for _id, city, *_ in data:
-                    if len(city) < len(shortest_city):
-                        shortest_city = city
-
-                checked = {}
-                if accept_source:
-                    first = next(row for row in data if shortest_city in row["city"])
-                    if not accept_source(shortest_city, first["street_type"], first["street"], first["house"]):
-                        return {}
-
-                for _id, city, street_type, street, house, entrance, code_type, code in data:
-                    if shortest_city in city:
-                        if accept_source:
-                            identity = (city, street_type, street, house)
-                            if identity not in checked:
-                                checked[identity] = accept_source(city, street_type, street, house)
-                            if not checked[identity]:
-                                continue
-                        result.setdefault("address", f"{shortest_city}, {street_type} {street}, дом {house}")
-                        result.setdefault("data", {})
-                        result["data"].setdefault(entrance, []).append((code, code_type))
+            selected = select_addresses(msg, (row[1:5] for row in data), accept_source)
+            if selected is None:
+                return {"status": "incomplete_query", "data": {}}
+            for _id, city, street_type, street, house, entrance, code_type, code in data:
+                if (city, street_type, street, house) in selected:
+                    result.setdefault("address", f"{city}, {street_type} {street}, дом {house}")
+                    result.setdefault("data", {}).setdefault(entrance, []).append((code, code_type))
 
         return result
 
